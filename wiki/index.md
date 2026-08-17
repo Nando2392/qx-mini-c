@@ -1,7 +1,7 @@
 # QX-mini-MoE Wiki
 
 > Bóveda Obsidian y wiki compilada al estilo Karpathy. Leer primero esta página y [[current-status-and-roadmap]].
-> Última actualización: 2026-08-17 | Páginas de conocimiento: 14
+> Última actualización: 2026-08-18 | Páginas de conocimiento: 15
 
 ## Proyecto
 
@@ -22,6 +22,7 @@
 
 - [[llama-cpp-parity]] — residuals/checkpoints/logits completos, bug de routing corregido y refutación de bit-parity.
 - [[f32-vs-q8k-activation]] — ADR y evidencia del modo CPU Q8_K compatible frente al default F32.
+- [[moe-stage-bisect]] — bisect Qwen3MoE por etapa/experto, kernels Q8_K y primera divergencia material.
 
 ## Rendimiento
 

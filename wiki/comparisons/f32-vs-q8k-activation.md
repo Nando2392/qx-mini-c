@@ -1,7 +1,7 @@
 ---
 title: F32 vs Q8_K Activation
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-18
 type: comparison
 tags: [quantization, validation, performance, cpu, cuda]
 sources: [comparisons/llama-cpp-parity.md, raw/project/project-state-2026-08-17.md]
@@ -14,9 +14,9 @@ confidence: high
 
 **Implementado y medido:** F32 permanece como contrato y modo predeterminado de QX. `q8_k_compat` queda disponible como modo explícito de compatibilidad/diagnóstico CPU.
 
-`q8_k_compat` cuantiza activaciones temporales F32 a bloques Q8_K únicamente para proyecciones IQ4_XS. Los tensores Q5_K y Q6_K conservan el dot F32 existente y el runtime lo declara como `iq4_xs_q8_k_with_f32_fallback`. No existe fallback silencioso ni metadata que afirme una ruta distinta de la ejecutada.
+`q8_k_compat` cuantiza activaciones temporales F32 a bloques Q8_K para proyecciones IQ4_XS y, tras [[moe-stage-bisect]], para expertos IQ2_XS/IQ3_XXS. Los demás tipos conservan dot F32 y el runtime declara si ejecutó ruta Q8_K, F32 o mixta. No existe fallback silencioso ni metadata que afirme una ruta distinta de la ejecutada.
 
-La decisión no afirma paridad con llama.cpp. Q8_K corrige casi exactamente la primera diferencia en `Vcur`, pero la divergencia reaparece en la salida MoE y continúa hasta logits y secuencia greedy. Véanse [[llama-cpp-parity]] y [[numerical-correctness]].
+La decisión no afirma paridad con llama.cpp. Q8_K corrige casi exactamente `Vcur` y reduce la salida MoE de layer 0, pero la divergencia reaparece al salir de layer 1 y continúa hasta logits y secuencia greedy. Véanse [[moe-stage-bisect]] y [[numerical-correctness]].
 
 ## Hipótesis
 
@@ -98,17 +98,17 @@ Token `[42]`, oracle llama F16, KV F32 en QX:
 | ffn_inp-0 | F32 | 0.00333905 | 0.000183834 | 0.999976473 | 1992 |
 | ffn_inp-0 | Q8_K compat | 0.0000489354 | 2.28653e-6 | 0.999999996 | 1992 |
 | ffn_moe_out-0 | F32 | 0.00255167 | 0.000677590 | 0.999944290 | 1992 |
-| ffn_moe_out-0 | Q8_K compat | 0.00792122 | 0.000694041 | 0.999947515 | 1992 |
+| ffn_moe_out-0 | Q8_K compat | 0.000701189 | 0.000140910 | 0.999997595 | 1992 |
 | l_out-0 | F32 | 0.00589061 | 0.000703227 | 0.999961082 | 1992 |
-| l_out-0 | Q8_K compat | 0.00797009 | 0.000694425 | 0.999965249 | 1992 |
+| l_out-0 | Q8_K compat | 0.000750065 | 0.000141082 | 0.999998410 | 1992 |
 | l_out-47 | F32 | 1099.6502 | 32.9520 | 0.439279 | 940 |
-| l_out-47 | Q8_K compat | 1097.6844 | 32.9117 | 0.441582 | 940 |
+| l_out-47 | Q8_K compat | 1095.7421 | 32.8627 | 0.444373 | 940 |
 | final norm | F32 | 8.74427 | 1.07487 | 0.808867 | 475 |
-| final norm | Q8_K compat | 8.71117 | 1.07502 | 0.809426 | 475 |
+| final norm | Q8_K compat | 8.65504 | 1.07496 | 0.810037 | 475 |
 | logits | F32 | 9.093953 | 1.478256 | 0.874880 | 87787 |
-| logits | Q8_K compat | 9.093479 | 1.474650 | 0.875527 | 87787 |
+| logits | Q8_K compat | 9.087952 | 1.472742 | 0.875870 | 87787 |
 
-**Primera divergencia posterior significativa:** después de corregir atención, la diferencia reaparece en `ffn_moe_out-0`. El próximo bisect debe investigar activaciones y kernels de expertos; no debe atribuirse al KV.
+**Bisect posterior:** [[moe-stage-bisect]] cerró los kernels de expertos layer 0 y desplazó la primera divergencia material al input de layer 2. Layer 1 usa tipos 22/23 y mantiene fallback F32.
 
 Resumen de checkpoints finales para las cuatro combinaciones QX contra llama F16:
 
@@ -116,8 +116,8 @@ Resumen de checkpoints finales para las cuatro combinaciones QX contra llama F16
 |---|---|---|---|---|
 | F32 | F32 | 1099.6502 / 0.439279 | 8.74427 / 0.808867 | 1.478256 / 0.874880 |
 | F32 | INT8 | 1098.1270 / 0.441263 | 8.72112 / 0.809212 | 1.475123 / 0.875443 |
-| Q8_K compat | F32 | 1097.6844 / 0.441582 | 8.71117 / 0.809426 | 1.474650 / 0.875527 |
-| Q8_K compat | INT8 | 1096.7478 / 0.443029 | 8.69585 / 0.809633 | 1.471953 / 0.876012 |
+| Q8_K compat | F32 | 1095.7421 / 0.444373 | 8.65504 / 0.810037 | 1.472742 / 0.875870 |
+| Q8_K compat | INT8 | 1094.4597 / 0.446203 | 8.64611 / 0.810359 | 1.469973 / 0.876367 |
 
 ## Greedy
 
@@ -125,8 +125,8 @@ Resumen de checkpoints finales para las cuatro combinaciones QX contra llama F16
 |---|---|---|---|
 | F32 | F32 | `[1124, 11287]` | `[50865, 31518]` |
 | F32 | INT8 | `[1124, 11287]` | `[81379, 44707]` |
-| Q8_K compat | F32 | `[1124, 11287]` | `[50865, 115810]` |
-| Q8_K compat | INT8 | `[1124, 19748]` | `[53934, 256]` |
+| Q8_K compat | F32 | `[1124, 11287]` | `[50865, 31518]` |
+| Q8_K compat | INT8 | `[1124, 11287]` | `[50865, 28065]` |
 | llama F16 | — | `[1124, 50853]` | `[358, 1184]` |
 | llama Q8_0 | — | `[1124, 50853]` | `[358, 614]` |
 
@@ -136,12 +136,12 @@ Compartir el primer argmax `1124` no implica paridad. Ningún modo QX coincide e
 
 Un token, 48 capas, KV INT8. Cinco repeticiones warm; no es tok/s ni throughput sostenido:
 
-| Activación | cold | median warm | MAD | min–max | peak RSS |
+| Activación | cold | median warm | MAD | min–max | median peak RSS |
 |---|---:|---:|---:|---:|---:|
-| F32 | 8.19598 s | 8.22912 s | 0.04541 s | 8.16235–8.27453 s | 5,603,328 B |
-| Q8_K compat | 7.57912 s | 7.62247 s | 0.02807 s | 7.52635–7.79626 s | 5,603,328 B |
+| F32 | 11.87577 s | 9.24408 s | 0.46075 s | 8.78333–13.96411 s | 5,672,960 B median |
+| Q8_K compat | 4.25738 s | 3.88918 s | 0.04593 s | 3.80302–4.32378 s | 5,603,328 B median |
 
-**Medido:** Q8_K fue aproximadamente 7.4% más rápido en mediana en este probe escalar y no cambió el peak RSS observable. El workspace adicional declarado es 4672 bytes. Hace falta perf por proyección/layer y profiling antes de generalizar.
+**Medido tras extender MoE:** Q8_K fue `2.37687×` más rápido en mediana (`57.9279%` menos latencia) y el RSS mediano fue `1.2274%` menor. El baseline F32 mostró variabilidad alta; son segundos/token de este probe, no throughput sostenido. Workspace adicional declarado: 4672 bytes para attention y hasta 2336 bytes por activación MoE.
 
 ## Trade-offs y riesgos
 

@@ -122,3 +122,12 @@
 - Gate byte-for-byte contra `quantize_row_q8_K_ref`: mixed/positive/negative/edge PASS; metadata de kernel refleja ejecución real.
 - Benchmark un token/48 capas/KV INT8: mediana F32 `8.22912 s`, Q8_K `7.62247 s`, cinco repeticiones; mismo peak RSS observado.
 - Decisión: F32 sigue default; Q8_K queda modo compatibilidad/diagnóstico. Próximo gate: bisect MoE.
+
+## [2026-08-18] update | Bisect MoE por etapa y expertos Q8_K
+
+- Oracle fijado a llama.cpp `768d2a481a99cb75ec9a03b95dadbd35e7acf496`; 18 callbacks internos y sidecars F32 lossless.
+- `moe-stage-probe` acepta el `ffn_inp` exacto, exporta 12 etapas y falla cerrado ante tamaño, NaN/Inf, capa, output, overflow y layout incompatibles.
+- Router/top-8/renorm coinciden; gate/up/SwiGLU/down/weighted de layer 0 quedan dentro de max-abs `1.20e-6` con Q8_K.
+- Añadidos vec-dot CPU IQ2_XS×Q8_K e IQ3_XXS×Q8_K verificados contra traits públicos ggml; F32 sigue default y otros tipos conservan fallback explícito.
+- End-to-end `ffn_moe_out-0` mejora a RMSE `1.40910e-4`; primera divergencia material actual: input layer 2 por tipos 22/23 de layer 1.
+- Greedy sigue sin paridad. Benchmark 5 warm, 48 capas/KV INT8: F32 `9.24408 s/token`, Q8_K `3.88918 s/token`, speedup `2.37687×`; RSS mediano no aumenta.

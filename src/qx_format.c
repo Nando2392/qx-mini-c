@@ -3378,6 +3378,74 @@ static float qx_dot_iq4_xs_q8_k(const unsigned char *row, const qx_projection_wo
     return total;
 }
 
+static float qx_dot_iq2_xs_q8_k(const unsigned char *row, const qx_projection_workspace *workspace) {
+    float sumf = 0.0f;
+    for (uint32_t block = 0; block < workspace->count; ++block) {
+        const unsigned char *raw = row + (uint64_t)block * 74u;
+        const unsigned char *scales = raw + 66u;
+        const qx_block_q8_k *activation = &workspace->blocks[block];
+        const int8_t *q8 = activation->qs;
+        int32_t bsum = 0;
+        for (uint32_t ib32 = 0; ib32 < 8u; ++ib32) {
+            uint16_t ls1 = (uint16_t)(2u * (scales[ib32] & 0x0fu) + 1u);
+            uint16_t ls2 = (uint16_t)(2u * (scales[ib32] >> 4) + 1u);
+            int32_t sumi = 0;
+            for (uint32_t l = 0; l < 2u; ++l) {
+                uint16_t q2 = qx_rd_le16(raw + 2u + (uint64_t)(4u * ib32 + l) * 2u);
+                const unsigned char *grid = (const unsigned char *)(const void *)&qx_iq2xs_grid[q2 & 511u];
+                unsigned char signs = qx_ksigns_iq2xs[q2 >> 9];
+                for (uint32_t j = 0; j < 8u; ++j) sumi += (int32_t)grid[j] * (int32_t)q8[j] * ((signs & qx_kmask_iq2xs[j]) ? -1 : 1);
+                q8 += 8;
+            }
+            bsum += sumi * (int32_t)ls1;
+            sumi = 0;
+            for (uint32_t l = 2u; l < 4u; ++l) {
+                uint16_t q2 = qx_rd_le16(raw + 2u + (uint64_t)(4u * ib32 + l) * 2u);
+                const unsigned char *grid = (const unsigned char *)(const void *)&qx_iq2xs_grid[q2 & 511u];
+                unsigned char signs = qx_ksigns_iq2xs[q2 >> 9];
+                for (uint32_t j = 0; j < 8u; ++j) sumi += (int32_t)grid[j] * (int32_t)q8[j] * ((signs & qx_kmask_iq2xs[j]) ? -1 : 1);
+                q8 += 8;
+            }
+            bsum += sumi * (int32_t)ls2;
+        }
+        sumf += qx_fp16_to_f32(qx_rd_le16(raw)) * activation->d * (float)bsum;
+    }
+    return 0.125f * sumf;
+}
+
+static float qx_dot_iq3_xxs_q8_k(const unsigned char *row, const qx_projection_workspace *workspace) {
+    float sumf = 0.0f;
+    for (uint32_t block = 0; block < workspace->count; ++block) {
+        const unsigned char *raw = row + (uint64_t)block * 98u;
+        const unsigned char *q3 = raw + 2u;
+        const unsigned char *gas = q3 + 64u;
+        const qx_block_q8_k *activation = &workspace->blocks[block];
+        const int8_t *q8 = activation->qs;
+        int32_t bsum = 0;
+        for (uint32_t ib32 = 0; ib32 < 8u; ++ib32) {
+            uint32_t aux32 = qx_rd_le32(gas + (uint64_t)ib32 * 4u);
+            uint32_t ls = 2u * (aux32 >> 28) + 1u;
+            int32_t sumi = 0;
+            for (uint32_t l = 0; l < 4u; ++l) {
+                uint32_t grid1 = qx_iq3xxs_grid[q3[2u * l]];
+                uint32_t grid2 = qx_iq3xxs_grid[q3[2u * l + 1u]];
+                unsigned char signs = qx_ksigns_iq2xs[(aux32 >> (7u * l)) & 127u];
+                for (uint32_t j = 0; j < 4u; ++j) {
+                    unsigned char g1 = (unsigned char)((grid1 >> (8u * j)) & 0xffu);
+                    unsigned char g2 = (unsigned char)((grid2 >> (8u * j)) & 0xffu);
+                    sumi += (int32_t)g1 * (int32_t)q8[j] * ((signs & qx_kmask_iq2xs[j]) ? -1 : 1);
+                    sumi += (int32_t)g2 * (int32_t)q8[j + 4u] * ((signs & qx_kmask_iq2xs[j + 4u]) ? -1 : 1);
+                }
+                q8 += 8;
+            }
+            q3 += 8;
+            bsum += sumi * (int32_t)ls;
+        }
+        sumf += qx_fp16_to_f32(qx_rd_le16(raw)) * activation->d * (float)bsum;
+    }
+    return 0.25f * sumf;
+}
+
 static int qx_projection_matvec_fill_mode(qx_file *file, const qx_tensor_dir_entry *t, unsigned char *buf, float *float_out, uint32_t rows, uint32_t dims, const float *residual, uint32_t residual_n, uint32_t token, uint32_t layer, uint32_t seed, const char *activation_format, qx_projection_workspace *workspace, double *probe_out, uint64_t *values_out, char *err, uint64_t err_len) {
     const char *decoder = NULL;
     uint64_t block_size = 0;
@@ -3521,6 +3589,25 @@ static void qx_detect_projection_kernel_usage(const qx_file *file, uint32_t laye
             if (tensor->flags == 23u) *q8_k_used = 1;
             else *f32_used = 1;
         }
+    }
+}
+
+static void qx_detect_moe_kernel_usage(const qx_file *file, uint32_t layers, int *q8_k_used, int *f32_used) {
+    *q8_k_used = 0;
+    *f32_used = 0;
+    for (uint32_t layer = 0; layer < layers; ++layer) {
+        char gate_name[QX_NAME_MAX], up_name[QX_NAME_MAX], down_name[QX_NAME_MAX];
+        snprintf(gate_name, sizeof(gate_name), "blk.%u.ffn_gate_exps.weight", layer);
+        snprintf(up_name, sizeof(up_name), "blk.%u.ffn_up_exps.weight", layer);
+        snprintf(down_name, sizeof(down_name), "blk.%u.ffn_down_exps.weight", layer);
+        const qx_tensor_dir_entry *gate = qx_find_tensor(file, gate_name);
+        const qx_tensor_dir_entry *up = qx_find_tensor(file, up_name);
+        const qx_tensor_dir_entry *down = qx_find_tensor(file, down_name);
+        if (gate || up) {
+            if (gate && up && gate->flags == 17u && up->flags == 17u) *q8_k_used = 1;
+            else *f32_used = 1;
+        }
+        if (down) { if (down->flags == 18u) *q8_k_used = 1; else *f32_used = 1; }
     }
 }
 
@@ -3800,9 +3887,9 @@ static void qx_print_float_json_array(FILE *out, const float *values, uint32_t c
     fprintf(out, "]");
 }
 
-static int qx_packed_expert_matvec(qx_file *file, const qx_tensor_dir_entry *tensor, uint32_t expert,
+static int qx_packed_expert_matvec_mode(qx_file *file, const qx_tensor_dir_entry *tensor, uint32_t expert,
                                    const float *input, uint32_t input_dims, float *output, uint32_t output_dims,
-                                   char *err, uint64_t err_len) {
+                                   const qx_projection_workspace *workspace, char *err, uint64_t err_len) {
     if (!file || !tensor || !input || !output || tensor->rank < 3u || tensor->dims[0] != input_dims || tensor->dims[1] < output_dims || expert >= tensor->dims[2]) {
         qx_set_err(err, err_len, "invalid packed expert matvec argument"); return 0;
     }
@@ -3811,14 +3898,27 @@ static int qx_packed_expert_matvec(qx_file *file, const qx_tensor_dir_entry *ten
     if (!qx_decoder_info(tensor->flags, &decoder, &block_size) || !block_size) { qx_set_err(err, err_len, "unsupported packed expert decoder"); return 0; }
     (void)decoder;
     uint64_t blocks_per_row = (input_dims + 255u) / 256u;
+    if (blocks_per_row > UINT64_MAX / block_size) { qx_set_err(err, err_len, "packed expert row size overflow"); return 0; }
     uint64_t row_bytes = blocks_per_row * block_size;
+    if (tensor->dims[1] > UINT64_MAX / row_bytes) { qx_set_err(err, err_len, "packed expert size overflow"); return 0; }
     uint64_t expert_bytes = row_bytes * tensor->dims[1];
-    if (expert_bytes * tensor->dims[2] > tensor->byte_size) { qx_set_err(err, err_len, "packed expert tensor is truncated"); return 0; }
+    if (tensor->dims[2] > UINT64_MAX / expert_bytes || tensor->dims[2] * expert_bytes > tensor->byte_size ||
+        expert > UINT64_MAX / expert_bytes || tensor->offset > UINT64_MAX - (uint64_t)expert * expert_bytes) {
+        qx_set_err(err, err_len, "packed expert tensor is truncated or overflows"); return 0;
+    }
+    if (workspace && ((tensor->flags != 17u && tensor->flags != 18u) || input_dims % QX_Q8_K_VALUES != 0u || workspace->count != blocks_per_row)) {
+        qx_set_err(err, err_len, "incompatible packed expert Q8_K workspace"); return 0;
+    }
     unsigned char *slice = NULL;
     if (!qx_read_raw_span(file, tensor->offset + (uint64_t)expert * expert_bytes, expert_bytes, &slice, err, err_len)) return 0;
     for (uint32_t row = 0; row < output_dims; ++row) {
-        double dot = 0.0;
         const unsigned char *row_data = slice + (uint64_t)row * row_bytes;
+        if (workspace) {
+            output[row] = tensor->flags == 17u ? qx_dot_iq2_xs_q8_k(row_data, workspace) : qx_dot_iq3_xxs_q8_k(row_data, workspace);
+            if (!isfinite(output[row])) { free(slice); qx_set_err(err, err_len, "non-finite packed expert Q8_K output"); return 0; }
+            continue;
+        }
+        double dot = 0.0;
         for (uint64_t block = 0; block < blocks_per_row; ++block) {
             float weights_block[256];
             if (!qx_decode_supported_block(tensor->flags, row_data + block * block_size, weights_block)) { free(slice); qx_set_err(err, err_len, "packed expert block decode failed"); return 0; }
@@ -3831,6 +3931,12 @@ static int qx_packed_expert_matvec(qx_file *file, const qx_tensor_dir_entry *ten
     }
     free(slice);
     return 1;
+}
+
+static int qx_packed_expert_matvec(qx_file *file, const qx_tensor_dir_entry *tensor, uint32_t expert,
+                                   const float *input, uint32_t input_dims, float *output, uint32_t output_dims,
+                                   char *err, uint64_t err_len) {
+    return qx_packed_expert_matvec_mode(file, tensor, expert, input, input_dims, output, output_dims, NULL, err, err_len);
 }
 
 int qx_dump_real_qkv_golden_probe_summary(const char *path, uint32_t layer, uint32_t token_a, uint32_t token_b, uint32_t q_heads_run, uint32_t seed, int full_moe, FILE *out, char *err, uint64_t err_len) {
@@ -4227,7 +4333,11 @@ static int qx_apply_real_moe_layer(
     qx_file *file, uint32_t layer, const float *residual_after_attention, uint32_t hidden,
     float *layer_output, float *moe_output_capture, uint32_t selected_experts[8], double routing_weights[8],
     uint32_t *gate_type_out, uint32_t *up_type_out, uint32_t *down_type_out,
-    double *moe_l2_out, char *err, uint64_t err_len) {
+    const char *activation_format, double *moe_l2_out, char *err, uint64_t err_len) {
+    int use_q8_k = activation_format && strcmp(activation_format, "q8_k_compat") == 0;
+    if (!use_q8_k && (!activation_format || strcmp(activation_format, "f32") != 0)) {
+        qx_set_err(err, err_len, "unsupported real MoE activation format"); return 0;
+    }
     char ffn_norm_name[QX_NAME_MAX], router_name[QX_NAME_MAX];
     char gate_name[QX_NAME_MAX], up_name[QX_NAME_MAX], down_name[QX_NAME_MAX];
     snprintf(ffn_norm_name, sizeof(ffn_norm_name), "blk.%u.ffn_norm.weight", layer);
@@ -4296,14 +4406,20 @@ static int qx_apply_real_moe_layer(
     }
     if (!isfinite(selected_weight_sum) || selected_weight_sum <= 0.0) { free(buffers); qx_set_err(err, err_len, "invalid selected router weights"); return 0; }
     for (uint32_t rank = 0; rank < 8u; ++rank) routing_weights[rank] /= selected_weight_sum;
+    int gate_up_q8_k = use_q8_k && gate_exps->flags == 17u && up_exps->flags == 17u;
+    int down_q8_k = use_q8_k && down_exps->flags == 18u;
+    qx_projection_workspace gate_up_workspace = {0};
+    if (gate_up_q8_k && !qx_quantize_q8_k(ffn_input, hidden, &gate_up_workspace, err, err_len)) { free(buffers); return 0; }
     for (uint32_t rank = 0; rank < 8u; ++rank) {
         uint32_t expert = selected_experts[rank];
-        if (!qx_packed_expert_matvec(file, gate_exps, expert, ffn_input, hidden, gate_values, intermediate, err, err_len) ||
-            !qx_packed_expert_matvec(file, up_exps, expert, ffn_input, hidden, up_values, intermediate, err, err_len)) {
+        if (!qx_packed_expert_matvec_mode(file, gate_exps, expert, ffn_input, hidden, gate_values, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, err, err_len) ||
+            !qx_packed_expert_matvec_mode(file, up_exps, expert, ffn_input, hidden, up_values, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, err, err_len)) {
             free(buffers); return 0;
         }
         for (uint32_t i = 0; i < intermediate; ++i) expert_hidden[i] = (float)(qx_silu((double)gate_values[i]) * (double)up_values[i]);
-        if (!qx_packed_expert_matvec(file, down_exps, expert, expert_hidden, intermediate, expert_output, hidden, err, err_len)) {
+        qx_projection_workspace down_workspace = {0};
+        if (down_q8_k && !qx_quantize_q8_k(expert_hidden, intermediate, &down_workspace, err, err_len)) { free(buffers); return 0; }
+        if (!qx_packed_expert_matvec_mode(file, down_exps, expert, expert_hidden, intermediate, expert_output, hidden, down_q8_k ? &down_workspace : NULL, err, err_len)) {
             free(buffers); return 0;
         }
         for (uint32_t i = 0; i < hidden; ++i) moe_output[i] += (float)(routing_weights[rank] * (double)expert_output[i]);
@@ -4320,6 +4436,227 @@ static int qx_apply_real_moe_layer(
     if (moe_l2_out) *moe_l2_out = sqrt(moe_l2);
     free(buffers);
     return 1;
+}
+
+static int qx_read_exact_f32_sidecar(const char *path, float *values, uint32_t count, char *err, uint64_t err_len) {
+    if (!path || !*path || !values || count == 0u || (uint64_t)count > (uint64_t)SIZE_MAX / sizeof(float)) {
+        qx_set_err(err, err_len, "invalid F32 sidecar argument"); return 0;
+    }
+    FILE *fp = fopen(path, "rb");
+    if (!fp) { qx_set_err(err, err_len, "cannot open F32 sidecar"); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(fp, 0, SEEK_END) != 0) { fclose(fp); qx_set_err(err, err_len, "cannot seek F32 sidecar"); return 0; }
+    int64_t size_signed = _ftelli64(fp);
+    if (_fseeki64(fp, 0, SEEK_SET) != 0) { fclose(fp); qx_set_err(err, err_len, "cannot rewind F32 sidecar"); return 0; }
+#else
+    if (fseeko(fp, 0, SEEK_END) != 0) { fclose(fp); qx_set_err(err, err_len, "cannot seek F32 sidecar"); return 0; }
+    off_t size_signed = ftello(fp);
+    if (fseeko(fp, 0, SEEK_SET) != 0) { fclose(fp); qx_set_err(err, err_len, "cannot rewind F32 sidecar"); return 0; }
+#endif
+    const uint64_t expected = (uint64_t)count * sizeof(float);
+    if (size_signed < 0 || (uint64_t)size_signed != expected || fread(values, sizeof(float), count, fp) != count) {
+        fclose(fp);
+        qx_set_err(err, err_len, "F32 sidecar size or read mismatch"); return 0;
+    }
+    if (fclose(fp) != 0) { qx_set_err(err, err_len, "cannot close F32 sidecar"); return 0; }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!isfinite(values[i])) { qx_set_err(err, err_len, "F32 sidecar contains non-finite value"); return 0; }
+    }
+    return 1;
+}
+
+int qx_dump_expert_q8_k_dot_probe_summary(const char *path, const char *tensor_name, uint32_t expert,
+        uint32_t row, const char *activation_path, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !tensor_name || !activation_path || !out) { qx_set_err(err, err_len, "invalid expert Q8_K dot probe argument"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_tensor_dir_entry *tensor = qx_find_tensor(&file, tensor_name);
+    if (!tensor || tensor->rank < 3u || (tensor->flags != 17u && tensor->flags != 18u) ||
+        tensor->dims[0] == 0u || tensor->dims[0] > UINT32_MAX || tensor->dims[0] % QX_Q8_K_VALUES != 0u ||
+        tensor->dims[1] > UINT32_MAX || tensor->dims[2] > UINT32_MAX || row >= tensor->dims[1] || expert >= tensor->dims[2]) {
+        qx_close_file(&file); qx_set_err(err, err_len, "unsupported expert Q8_K dot tensor or range"); return 0;
+    }
+    uint64_t block_size = tensor->flags == 17u ? 74u : 98u;
+    uint64_t blocks = tensor->dims[0] / QX_Q8_K_VALUES;
+    if (blocks == 0u || blocks > UINT64_MAX / block_size) { qx_close_file(&file); qx_set_err(err, err_len, "expert Q8_K row size overflow"); return 0; }
+    uint64_t row_bytes = blocks * block_size;
+    if (tensor->dims[1] > UINT64_MAX / row_bytes) { qx_close_file(&file); qx_set_err(err, err_len, "expert Q8_K tensor size overflow"); return 0; }
+    uint64_t expert_bytes = tensor->dims[1] * row_bytes;
+    if (tensor->dims[2] > UINT64_MAX / expert_bytes || tensor->dims[2] * expert_bytes != tensor->byte_size ||
+        expert > UINT64_MAX / expert_bytes || row > UINT64_MAX / row_bytes) {
+        qx_close_file(&file); qx_set_err(err, err_len, "invalid expert Q8_K tensor byte size"); return 0;
+    }
+    uint64_t relative = (uint64_t)expert * expert_bytes + (uint64_t)row * row_bytes;
+    if (relative > tensor->byte_size || row_bytes > tensor->byte_size - relative || tensor->offset > UINT64_MAX - relative) {
+        qx_close_file(&file); qx_set_err(err, err_len, "expert Q8_K row offset overflow"); return 0;
+    }
+    uint32_t input_count = (uint32_t)tensor->dims[0];
+    if ((uint64_t)input_count > (uint64_t)SIZE_MAX / sizeof(float)) { qx_close_file(&file); qx_set_err(err, err_len, "expert Q8_K activation size overflow"); return 0; }
+    float *activation = (float *)malloc((size_t)input_count * sizeof(float));
+    unsigned char *row_raw = NULL;
+    if (!activation) { qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    if (!qx_read_exact_f32_sidecar(activation_path, activation, input_count, err, err_len) ||
+        !qx_read_raw_span(&file, tensor->offset + relative, row_bytes, &row_raw, err, err_len)) {
+        free(activation); free(row_raw); qx_close_file(&file); return 0;
+    }
+    qx_projection_workspace workspace = {0};
+    if (!qx_quantize_q8_k(activation, input_count, &workspace, err, err_len)) {
+        free(activation); free(row_raw); qx_close_file(&file); return 0;
+    }
+    float dot = tensor->flags == 17u ? qx_dot_iq2_xs_q8_k(row_raw, &workspace) : qx_dot_iq3_xxs_q8_k(row_raw, &workspace);
+    if (!isfinite(dot)) { free(activation); free(row_raw); qx_close_file(&file); qx_set_err(err, err_len, "non-finite expert Q8_K dot"); return 0; }
+    fprintf(out, "{\"probe\":\"expert_q8_k_dot\",\"tensor\":\"%s\",\"ggml_type\":%u,\"expert\":%u,\"row\":%u,\"values\":%u,\"blocks\":%u,\"dot\":%.9g}\n",
+            tensor->name, tensor->flags, expert, row, input_count, workspace.count, dot);
+    free(activation); free(row_raw); qx_close_file(&file); return 1;
+}
+
+static int qx_write_moe_stage_sidecar(const char *dir, const char *name, uint32_t layer,
+        const float *values, uint64_t count, char *err, uint64_t err_len) {
+    if (!dir || !*dir || !name || !*name || !values || count == 0u || count > (uint64_t)SIZE_MAX / sizeof(float)) {
+        qx_set_err(err, err_len, "invalid MoE sidecar argument"); return 0;
+    }
+    char path[1024];
+    int length = snprintf(path, sizeof(path), "%s/%s-%u.f32", dir, name, layer);
+    if (length < 0 || (size_t)length >= sizeof(path)) { qx_set_err(err, err_len, "MoE sidecar path too long"); return 0; }
+    FILE *fp = fopen(path, "wb");
+    if (!fp) { qx_set_err(err, err_len, "cannot open MoE sidecar"); return 0; }
+    int ok = fwrite(values, sizeof(float), (size_t)count, fp) == (size_t)count;
+    if (fclose(fp) != 0) ok = 0;
+    if (!ok) { qx_set_err(err, err_len, "cannot write MoE sidecar"); return 0; }
+    return 1;
+}
+
+int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char *ffn_input_path,
+        const char *output_dir, const char *activation_mode, FILE *out, char *err, uint64_t err_len) {
+    int use_q8_k = activation_mode && strcmp(activation_mode, "q8_k_compat") == 0;
+    if (!path || !ffn_input_path || !output_dir || !out || (!use_q8_k && (!activation_mode || strcmp(activation_mode, "f32") != 0))) {
+        qx_set_err(err, err_len, "invalid MoE stage probe argument or activation mode"); return 0;
+    }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const uint32_t hidden = file.header.manifest.hidden;
+    if (hidden == 0u || layer >= file.header.manifest.layers) { qx_close_file(&file); qx_set_err(err, err_len, "invalid MoE stage layer"); return 0; }
+
+    char norm_name[QX_NAME_MAX], router_name[QX_NAME_MAX], gate_name[QX_NAME_MAX], up_name[QX_NAME_MAX], down_name[QX_NAME_MAX];
+    snprintf(norm_name, sizeof(norm_name), "blk.%u.ffn_norm.weight", layer);
+    snprintf(router_name, sizeof(router_name), "blk.%u.ffn_gate_inp.weight", layer);
+    snprintf(gate_name, sizeof(gate_name), "blk.%u.ffn_gate_exps.weight", layer);
+    snprintf(up_name, sizeof(up_name), "blk.%u.ffn_up_exps.weight", layer);
+    snprintf(down_name, sizeof(down_name), "blk.%u.ffn_down_exps.weight", layer);
+    const qx_tensor_dir_entry *norm = qx_find_tensor(&file, norm_name);
+    const qx_tensor_dir_entry *router = qx_find_tensor(&file, router_name);
+    const qx_tensor_dir_entry *gate = qx_find_tensor(&file, gate_name);
+    const qx_tensor_dir_entry *up = qx_find_tensor(&file, up_name);
+    const qx_tensor_dir_entry *down = qx_find_tensor(&file, down_name);
+    uint32_t experts = router && router->rank > 1u ? (uint32_t)router->dims[1] : 0u;
+    uint32_t intermediate = gate && gate->rank > 1u ? (uint32_t)gate->dims[1] : 0u;
+    if (!norm || !router || !gate || !up || !down || experts < 8u || experts > 128u || intermediate == 0u ||
+        router->flags != 0u || router->dims[0] != hidden || router->byte_size != (uint64_t)hidden * experts * 4ull ||
+        gate->rank < 3u || up->rank < 3u || down->rank < 3u || gate->dims[0] != hidden || gate->dims[1] != intermediate || gate->dims[2] != experts ||
+        up->dims[0] != hidden || up->dims[1] != intermediate || up->dims[2] != experts ||
+        down->dims[0] != intermediate || down->dims[1] != hidden || down->dims[2] != experts) {
+        qx_close_file(&file); qx_set_err(err, err_len, "unsupported MoE stage tensor layout"); return 0;
+    }
+    if ((uint64_t)hidden > (uint64_t)SIZE_MAX / sizeof(float) ||
+        (uint64_t)intermediate > (uint64_t)SIZE_MAX / (8u * sizeof(float)) ||
+        (uint64_t)hidden > (uint64_t)SIZE_MAX / (8u * sizeof(float))) {
+        qx_close_file(&file); qx_set_err(err, err_len, "MoE stage allocation overflow"); return 0;
+    }
+
+    float *ffn_input = (float *)malloc((size_t)hidden * sizeof(float));
+    float *ffn_norm = (float *)malloc((size_t)hidden * sizeof(float));
+    float *logits = (float *)malloc((size_t)experts * sizeof(float));
+    float *probs = (float *)malloc((size_t)experts * sizeof(float));
+    float *gate_values = (float *)malloc((size_t)intermediate * 8u * sizeof(float));
+    float *up_values = (float *)malloc((size_t)intermediate * 8u * sizeof(float));
+    float *swiglu = (float *)malloc((size_t)intermediate * 8u * sizeof(float));
+    float *down_values = (float *)malloc((size_t)hidden * 8u * sizeof(float));
+    float *weighted = (float *)malloc((size_t)hidden * 8u * sizeof(float));
+    if (!ffn_input || !ffn_norm || !logits || !probs || !gate_values || !up_values || !swiglu || !down_values || !weighted) {
+        free(ffn_input); free(ffn_norm); free(logits); free(probs); free(gate_values); free(up_values); free(swiglu); free(down_values); free(weighted);
+        qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0;
+    }
+    if (!qx_read_exact_f32_sidecar(ffn_input_path, ffn_input, hidden, err, err_len)) goto fail;
+    double rms = 0.0;
+    if (!qx_apply_f32_rmsnorm(&file, norm, ffn_input, ffn_norm, hidden, &rms, err, err_len)) goto fail;
+    unsigned char *router_raw = NULL;
+    if (!qx_read_raw_span(&file, router->offset, router->byte_size, &router_raw, err, err_len)) goto fail;
+    double max_logit = -1.0e300;
+    for (uint32_t expert = 0; expert < experts; ++expert) {
+        double dot = 0.0;
+        const unsigned char *row = router_raw + (uint64_t)expert * hidden * 4ull;
+        for (uint32_t i = 0; i < hidden; ++i) dot += (double)qx_rd_le_f32(row + (uint64_t)i * 4ull) * (double)ffn_norm[i];
+        if (!isfinite(dot)) { free(router_raw); qx_set_err(err, err_len, "non-finite MoE router logit"); goto fail; }
+        logits[expert] = (float)dot;
+        if (dot > max_logit) max_logit = dot;
+    }
+    free(router_raw);
+    double denominator = 0.0;
+    for (uint32_t expert = 0; expert < experts; ++expert) { probs[expert] = (float)exp((double)logits[expert] - max_logit); denominator += probs[expert]; }
+    if (!isfinite(denominator) || denominator <= 0.0) { qx_set_err(err, err_len, "invalid MoE router softmax"); goto fail; }
+    for (uint32_t expert = 0; expert < experts; ++expert) probs[expert] = (float)((double)probs[expert] / denominator);
+    unsigned char picked[128] = {0};
+    uint32_t selected[8];
+    float topk[8], weights[8], weight_sum_sidecar[1];
+    double weight_sum = 0.0;
+    for (uint32_t rank = 0; rank < 8u; ++rank) {
+        uint32_t best = 0u; float best_prob = -1.0f;
+        for (uint32_t expert = 0; expert < experts; ++expert) if (!picked[expert] && probs[expert] > best_prob) { best = expert; best_prob = probs[expert]; }
+        picked[best] = 1u; selected[rank] = best; topk[rank] = (float)best; weights[rank] = best_prob; weight_sum += best_prob;
+    }
+    if (!isfinite(weight_sum) || weight_sum <= 0.0) { qx_set_err(err, err_len, "invalid selected MoE weights"); goto fail; }
+    weight_sum_sidecar[0] = (float)weight_sum;
+    float weights_norm[8];
+    for (uint32_t rank = 0; rank < 8u; ++rank) weights_norm[rank] = (float)((double)weights[rank] / weight_sum);
+    int gate_up_q8_k = use_q8_k && gate->flags == 17u && up->flags == 17u;
+    int down_q8_k = use_q8_k && down->flags == 18u;
+    int q8_k_used = gate_up_q8_k || down_q8_k;
+    int f32_used = !gate_up_q8_k || !down_q8_k;
+    const char *projection_kernel = "dequant_f32";
+    if (q8_k_used && f32_used) projection_kernel = "iq2_xs_iq3_xxs_q8_k_with_f32_fallback";
+    else if (q8_k_used) projection_kernel = "iq2_xs_q8_k_and_iq3_xxs_q8_k";
+    qx_projection_workspace gate_up_workspace = {0};
+    if (gate_up_q8_k && !qx_quantize_q8_k(ffn_norm, hidden, &gate_up_workspace, err, err_len)) goto fail;
+    for (uint32_t rank = 0; rank < 8u; ++rank) {
+        float *gate_rank = gate_values + (size_t)rank * intermediate;
+        float *up_rank = up_values + (size_t)rank * intermediate;
+        float *swiglu_rank = swiglu + (size_t)rank * intermediate;
+        float *down_rank = down_values + (size_t)rank * hidden;
+        float *weighted_rank = weighted + (size_t)rank * hidden;
+        if (!qx_packed_expert_matvec_mode(&file, gate, selected[rank], ffn_norm, hidden, gate_rank, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, err, err_len) ||
+            !qx_packed_expert_matvec_mode(&file, up, selected[rank], ffn_norm, hidden, up_rank, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, err, err_len)) goto fail;
+        for (uint32_t i = 0; i < intermediate; ++i) swiglu_rank[i] = (float)(qx_silu((double)gate_rank[i]) * (double)up_rank[i]);
+        qx_projection_workspace down_workspace = {0};
+        if (down_q8_k && !qx_quantize_q8_k(swiglu_rank, intermediate, &down_workspace, err, err_len)) goto fail;
+        if (!qx_packed_expert_matvec_mode(&file, down, selected[rank], swiglu_rank, intermediate, down_rank, hidden, down_q8_k ? &down_workspace : NULL, err, err_len)) goto fail;
+        for (uint32_t i = 0; i < hidden; ++i) weighted_rank[i] = (float)((double)down_rank[i] * (double)weights_norm[rank]);
+    }
+
+    uint32_t written = 0u;
+#define QX_WRITE_MOE_STAGE(name_, values_, count_) do { if (!qx_write_moe_stage_sidecar(output_dir, name_, layer, values_, count_, err, err_len)) goto fail; ++written; } while (0)
+    QX_WRITE_MOE_STAGE("ffn_norm", ffn_norm, hidden);
+    QX_WRITE_MOE_STAGE("ffn_moe_logits", logits, experts);
+    QX_WRITE_MOE_STAGE("ffn_moe_probs", probs, experts);
+    QX_WRITE_MOE_STAGE("ffn_moe_topk", topk, 8u);
+    QX_WRITE_MOE_STAGE("ffn_moe_weights", weights, 8u);
+    QX_WRITE_MOE_STAGE("ffn_moe_weights_sum", weight_sum_sidecar, 1u);
+    QX_WRITE_MOE_STAGE("ffn_moe_weights_norm", weights_norm, 8u);
+    QX_WRITE_MOE_STAGE("ffn_moe_gate", gate_values, (uint64_t)intermediate * 8u);
+    QX_WRITE_MOE_STAGE("ffn_moe_up", up_values, (uint64_t)intermediate * 8u);
+    QX_WRITE_MOE_STAGE("ffn_moe_swiglu", swiglu, (uint64_t)intermediate * 8u);
+    QX_WRITE_MOE_STAGE("ffn_moe_down", down_values, (uint64_t)hidden * 8u);
+    QX_WRITE_MOE_STAGE("ffn_moe_weighted", weighted, (uint64_t)hidden * 8u);
+#undef QX_WRITE_MOE_STAGE
+    fprintf(out, "{\"probe\":\"moe_stage\",\"layer\":%u,\"input_count\":%u,\"experts\":%u,\"experts_used\":8,\"intermediate\":%u,\"activation_mode\":\"%s\",\"projection_kernel\":\"%s\",\"gate_ggml_type\":%u,\"up_ggml_type\":%u,\"down_ggml_type\":%u,\"selected_experts\":[",
+            layer, hidden, experts, intermediate, activation_mode, projection_kernel, gate->flags, up->flags, down->flags);
+    for (uint32_t rank = 0; rank < 8u; ++rank) fprintf(out, "%s%u", rank ? "," : "", selected[rank]);
+    fprintf(out, "],\"routing_weights\":[");
+    for (uint32_t rank = 0; rank < 8u; ++rank) fprintf(out, "%s%.9g", rank ? "," : "", weights_norm[rank]);
+    fprintf(out, "],\"sidecars_written\":%u}\n", written);
+    free(ffn_input); free(ffn_norm); free(logits); free(probs); free(gate_values); free(up_values); free(swiglu); free(down_values); free(weighted); qx_close_file(&file); return 1;
+
+fail:
+    free(ffn_input); free(ffn_norm); free(logits); free(probs); free(gate_values); free(up_values); free(swiglu); free(down_values); free(weighted); qx_close_file(&file); return 0;
 }
 
 static int qx_write_residual_dump(const char *dir, uint32_t step, uint32_t layer, const char *phase,
@@ -4395,6 +4732,16 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     if (q8_k_kernel_used && f32_projection_used) projection_kernel = "iq4_xs_q8_k_with_f32_fallback";
     else if (q8_k_kernel_used) projection_kernel = "iq4_xs_q8_k";
     else if (f32_projection_used) projection_kernel = "dequant_x_f32_scalar";
+    int moe_q8_k_used = 0, moe_f32_used = 0;
+    if (full_moe) {
+        if (strcmp(activation_format, "q8_k_compat") == 0) qx_detect_moe_kernel_usage(&file, layers, &moe_q8_k_used, &moe_f32_used);
+        else moe_f32_used = 1;
+    }
+    const char *moe_projection_kernel = "not_used";
+    if (moe_q8_k_used && moe_f32_used) moe_projection_kernel = "iq2_xs_iq3_xxs_q8_k_with_f32_fallback";
+    else if (moe_q8_k_used) moe_projection_kernel = "iq2_xs_q8_k_and_iq3_xxs_q8_k";
+    else if (moe_f32_used) moe_projection_kernel = "dequant_f32";
+    uint32_t moe_activation_workspace_bytes = moe_q8_k_used ? ((file.header.manifest.hidden + 255u) / 256u) * (uint32_t)sizeof(qx_block_q8_k) : 0u;
     if (q_heads == 0u || kv_heads == 0u || head_dim == 0u || q_heads > UINT32_MAX / head_dim || kv_heads > UINT32_MAX / head_dim) {
         qx_close_file(&file);
         qx_set_err(err, err_len, "invalid attention dimensions");
@@ -4471,6 +4818,8 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"activation_format\": \"%s\",\n", activation_format);
     fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
     fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
+    fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);
+    fprintf(out, "  \"moe_activation_workspace_bytes\": %u,\n", moe_activation_workspace_bytes);
     fprintf(out, "  \"kv_source\": \"%s\",\n", projection_matvec ? "projection_matvec" : (real_kv ? "projection_decode" : "deterministic_skeleton"));
     fprintf(out, "  \"residual_source\": \"%s\",\n", full_moe ? "real_attention_moe_carry" : (residual_carry ? "embedding_rmsnorm_carry" : (residual_vector ? "embedding_rmsnorm" : "probe_scalar")));
     fprintf(out, "  \"residual_dims\": %u,\n", residual_vector ? residual_dims : 0u);
@@ -4645,7 +4994,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                 if (!qx_apply_real_moe_layer(&file, layer, residual_vec, residual_values, residual_vec,
                         residual_dump_dir && *residual_dump_dir ? causal_vec : NULL,
                         selected_experts, routing_weights, &gate_ggml_type, &up_ggml_type, &down_ggml_type,
-                        &real_moe_output_l2, err, err_len)) {
+                        activation_format, &real_moe_output_l2, err, err_len)) {
                     free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
                 }
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "ffn-moe-out", causal_vec, residual_values, err, err_len)) {

@@ -70,8 +70,20 @@ struct internal_capture_record {
 };
 
 struct internal_capture_state {
-    internal_capture_record records[6] = {
+    internal_capture_record records[18] = {
         {"ffn_inp-0", {}, false},
+        {"ffn_norm-0", {}, false},
+        {"ffn_moe_logits-0", {}, false},
+        {"ffn_moe_probs-0", {}, false},
+        {"ffn_moe_topk-0", {}, false},
+        {"ffn_moe_weights-0", {}, false},
+        {"ffn_moe_weights_sum-0", {}, false},
+        {"ffn_moe_weights_norm-0", {}, false},
+        {"ffn_moe_gate-0", {}, false},
+        {"ffn_moe_up-0", {}, false},
+        {"ffn_moe_swiglu-0", {}, false},
+        {"ffn_moe_down-0", {}, false},
+        {"ffn_moe_weighted-0", {}, false},
         {"ffn_moe_out-0", {}, false},
         {"l_out-0", {}, false},
         {"Vcur-0", {}, false},
@@ -93,7 +105,7 @@ static bool capture_internal_tensor(struct ggml_tensor * tensor, bool ask, void 
     if (ask) return target != nullptr;
     if (!target || target->captured || state->failed) return true;
     if (!tensor->buffer || !ggml_is_contiguous(tensor) ||
-        (tensor->type != GGML_TYPE_F32 && tensor->type != GGML_TYPE_F16)) {
+        (tensor->type != GGML_TYPE_F32 && tensor->type != GGML_TYPE_F16 && tensor->type != GGML_TYPE_I32)) {
         state->failed = true;
         return true;
     }
@@ -104,7 +116,7 @@ static bool capture_internal_tensor(struct ggml_tensor * tensor, bool ask, void 
     }
     const size_t elements = static_cast<size_t>(elements_signed);
     const size_t bytes = ggml_nbytes(tensor);
-    const size_t item_size = tensor->type == GGML_TYPE_F32 ? sizeof(float) : sizeof(ggml_fp16_t);
+    const size_t item_size = tensor->type == GGML_TYPE_F16 ? sizeof(ggml_fp16_t) : sizeof(uint32_t);
     if (elements > std::numeric_limits<size_t>::max() / sizeof(float) ||
         elements > std::numeric_limits<size_t>::max() / item_size || bytes != elements * item_size) {
         state->failed = true;
@@ -116,11 +128,17 @@ static bool capture_internal_tensor(struct ggml_tensor * tensor, bool ask, void 
     target->values.resize(elements);
     if (tensor->type == GGML_TYPE_F32) {
         std::memcpy(target->values.data(), raw.data(), bytes);
-    } else {
+    } else if (tensor->type == GGML_TYPE_F16) {
         for (size_t i = 0; i < elements; ++i) {
             ggml_fp16_t value;
             std::memcpy(&value, raw.data() + i * sizeof(value), sizeof(value));
             target->values[i] = ggml_fp16_to_fp32(value);
+        }
+    } else {
+        for (size_t i = 0; i < elements; ++i) {
+            int32_t value;
+            std::memcpy(&value, raw.data() + i * sizeof(value), sizeof(value));
+            target->values[i] = static_cast<float>(value);
         }
     }
     target->captured = true;

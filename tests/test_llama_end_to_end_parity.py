@@ -45,7 +45,7 @@ def test_real_end_to_end_parity_is_reproducibly_refuted(tmp_path):
         oracle = run_json([
             str(LLAMA_EXE), str(GGUF), str(llama_dir), "42", "0,1,24,47", llama_kv, "internals",
         ])
-        assert oracle["internals_captured"] == 6
+        assert oracle["internals_captured"] == 18
         assert oracle["logits"]["argmax"] == 1124
 
         qx = run_json([

@@ -1,7 +1,7 @@
 ---
 title: Numerical Correctness
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-18
 type: concept
 tags: [validation, golden, testing, quantization]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -37,7 +37,7 @@ Cada slice se valida antes de combinarlo:
 
 ```text
 tokens greedy multi-token idénticos
-bisect de activaciones/kernels MoE después de atención Q8_K compatible
+golden Q8_K para expertos tipos 22/23 después del bisect layer 0
 Δppl KV INT8 <0.5%
 contexto 4K sin fugas
 RSS ±5%
@@ -68,7 +68,9 @@ La serialización QX coincide byte por byte con `quantize_row_q8_K_ref` del orac
 
 En `Vcur-0`, el modo reduce max-abs de `0.000305031` a `7.45e-9` y RMSE de `8.316e-5` a `1.158e-9`. En `kqv_out-0`, max-abs baja de `0.000305337` a `1.486e-5`. La mejora no cierra el forward: la siguiente diferencia material aparece en `ffn_moe_out-0`; logits Q8_K/F32-KV mantienen max-abs `9.09348`, RMSE `1.47465`, cosine `0.875527` y argmax `1124`.
 
-El final norm también se captura desde la API pública de embeddings del oracle. Q8_K/F32-KV frente a llama F16 mantiene max-abs `8.71117`, RMSE `1.07502`, cosine `0.809426`; por tanto, la normalización final no recupera la divergencia acumulada.
+El bisect posterior [[moe-stage-bisect]] amplió el modo opt-in a expertos IQ2_XS/IQ3_XXS. Con el mismo `ffn_inp`, router, top-8 y todas las etapas de layer 0 quedan dentro de max-abs `1.20e-6`. End-to-end `ffn_moe_out-0` mejora a max-abs `0.000701189`, RMSE `0.000140910`, cosine `0.999997595`. La primera divergencia material se desplaza a input layer 2 porque layer 1 usa tipos 22/23 y mantiene fallback F32.
+
+El final norm también se captura desde la API pública de embeddings del oracle. Tras el bisect MoE, Q8_K/F32-KV frente a llama F16 mantiene max-abs `8.65504`, RMSE `1.07496`, cosine `0.810037`; por tanto, la normalización final no recupera la divergencia acumulada.
 
 Las secuencias greedy siguen divergentes. La decisión, matriz completa, índices máximos y trade-offs están en [[f32-vs-q8k-activation]].
 

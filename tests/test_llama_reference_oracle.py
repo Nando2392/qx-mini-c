@@ -48,7 +48,7 @@ def test_llama_reference_oracle_rebuilds_and_runs_standalone(tmp_path):
         assert payload["n_layer"] == 48
         assert payload["n_vocab"] == 151936
         assert payload["logits"]["argmax"] == 1124
-        assert payload["internals_captured"] == 6
+        assert payload["internals_captured"] == 18
         assert payload["result_norm"]["written"] is True
         assert payload["result_norm"]["count"] == 2048
         assert (output / "layer-0.f32").stat().st_size == 2048 * 4
@@ -60,3 +60,19 @@ def test_llama_reference_oracle_rebuilds_and_runs_standalone(tmp_path):
         assert (output / "kqv_out-0.f32").stat().st_size == 4096 * 4
         assert (output / "l_out-47.f32").stat().st_size == 2048 * 4
         assert (output / "result_norm.f32").stat().st_size == 2048 * 4
+        expected_moe_sidecars = {
+            "ffn_norm-0": 2048,
+            "ffn_moe_logits-0": 128,
+            "ffn_moe_probs-0": 128,
+            "ffn_moe_topk-0": 8,
+            "ffn_moe_weights-0": 8,
+            "ffn_moe_weights_sum-0": 1,
+            "ffn_moe_weights_norm-0": 8,
+            "ffn_moe_gate-0": 768 * 8,
+            "ffn_moe_up-0": 768 * 8,
+            "ffn_moe_swiglu-0": 768 * 8,
+            "ffn_moe_down-0": 2048 * 8,
+            "ffn_moe_weighted-0": 2048 * 8,
+        }
+        for name, count in expected_moe_sidecars.items():
+            assert (output / f"{name}.f32").stat().st_size == count * 4

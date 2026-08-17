@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-18
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -34,14 +34,18 @@ tokenizer parity para prompts fijos: GREEN
 QXF corruption/legacy-clamp gate: GREEN
 modo Q8_K CPU compatible: GREEN, opt-in
 F32 continúa default: DECIDIDO
-→ bisect MoE desde ffn_moe_out-0
+bisect MoE layer 0 por etapa/experto: GREEN
+Q8_K IQ2_XS/IQ3_XXS CPU opt-in: GREEN
+→ primera divergencia material actual: input layer 2
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
 
 El gate [[llama-cpp-parity]] aisló layer 0, encontró y corrigió la falta de renormalización de pesos top-8. Tras el fix, layer-1 cosine sube a `0.999961` (F32/F16), pero exactitud residual/logit queda refutada. La primera diferencia aparece en `Vcur`: QX usa activación F32 y ggml usa activación temporal Q8_K para IQ4_XS.
 
-El gate [[f32-vs-q8k-activation]] implementó `q8_k_compat` como modo CPU explícito. En `Vcur-0` reduce max-abs de `3.05e-4` a `7.45e-9`, usa 4672 bytes de workspace y fue ~7.4% más rápido en la mediana del probe. No logra paridad de logits ni secuencia; F32 permanece default y la próxima divergencia a bisectar es `ffn_moe_out-0`.
+El gate [[f32-vs-q8k-activation]] implementó `q8_k_compat` como modo CPU explícito. En `Vcur-0` reduce max-abs de `3.05e-4` a `7.45e-9`, usa 4672 bytes de workspace y, en ese baseline anterior, fue ~7.4% más rápido. Ese gate identificó `ffn_moe_out-0` como siguiente objetivo; el resultado supersedente está en [[moe-stage-bisect]].
+
+El gate [[moe-stage-bisect]] usa el mismo `ffn_inp-0` en QX/llama.cpp y cierra router, top-8, pesos, gate/up, SwiGLU, down y mezcla de layer 0 dentro de max-abs `1.20e-6`. El forward Q8_K reduce RMSE de `ffn_moe_out-0` de `6.78e-4` a `1.41e-4`. La primera divergencia material pasa a input layer 2: layer 1 usa expertos tipos `22/23`, que mantienen fallback F32 hasta disponer de golden propio.
 
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 11287`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
@@ -49,7 +53,7 @@ La comparación externa secuencial está cerrada como refutación: llama F16/Q8_
 
 ## Después
 
-1. Bisectar gate/up, SwiGLU y down de [[moe-forward]] desde `ffn_moe_out-0`.
+1. Evaluar con golden independiente temporales Q8_K para expertos tipos 22/23 de layer 1; no extrapolar el contrato 17/18.
 2. Ampliar tokenizer a cobertura Unicode/chat-template exhaustiva.
 3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 4. Medir baseline de inferencia real.

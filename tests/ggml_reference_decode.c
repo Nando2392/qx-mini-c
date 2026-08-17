@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "ggml-quants.h"
+#include "ggml-cpu.h"
 
 static int parse_u64(const char *text, uint64_t *value) {
     char *end = NULL;
@@ -29,6 +30,35 @@ int main(int argc, char **argv) {
         block_q8_K block;
         quantize_row_q8_K_ref(activation, &block, QK_K);
         return fwrite(&block, sizeof(block), 1, stdout) == 1 ? 0 : 5;
+    }
+    if (argc == 6 && (strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 || strcmp(argv[1], "iq3_xxs_q8_k_dot") == 0)) {
+        uint64_t offset = 0, blocks = 0;
+        if (!parse_u64(argv[3], &offset) || !parse_u64(argv[4], &blocks) || !blocks || blocks > INT32_MAX / QK_K) return 2;
+        const size_t block_size = strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 ? sizeof(block_iq2_xs) : sizeof(block_iq3_xxs);
+        if (blocks > SIZE_MAX / block_size || blocks > SIZE_MAX / sizeof(block_q8_K) || blocks > SIZE_MAX / (QK_K * sizeof(float))) return 2;
+        FILE *weights_file = fopen(argv[2], "rb");
+        FILE *activation_file = fopen(argv[5], "rb");
+        if (!weights_file || !activation_file) { if (weights_file) fclose(weights_file); if (activation_file) fclose(activation_file); return 3; }
+        if (_fseeki64(weights_file, (__int64)offset, SEEK_SET) != 0) { fclose(weights_file); fclose(activation_file); return 3; }
+        void *weights = malloc((size_t)blocks * block_size);
+        float *activation = (float *)malloc((size_t)blocks * QK_K * sizeof(float));
+        block_q8_K *q8 = (block_q8_K *)malloc((size_t)blocks * sizeof(block_q8_K));
+        if (!weights || !activation || !q8) { free(weights); free(activation); free(q8); fclose(weights_file); fclose(activation_file); return 4; }
+        const size_t count = (size_t)blocks * QK_K;
+        int ok = fread(weights, block_size, (size_t)blocks, weights_file) == (size_t)blocks &&
+                 fread(activation, sizeof(float), count, activation_file) == count && fgetc(activation_file) == EOF;
+        fclose(weights_file);
+        fclose(activation_file);
+        if (!ok) { free(weights); free(activation); free(q8); return 3; }
+        quantize_row_q8_K_ref(activation, q8, (int64_t)count);
+        ggml_cpu_init();
+        enum ggml_type type = strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 ? GGML_TYPE_IQ2_XS : GGML_TYPE_IQ3_XXS;
+        const struct ggml_type_traits_cpu *traits = ggml_get_type_traits_cpu(type);
+        if (!traits || !traits->vec_dot || traits->vec_dot_type != GGML_TYPE_Q8_K) { free(weights); free(activation); free(q8); return 6; }
+        float dot = 0.0f;
+        traits->vec_dot((int)count, &dot, 0, weights, 0, q8, 0, 1);
+        free(weights); free(activation); free(q8);
+        return fwrite(&dot, sizeof(dot), 1, stdout) == 1 ? 0 : 5;
     }
     if (argc == 6 && strcmp(argv[1], "q6_k_logits") == 0) {
         uint64_t offset = 0, rows = 0;

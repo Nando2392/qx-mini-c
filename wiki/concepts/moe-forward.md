@@ -1,7 +1,7 @@
 ---
 title: MoE Forward
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-18
 type: concept
 tags: [qwen3-moe, runtime, quantization, validation]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -28,13 +28,15 @@ post-attention residual
 
 La comparación independiente con Qwen3MoE en llama.cpp demostró que los ocho pesos seleccionados deben renormalizarse por su suma. QX omitía ese paso; el defecto fue corregido en las dos rutas reales y está cubierto por tests que exigen ocho expertos únicos y suma top-8 igual a `1.0`. Véase [[llama-cpp-parity]].
 
-## Shapes de referencia
+## Shapes y layouts de referencia
 
 ```text
 router: 2048 → 128 F32
-gate/up: [2048, 768, 128] IQ2_XS
-down: [768, 2048, 128] IQ3_XXS
+gate/up: [2048, 768, 128]
+down: [768, 2048, 128]
 ```
+
+Los tipos no son homogéneos. Layers `0/1/24/47` usan respectivamente `(17,17,18)`, `(22,22,23)`, `(17,17,21)` y `(22,22,23)`. Los row bytes por tensor son `592/592/294`, `656/656/408`, `592/592/330` y `656/656/408`. Véase [[moe-stage-bisect]].
 
 ## Límites
 
@@ -44,6 +46,6 @@ down: [768, 2048, 128] IQ3_XXS
 - Los 47 enlaces adyacentes cumplieron `residual_output_checksum[N] == residual_input_checksum[N+1]`.
 - Validado externamente: el fix de routing redujo el error de entrada de layer 1 desde max-abs aproximado `1.08` hasta `0.00589` en F32/F16; la paridad exacta restante está refutada por diferencias de contrato numérico posteriores.
 - Pendiente: golden end-to-end de todos los tipos quant multi-layer.
-- El modo attention `q8_k_compat` deja `ffn_inp-0` casi idéntico al oracle (max-abs `4.89e-5`), pero `ffn_moe_out-0` vuelve a divergir (max-abs `0.00792`). El próximo bisect debe separar gate/up, SwiGLU y down por experto; no atribuir esta diferencia al KV. Véase [[f32-vs-q8k-activation]].
+- `q8_k_compat` cubre ahora gate/up IQ2_XS y down IQ3_XXS de layer 0. Con el mismo `ffn_inp`, todas las etapas quedan dentro de max-abs `1.20e-6`; end-to-end `ffn_moe_out-0` queda en RMSE `1.41e-4`. La primera divergencia material pasa al input de layer 2 por el fallback F32 de tipos 22/23 en layer 1. Véase [[moe-stage-bisect]].
 
 Gates: [[numerical-correctness]]. Rendimiento: [[performance-model]].

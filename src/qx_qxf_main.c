@@ -49,6 +49,8 @@ static void usage(const char *argv0) {
         "  %s state-loop-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 1 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe [--final-head --top-n 5] [--dump-residuals dir] [--bench]\n"
         "  %s rope-gqa-golden-probe --tokens 2 --q-heads-run 9 --seed 7\n"
         "  qxqxf real-qkv-golden-probe --in model.qxf --layer 0 --token-a 42 --token-b 43 --q-heads-run 9 --seed 7\n"
+        "  qxqxf moe-stage-probe --in model.qxf --layer 0 --ffn-inp ffn_inp-0.f32 --out-dir sidecars\n"
+        "  qxqxf expert-q8-k-dot-probe --in model.qxf --name blk.0.ffn_gate_exps.weight --expert 49 --row 0 --activation ffn_norm-0.f32\n"
         "  %s token-embedding --in model.qxf --token-id 42\n"
         "  %s rmsnorm-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --seed 7\n"
         "  %s attention-probe --in model.qxf --layer 0 --blocks 2 --seed 7\n"
@@ -1433,6 +1435,61 @@ int main(int argc, char **argv) {
         char err[256];
         if (!qx_dump_real_qkv_golden_probe_summary(in_path, layer, token_a, token_b, q_heads_run, seed, full_moe, stdout, err, sizeof(err))) {
             fprintf(stderr, "real-qkv-golden-probe failed: %s\n", err);
+            return 1;
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[1], "moe-stage-probe") == 0) {
+        const char *in_path = NULL;
+        const char *ffn_input_path = NULL;
+        const char *output_dir = NULL;
+        const char *activation_mode = "f32";
+        uint32_t layer = 0u;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
+            else if (strcmp(argv[i], "--ffn-inp") == 0 && i + 1 < argc) ffn_input_path = argv[++i];
+            else if (strcmp(argv[i], "--out-dir") == 0 && i + 1 < argc) output_dir = argv[++i];
+            else if (strcmp(argv[i], "--activation") == 0 && i + 1 < argc) activation_mode = argv[++i];
+            else if (strcmp(argv[i], "--layer") == 0 && i + 1 < argc) {
+                char *end = NULL;
+                errno = 0;
+                unsigned long parsed = strtoul(argv[++i], &end, 10);
+                if (errno || !end || *end || parsed > UINT32_MAX) { usage(argv[0]); return 2; }
+                layer = (uint32_t)parsed;
+            } else { usage(argv[0]); return 2; }
+        }
+        if (!in_path || !ffn_input_path || !output_dir) { usage(argv[0]); return 2; }
+        char err[256];
+        if (!qx_dump_moe_stage_probe_summary(in_path, layer, ffn_input_path, output_dir, activation_mode, stdout, err, sizeof(err))) {
+            fprintf(stderr, "moe-stage-probe failed: %s\n", err);
+            return 1;
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[1], "expert-q8-k-dot-probe") == 0) {
+        const char *in_path = NULL;
+        const char *tensor_name = NULL;
+        const char *activation_path = NULL;
+        uint32_t expert = UINT32_MAX, row = UINT32_MAX;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
+            else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) tensor_name = argv[++i];
+            else if (strcmp(argv[i], "--activation") == 0 && i + 1 < argc) activation_path = argv[++i];
+            else if ((strcmp(argv[i], "--expert") == 0 || strcmp(argv[i], "--row") == 0) && i + 1 < argc) {
+                int is_expert = strcmp(argv[i], "--expert") == 0;
+                char *end = NULL;
+                errno = 0;
+                unsigned long parsed = strtoul(argv[++i], &end, 10);
+                if (errno || !end || *end || parsed > UINT32_MAX) { usage(argv[0]); return 2; }
+                if (is_expert) expert = (uint32_t)parsed; else row = (uint32_t)parsed;
+            } else { usage(argv[0]); return 2; }
+        }
+        if (!in_path || !tensor_name || !activation_path || expert == UINT32_MAX || row == UINT32_MAX) { usage(argv[0]); return 2; }
+        char err[256];
+        if (!qx_dump_expert_q8_k_dot_probe_summary(in_path, tensor_name, expert, row, activation_path, stdout, err, sizeof(err))) {
+            fprintf(stderr, "expert-q8-k-dot-probe failed: %s\n", err);
             return 1;
         }
         return 0;
