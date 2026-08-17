@@ -281,3 +281,37 @@ def test_state_loop_propagates_real_attention_and_moe_across_two_layers():
     )
     assert invalid.returncode != 0
     assert "--norm cannot be combined with --full-moe" in invalid.stderr
+
+
+def test_state_loop_propagates_one_real_token_across_all_48_layers():
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    payload = json.loads(
+        subprocess.check_output(
+            [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8", "--top-k", "3", "--scan", "64", "--temperature", "0", "--seed", "7", "--full-moe"],
+            text=True,
+        )
+    )
+    layers = payload["tokens"][0]["layers"]
+    assert payload["layers"] == 48
+    assert payload["layers_run"] == 48
+    assert payload["kv_appends"] == 48
+    assert payload["cache_readback_ok"] is True
+    assert len(layers) == 48
+    assert [layer["layer"] for layer in layers] == list(range(48))
+    for index, layer in enumerate(layers):
+        assert layer["full_moe"] is True
+        assert layer["qk_head_norm"] is True
+        assert layer["attention_context_tokens"] == 1
+        assert layer["q_tensor"] == f"blk.{index}.attn_q.weight"
+        assert layer["k_tensor"] == f"blk.{index}.attn_k.weight"
+        assert layer["v_tensor"] == f"blk.{index}.attn_v.weight"
+        assert layer["output_tensor"] == f"blk.{index}.attn_output.weight"
+        assert layer["experts_run"] == 8
+        assert len(layer["selected_experts"]) == 8
+        assert len(set(layer["selected_experts"])) == 8
+        assert layer["moe_output_l2"] > 0
+        assert layer["residual_output_checksum"] != layer["residual_input_checksum"]
+        if index:
+            assert layers[index - 1]["residual_output_checksum"] == layer["residual_input_checksum"]
+    assert layers[0]["residual_input_checksum"] != layers[-1]["residual_output_checksum"]

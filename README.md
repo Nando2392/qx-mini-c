@@ -2,7 +2,7 @@
 
 Experimental C runtime and mmap-oriented model format for correctness-first local inference of **Qwen3-30B-A3B MoE**.
 
-> Status: research runtime. Layers 0→1 now propagate one token's real residual through attention, INT8 KV and top-8 MoE. Complete 48-layer or multi-token autoregressive generation is not finished. Historical probe throughput is not full-model throughput.
+> Status: research runtime. One token now propagates a real residual through all 48 layers with attention, INT8 KV and top-8 MoE. Final RMSNorm, complete lm_head and multi-token autoregressive generation are not finished. Probe timing is not decode throughput.
 
 ## Goals
 
@@ -29,10 +29,10 @@ GGUF tensor bytes
 → F32 router + top-8
 → IQ2_XS gate/up + SwiGLU
 → IQ3_XXS down
-→ weighted MoE sum + residual propagation from layer 0 to layer 1
+→ weighted MoE sum + residual propagation across layers 0–47
 ```
 
-The one-token, two-layer state gate is GREEN. The next correctness gate is extending the same state loop to all 48 layers, then final RMSNorm, full lm_head, per-token embedding reset/tokenizer parity and identical greedy tokens.
+The one-token, 48-layer state gate is GREEN. The next correctness gate is final RMSNorm and full lm_head, followed by tokenizer parity and identical greedy tokens.
 
 ## Honest performance state
 
@@ -40,10 +40,10 @@ Measured on the current scalar CPU path:
 
 ```text
 real layer-0 probe median: ~0.2085 s/layer
-48-layer lower-bound extrapolation: ~0.10 token/s
+real one-token 48-layer state probe: ~8.50 s
 ```
 
-The extrapolation excludes final norm, complete lm_head and tokenizer. It is not completed inference. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
+The 48-layer measurement excludes final norm, complete lm_head and tokenizer. It is not completed inference and must not be reported as token/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
 
 CUDA is planned but **not implemented**.
 

@@ -28,3 +28,12 @@
 - Expertos layer 0: `[49, 89, 92, 48, 108, 58, 4, 38]`.
 - Expertos layer 1: `[68, 13, 28, 73, 63, 32, 124, 114]`.
 - Probe medido: ~0.34 s para dos layers; no es decode completo.
+
+## [2026-08-17] update | State loop real 0→47
+
+- El runtime ya estaba generalizado; el nuevo gate real de 48 capas pasó sin modificar el kernel.
+- Un token ejecutó attention, Q/K RMSNorm, RoPE/GQA, KV INT8 y top-8 MoE en layers 0–47.
+- Los 47 enlaces de carry adyacentes pasaron; `layers_run=48`, `kv_appends=48`, `cache_readback_ok=true`.
+- Checksums extremos: entrada `8017452295594298460`, salida `675293441229675006`.
+- Tiempo medido: ~8.50 s para el probe instrumentado; no es decode completo ni tok/s.
+- Próximo gate: final RMSNorm y lm_head completo.

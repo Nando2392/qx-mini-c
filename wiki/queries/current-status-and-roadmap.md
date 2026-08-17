@@ -16,31 +16,31 @@ confidence: high
 - Loader, checksums y decoders quant necesarios.
 - Attention real completa de layer 0.
 - [[moe-forward]] real completo de layer 0.
-- State loop real 0→1 para un token: residual, attention normalizada, Q/K RMSNorm, RoPE/GQA, KV INT8 y MoE top-8 en ambas capas.
+- State loop real 0→47 para un token: residual, attention normalizada, Q/K RMSNorm, RoPE/GQA, KV INT8 y MoE top-8 en las 48 capas.
 - Golden independientes para embedding, IQ4_XS e IQ2_XS/IQ3_XXS representativos.
 - Smoke check y suite pytest.
 
 ## Gate activo
 
 ```text
-state loop real layers 0 y 1: GREEN
-→ extender a 48 layers
+state loop real layers 0–47: GREEN
 → final norm
 → lm_head completo
 → tokenizer
 greedy tokens idénticos
 ```
 
-`state-loop-probe --full-moe` propaga checksums reales entre layers 0 y 1. El checksum de salida de layer 0 coincide con el checksum de entrada de layer 1.
+`state-loop-probe --full-moe` ejecutó las 48 capas y verificó los 47 enlaces adyacentes de checksum. La medición de un token fue ~8.50 s; no incluye final norm, lm_head ni selección real del token siguiente.
 
 ## Después
 
-1. Completar correctitud multi-layer.
-2. Implementar el ciclo autoregresivo multi-token con embedding nuevo por token.
-3. Aplicar [[optimization-priorities]] CPU.
-4. Medir baseline de inferencia real.
-5. Diseñar backend CUDA híbrido.
-6. Gates 4K, RSS, calidad KV y 8 h.
+1. Implementar final RMSNorm y lm_head completo.
+2. Comparar logits y greedy token contra referencia externa.
+3. Implementar el ciclo autoregresivo multi-token.
+4. Aplicar [[optimization-priorities]] CPU.
+5. Medir baseline de inferencia real.
+6. Diseñar backend CUDA híbrido.
+7. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 

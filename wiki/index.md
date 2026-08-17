@@ -8,7 +8,7 @@
 - [[project-overview]] — objetivo, alcance y límites honestos.
 - [[architecture]] — flujo GGUF → QXF → forward y memoria.
 - [[qxf-format]] — contrato del contenedor QXF1.
-- [[moe-forward]] — atención y MoE real de layer 0.
+- [[moe-forward]] — atención, MoE y carry real por las 48 capas.
 
 ## Correctitud
 

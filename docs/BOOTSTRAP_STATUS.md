@@ -3007,3 +3007,32 @@ Auto Research project check: PASS
 ```
 
 Honesty boundary: residual carry 0→1 is now real and checksum-gated, but layer 1 does not yet have an independent full-vector golden against a separate implementation. Layers 2–47, final norm, complete lm_head, tokenizer parity and identical greedy tokens remain open. The two-layer timing is not full-model decode throughput.
+
+## 2026-08-17: one real token through all 48 layers
+
+The existing full-MoE loop was already layer-generic. A new real-model regression gate now executes layers 0–47 and verifies every adjacent residual handoff without requiring a kernel change.
+
+```text
+layers_run: 48
+kv_appends: 48
+cache_readback_ok: true
+all Q/K head norms present: true
+all top-8 expert sets unique: true
+all MoE output L2 values finite and positive: true
+47/47 adjacent residual checksum links: PASS
+first input checksum: 8017452295594298460
+last output checksum: 675293441229675006
+measured elapsed: ~8.50 s
+```
+
+Observed `(gate, up, down)` GGML type triples:
+
+```text
+(17, 17, 18)
+(17, 17, 21)
+(17, 17, 23)
+(22, 22, 21)
+(22, 22, 23)
+```
+
+Honesty boundary: this proves one-token state propagation and execution across all transformer layers. It does not include final RMSNorm, complete lm_head logits, reference-token equality or valid multi-token autoregression. The measured time is an instrumented probe duration, not token throughput.

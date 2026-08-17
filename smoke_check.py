@@ -69,7 +69,7 @@ def main() -> int:
     real_state = None
     if real_model.exists():
         real_golden = json.loads(run(EXE, "real-qkv-golden-probe", "--in", real_model, "--layer", 0, "--token-a", 42, "--token-b", 43, "--q-heads-run", 32, "--seed", 7, "--full-moe"))
-        real_state = json.loads(run(EXE, "state-loop-probe", "--in", real_model, "--prompt-token", 42, "--steps", 1, "--layers", 2, "--ctx", 4, "--kv", "int8", "--top-k", 3, "--scan", 64, "--temperature", 0, "--seed", 7, "--full-moe"))
+        real_state = json.loads(run(EXE, "state-loop-probe", "--in", real_model, "--prompt-token", 42, "--steps", 1, "--layers", 48, "--ctx", 4, "--kv", "int8", "--top-k", 3, "--scan", 64, "--temperature", 0, "--seed", 7, "--full-moe"))
 
     layer0 = result["tokens"][0]["layers"][0]
     assert result["delta_source"] == "rope_gqa_attention"
@@ -110,11 +110,15 @@ def main() -> int:
         assert real_golden["moe_output_l2"] > 0
         assert len(real_golden["layer_output_raw"]) == 2048
     if real_state is not None:
-        real_layer0, real_layer1 = real_state["tokens"][0]["layers"]
+        real_layers = real_state["tokens"][0]["layers"]
         assert real_state["residual_source"] == "real_attention_moe_carry"
-        assert real_layer0["residual_output_checksum"] == real_layer1["residual_input_checksum"]
-        assert real_layer0["experts_run"] == 8
-        assert real_layer1["experts_run"] == 8
+        assert real_state["layers_run"] == 48
+        assert real_state["kv_appends"] == 48
+        assert len(real_layers) == 48
+        assert all(layer["full_moe"] is True for layer in real_layers)
+        assert all(layer["qk_head_norm"] is True for layer in real_layers)
+        assert all(layer["experts_run"] == 8 for layer in real_layers)
+        assert all(real_layers[index - 1]["residual_output_checksum"] == real_layers[index]["residual_input_checksum"] for index in range(1, 48))
 
     print(
         json.dumps(
@@ -128,7 +132,9 @@ def main() -> int:
                 "softmax_sum": layer0["softmax_sum"],
                 "golden_probe": golden["probe"],
                 "real_qkv_golden": real_golden is not None,
-                "real_two_layer_state": real_state is not None,
+                "real_48_layer_state": real_state is not None,
+                "real_layers_run": real_state["layers_run"] if real_state is not None else 0,
+                "real_carry_links": 47 if real_state is not None else 0,
             }
         )
     )
