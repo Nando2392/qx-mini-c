@@ -523,6 +523,7 @@ static int qx_tok_bpe_chunk(
         symbols[i].length = encoded_length;
     }
     uint64_t work = 0u;
+    uint64_t work_limit = ((uint64_t)chunk_length * (uint64_t)(chunk_length ? chunk_length - 1u : 0u)) / 2u;
     for (;;) {
         uint32_t best_rank = UINT32_MAX;
         uint32_t best_index = UINT32_MAX;
@@ -532,7 +533,7 @@ static int qx_tok_bpe_chunk(
                 best_rank = rank;
                 best_index = i;
             }
-            if (++work > 4000000ull) { qx_tok_symbols_free(symbols, count); qx_tok_set_err(err, err_len, "BPE work limit exceeded"); return 0; }
+            if (++work > work_limit) { qx_tok_symbols_free(symbols, count); qx_tok_set_err(err, err_len, "BPE work limit exceeded"); return 0; }
         }
         if (best_index == UINT32_MAX) break;
         uint32_t combined_length = symbols[best_index].length + symbols[best_index + 1u].length;

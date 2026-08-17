@@ -353,6 +353,19 @@ def test_qwen3_tokenizer_rejects_invalid_inputs(real_qxt, tmp_path):
         assert "tokenizer fingerprint does not match Qwen3-30B-A3B" in mismatch.stderr
 
 
+@pytest.mark.parametrize("payload", [b"a" * 4096, b" " * 4096])
+def test_qwen3_tokenizer_accepts_adversarial_input_at_declared_limit(real_qxt, tmp_path, payload):
+    prompt = tmp_path / "declared-limit.txt"
+    prompt.write_bytes(payload)
+    result = subprocess.run(
+        [str(EXE), "tokenizer-encode", "--tokenizer", str(real_qxt), "--text-file", str(prompt)],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["input_bytes"] == 4096
+
+
 def test_tokenized_prompt_prefills_verified_greedy_loop(real_qxt, tmp_path):
     if not REAL_QXF.exists():
         pytest.skip("real Qwen3 QXF is not available")
