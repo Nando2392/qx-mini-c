@@ -1,0 +1,4980 @@
+#include "qx_format.h"
+
+#include <errno.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "qx_iq2xs_tables.inc"
+
+static void qx_set_err(char *err, uint64_t err_len, const char *msg) {
+    if (err && err_len > 0) {
+#ifdef _MSC_VER
+        strncpy_s(err, (size_t)err_len, msg, _TRUNCATE);
+#else
+        snprintf(err, (size_t)err_len, "%s", msg);
+#endif
+    }
+}
+
+static void qx_set_errno_err(char *err, uint64_t err_len, int code) {
+    if (!err || err_len == 0) return;
+#ifdef _MSC_VER
+    strerror_s(err, (size_t)err_len, code);
+#else
+    snprintf(err, (size_t)err_len, "%s", strerror(code));
+#endif
+}
+
+uint64_t qx_align_u64(uint64_t value, uint64_t alignment) {
+    if (alignment == 0) return value;
+    uint64_t rem = value % alignment;
+    return rem == 0 ? value : value + (alignment - rem);
+}
+
+uint64_t qx_fnv1a64(const void *data, uint64_t len) {
+    const unsigned char *p = (const unsigned char *)data;
+    uint64_t h = 1469598103934665603ull;
+    for (uint64_t i = 0; i < len; i++) {
+        h ^= (uint64_t)p[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+const char *qx_model_type_name(qx_model_type t) {
+    switch (t) {
+        case QX_MODEL_QWEN3_DENSE: return "qwen3_dense";
+        case QX_MODEL_QWEN3_MOE: return "qwen3_moe";
+        default: return "unknown";
+    }
+}
+
+const char *qx_quant_type_name(qx_quant_type t) {
+    switch (t) {
+        case QX_QUANT_F16: return "f16";
+        case QX_QUANT_Q4_BLOCK: return "q4";
+        case QX_QUANT_Q3_BLOCK: return "q3";
+        case QX_QUANT_Q3Q4_MIXED: return "q3q4mix";
+        case QX_QUANT_Q2_BLOCK: return "q2";
+        default: return "unknown";
+    }
+}
+
+int qx_parse_quant_type(const char *s, qx_quant_type *out) {
+    if (!s || !out) return 0;
+    if (strcmp(s, "f16") == 0) { *out = QX_QUANT_F16; return 1; }
+    if (strcmp(s, "q4") == 0 || strcmp(s, "q4_block") == 0) { *out = QX_QUANT_Q4_BLOCK; return 1; }
+    if (strcmp(s, "q3") == 0 || strcmp(s, "q3_block") == 0) { *out = QX_QUANT_Q3_BLOCK; return 1; }
+    if (strcmp(s, "q3q4mix") == 0 || strcmp(s, "q3q4") == 0 || strcmp(s, "mixed") == 0) { *out = QX_QUANT_Q3Q4_MIXED; return 1; }
+    if (strcmp(s, "q2") == 0 || strcmp(s, "q2_block") == 0) { *out = QX_QUANT_Q2_BLOCK; return 1; }
+    return 0;
+}
+
+int qx_manifest_for_model(const char *model, qx_quant_type quant, qx_model_manifest *out) {
+    if (!model || !out) return 0;
+    memset(out, 0, sizeof(*out));
+    out->quant_type = quant;
+    out->vocab = 151936;
+    out->max_ctx = 40960;
+    if (strcmp(model, "qwen3-4b") == 0) {
+        out->model_type = QX_MODEL_QWEN3_DENSE;
+        out->layers = 36; out->hidden = 2560; out->intermediate = 9728;
+        out->q_heads = 32; out->kv_heads = 8; out->head_dim = 128;
+        return 1;
+    }
+    if (strcmp(model, "qwen3-8b") == 0) {
+        out->model_type = QX_MODEL_QWEN3_DENSE;
+        out->layers = 36; out->hidden = 4096; out->intermediate = 12288;
+        out->q_heads = 32; out->kv_heads = 8; out->head_dim = 128;
+        return 1;
+    }
+    if (strcmp(model, "qwen3-14b") == 0) {
+        out->model_type = QX_MODEL_QWEN3_DENSE;
+        out->layers = 40; out->hidden = 5120; out->intermediate = 17408;
+        out->q_heads = 40; out->kv_heads = 8; out->head_dim = 128;
+        return 1;
+    }
+    if (strcmp(model, "qwen3-30b-a3b") == 0) {
+        out->model_type = QX_MODEL_QWEN3_MOE;
+        out->layers = 48; out->hidden = 2048; out->intermediate = 6144;
+        out->q_heads = 32; out->kv_heads = 4; out->head_dim = 128;
+        out->experts = 128; out->experts_per_token = 8; out->moe_intermediate = 768;
+        return 1;
+    }
+    return 0;
+}
+
+uint32_t qx_dense_tensor_count(uint32_t layers) {
+    /* token_embd + output_norm + lm_head + 9 tensors/layer for dense Qwen3. */
+    return 3u + layers * 9u;
+}
+
+uint32_t qx_moe_tensor_count(uint32_t layers, uint32_t experts) {
+    /* token_embd + output_norm + lm_head + per-layer:
+       attn_norm/q/k/v/o + moe_norm + router + 3 tensors per expert. */
+    return 3u + layers * (7u + experts * 3u);
+}
+
+static qx_tensor_dtype qx_default_dtype_for_name(const char *name, qx_quant_type quant) {
+    if (strstr(name, "norm") != NULL) return QX_DTYPE_F32;
+    if (quant == QX_QUANT_Q3_BLOCK) return QX_DTYPE_Q3;
+    if (quant == QX_QUANT_Q4_BLOCK) return QX_DTYPE_Q4;
+    if (quant == QX_QUANT_Q2_BLOCK) return QX_DTYPE_Q2;
+    if (quant == QX_QUANT_F16) return QX_DTYPE_F16;
+    /* Mixed policy: attention/router/embed/head stay Q4; FFN and experts are Q3. */
+    if (strstr(name, "ffn_") != NULL || strstr(name, ".expert.") != NULL) return QX_DTYPE_Q3;
+    return QX_DTYPE_Q4;
+}
+
+static void qx_fill_entry(qx_tensor_dir_entry *e, const char *name, qx_quant_type quant,
+                          uint64_t d0, uint64_t d1) {
+    memset(e, 0, sizeof(*e));
+#ifdef _MSC_VER
+    strncpy_s(e->name, sizeof(e->name), name, _TRUNCATE);
+#else
+    snprintf(e->name, sizeof(e->name), "%s", name);
+#endif
+    e->dtype = (uint32_t)qx_default_dtype_for_name(name, quant);
+    e->quant = (uint32_t)quant;
+    e->rank = d1 == 0 ? 1u : 2u;
+    e->dims[0] = d0;
+    e->dims[1] = d1;
+    e->group_size = (e->dtype == QX_DTYPE_F32 || e->dtype == QX_DTYPE_F16) ? 0u : 64u;
+    e->offset = 0;
+    e->byte_size = 0;
+    e->checksum = qx_fnv1a64(e->name, (uint64_t)strlen(e->name));
+}
+
+static uint32_t qx_make_dense_entries(const qx_model_manifest *m, qx_tensor_dir_entry *entries, uint32_t cap) {
+    uint32_t n = 0;
+#define ADD(name, d0, d1) do { if (n < cap) qx_fill_entry(&entries[n++], (name), m->quant_type, (d0), (d1)); } while (0)
+    ADD("token_embd.weight", m->vocab, m->hidden);
+    for (uint32_t layer = 0; layer < m->layers; layer++) {
+        char name[QX_NAME_MAX];
+#define LADD(suffix, d0, d1) do { snprintf(name, sizeof(name), "blk.%u.%s", layer, (suffix)); ADD(name, (d0), (d1)); } while (0)
+        LADD("attn_norm.weight", m->hidden, 0);
+        LADD("attn_q.weight", m->hidden, (uint64_t)m->q_heads * m->head_dim);
+        LADD("attn_k.weight", m->hidden, (uint64_t)m->kv_heads * m->head_dim);
+        LADD("attn_v.weight", m->hidden, (uint64_t)m->kv_heads * m->head_dim);
+        LADD("attn_o.weight", (uint64_t)m->q_heads * m->head_dim, m->hidden);
+        LADD("ffn_norm.weight", m->hidden, 0);
+        LADD("ffn_gate.weight", m->hidden, m->intermediate);
+        LADD("ffn_up.weight", m->hidden, m->intermediate);
+        LADD("ffn_down.weight", m->intermediate, m->hidden);
+#undef LADD
+    }
+    ADD("output_norm.weight", m->hidden, 0);
+    ADD("lm_head.weight", m->hidden, m->vocab);
+#undef ADD
+    return n;
+}
+
+static uint32_t qx_make_moe_entries(const qx_model_manifest *m, qx_tensor_dir_entry *entries, uint32_t cap) {
+    uint32_t n = 0;
+#define ADD(name, d0, d1) do { if (n < cap) qx_fill_entry(&entries[n++], (name), m->quant_type, (d0), (d1)); } while (0)
+    ADD("token_embd.weight", m->vocab, m->hidden);
+    for (uint32_t layer = 0; layer < m->layers; layer++) {
+        char name[QX_NAME_MAX];
+#define LADD(suffix, d0, d1) do { snprintf(name, sizeof(name), "blk.%u.%s", layer, (suffix)); ADD(name, (d0), (d1)); } while (0)
+        LADD("attn_norm.weight", m->hidden, 0);
+        LADD("attn_q.weight", m->hidden, (uint64_t)m->q_heads * m->head_dim);
+        LADD("attn_k.weight", m->hidden, (uint64_t)m->kv_heads * m->head_dim);
+        LADD("attn_v.weight", m->hidden, (uint64_t)m->kv_heads * m->head_dim);
+        LADD("attn_o.weight", (uint64_t)m->q_heads * m->head_dim, m->hidden);
+        LADD("moe_norm.weight", m->hidden, 0);
+        LADD("moe_router.weight", m->hidden, m->experts);
+        for (uint32_t expert = 0; expert < m->experts; expert++) {
+#define EADD(suffix, d0, d1) do { snprintf(name, sizeof(name), "blk.%u.expert.%u.%s", layer, expert, (suffix)); ADD(name, (d0), (d1)); } while (0)
+            EADD("gate.weight", m->hidden, m->moe_intermediate);
+            EADD("up.weight", m->hidden, m->moe_intermediate);
+            EADD("down.weight", m->moe_intermediate, m->hidden);
+#undef EADD
+        }
+#undef LADD
+    }
+    ADD("output_norm.weight", m->hidden, 0);
+    ADD("lm_head.weight", m->hidden, m->vocab);
+#undef ADD
+    return n;
+}
+
+int qx_write_metadata_only(const char *path, const qx_model_manifest *manifest, char *err, uint64_t err_len) {
+    if (!path || !manifest) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+
+    uint32_t count = manifest->model_type == QX_MODEL_QWEN3_MOE
+        ? qx_moe_tensor_count(manifest->layers, manifest->experts)
+        : qx_dense_tensor_count(manifest->layers);
+    qx_tensor_dir_entry *entries = (qx_tensor_dir_entry *)calloc(count, sizeof(qx_tensor_dir_entry));
+    if (!entries) { qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint32_t made = manifest->model_type == QX_MODEL_QWEN3_MOE
+        ? qx_make_moe_entries(manifest, entries, count)
+        : qx_make_dense_entries(manifest, entries, count);
+    if (made != count) { free(entries); qx_set_err(err, err_len, "internal tensor count mismatch"); return 0; }
+
+    qx_header h;
+    memset(&h, 0, sizeof(h));
+    memcpy(h.magic, QX_MAGIC, 4);
+    h.version = QX_VERSION;
+    h.header_size = (uint32_t)sizeof(qx_header);
+    h.dir_entry_size = (uint32_t)sizeof(qx_tensor_dir_entry);
+    h.tensor_count = count;
+    h.dir_offset = qx_align_u64(sizeof(qx_header), QX_ALIGN_BYTES);
+    h.data_offset = qx_align_u64(h.dir_offset + (uint64_t)count * sizeof(qx_tensor_dir_entry), QX_ALIGN_BYTES);
+    h.file_size = h.data_offset;
+    h.manifest = *manifest;
+    h.manifest_checksum = qx_fnv1a64(&h.manifest, (uint64_t)sizeof(h.manifest));
+
+    FILE *f = fopen(path, "wb");
+    if (!f) { free(entries); qx_set_errno_err(err, err_len, errno); return 0; }
+
+    int ok = 1;
+    if (fwrite(&h, sizeof(h), 1, f) != 1) ok = 0;
+    uint64_t pad_to_dir = h.dir_offset - sizeof(h);
+    for (uint64_t i = 0; ok && i < pad_to_dir; i++) if (fputc(0, f) == EOF) ok = 0;
+    if (ok && fwrite(entries, sizeof(qx_tensor_dir_entry), count, f) != count) ok = 0;
+    uint64_t pos = h.dir_offset + (uint64_t)count * sizeof(qx_tensor_dir_entry);
+    for (uint64_t i = pos; ok && i < h.data_offset; i++) if (fputc(0, f) == EOF) ok = 0;
+    if (fclose(f) != 0) ok = 0;
+    free(entries);
+    if (!ok) { qx_set_err(err, err_len, "write failed"); return 0; }
+    return 1;
+}
+
+int qx_read_header(FILE *f, qx_header *out, char *err, uint64_t err_len) {
+    if (!f || !out) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (fread(out, sizeof(*out), 1, f) != 1) { qx_set_err(err, err_len, "short read header"); return 0; }
+    if (memcmp(out->magic, QX_MAGIC, 4) != 0) { qx_set_err(err, err_len, "bad QXF magic"); return 0; }
+    if (out->version != QX_VERSION) { qx_set_err(err, err_len, "unsupported QXF version"); return 0; }
+    if (out->header_size != sizeof(qx_header) || out->dir_entry_size != sizeof(qx_tensor_dir_entry)) {
+        qx_set_err(err, err_len, "QXF struct size mismatch"); return 0;
+    }
+    uint64_t got = qx_fnv1a64(&out->manifest, (uint64_t)sizeof(out->manifest));
+    if (got != out->manifest_checksum) { qx_set_err(err, err_len, "manifest checksum mismatch"); return 0; }
+    return 1;
+}
+
+int qx_dump_summary(const char *path, FILE *out, char *err, uint64_t err_len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { qx_set_errno_err(err, err_len, errno); return 0; }
+    qx_header h;
+    if (!qx_read_header(f, &h, err, err_len)) { fclose(f); return 0; }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"magic\": \"QXF1\",\n");
+    fprintf(out, "  \"version\": %u,\n", h.version);
+    fprintf(out, "  \"model_type\": \"%s\",\n", qx_model_type_name((qx_model_type)h.manifest.model_type));
+    fprintf(out, "  \"quant_type\": \"%s\",\n", qx_quant_type_name((qx_quant_type)h.manifest.quant_type));
+    fprintf(out, "  \"layers\": %u,\n", h.manifest.layers);
+    fprintf(out, "  \"hidden\": %u,\n", h.manifest.hidden);
+    fprintf(out, "  \"intermediate\": %u,\n", h.manifest.intermediate);
+    fprintf(out, "  \"q_heads\": %u,\n", h.manifest.q_heads);
+    fprintf(out, "  \"kv_heads\": %u,\n", h.manifest.kv_heads);
+    fprintf(out, "  \"head_dim\": %u,\n", h.manifest.head_dim);
+    fprintf(out, "  \"vocab\": %u,\n", h.manifest.vocab);
+    fprintf(out, "  \"tensor_count\": %u,\n", h.tensor_count);
+    fprintf(out, "  \"dir_offset\": %llu,\n", (unsigned long long)h.dir_offset);
+    fprintf(out, "  \"data_offset\": %llu,\n", (unsigned long long)h.data_offset);
+    fprintf(out, "  \"file_size\": %llu\n", (unsigned long long)h.file_size);
+    fprintf(out, "}\n");
+    fclose(f);
+    return 1;
+}
+
+
+static qx_tensor_dtype qx_dtype_from_ggml_type(uint32_t ggml_type) {
+    /* Minimal mapping for common GGML quant types used by GGUF. */
+    switch (ggml_type) {
+        case 0: return QX_DTYPE_F32;
+        case 1: return QX_DTYPE_F16;
+        case 2: return QX_DTYPE_Q4;
+        case 3: return QX_DTYPE_Q4;
+        case 10: return QX_DTYPE_Q2;
+        case 11: return QX_DTYPE_Q3;
+        case 12: return QX_DTYPE_Q4;
+        case 13: return QX_DTYPE_Q4;
+        case 14: return QX_DTYPE_Q4;
+        case 16: return QX_DTYPE_Q2;
+        case 17: return QX_DTYPE_Q2;
+        case 18: return QX_DTYPE_Q3;
+        case 21: return QX_DTYPE_Q3;
+        case 22: return QX_DTYPE_Q2;
+        case 23: return QX_DTYPE_Q4;
+        default: return QX_DTYPE_U8;
+    }
+}
+
+static int copy_tensor_bytes(FILE *src, FILE *dst, uint64_t src_abs, uint64_t n, uint64_t *checksum) {
+    enum { COPY_CHUNK = 64 * 1024 };
+    unsigned char *buf = (unsigned char *)malloc(COPY_CHUNK);
+    if (!buf) return 0;
+#if defined(_WIN32)
+    if (_fseeki64(src, (int64_t)src_abs, SEEK_SET) != 0) { free(buf); return 0; }
+#else
+    if (fseeko(src, (off_t)src_abs, SEEK_SET) != 0) { free(buf); return 0; }
+#endif
+    uint64_t h = 1469598103934665603ull;
+    while (n > 0) {
+        size_t want = n < COPY_CHUNK ? (size_t)n : COPY_CHUNK;
+        if (fread(buf, 1, want, src) != want) { free(buf); return 0; }
+        for (size_t i = 0; i < want; i++) { h ^= (uint64_t)buf[i]; h *= 1099511628211ull; }
+        if (fwrite(buf, 1, want, dst) != want) { free(buf); return 0; }
+        n -= want;
+    }
+    free(buf);
+    *checksum = h;
+    return 1;
+}
+
+int qx_write_tensor_copy_from_gguf(const char *out_path, const char *gguf_path, const qx_model_manifest *manifest, const qx_gguf_tensor_table *table, char *err, uint64_t err_len) {
+    if (!out_path || !gguf_path || !manifest || !table || !table->tensors) {
+        qx_set_err(err, err_len, "invalid argument"); return 0;
+    }
+    if (table->tensor_count > UINT32_MAX) { qx_set_err(err, err_len, "too many tensors for QXF v1"); return 0; }
+
+    qx_tensor_dir_entry *entries = (qx_tensor_dir_entry *)calloc((size_t)table->tensor_count, sizeof(qx_tensor_dir_entry));
+    if (!entries) { qx_set_err(err, err_len, "out of memory"); return 0; }
+
+    uint64_t cursor = qx_align_u64(sizeof(qx_header), QX_ALIGN_BYTES);
+    uint64_t dir_offset = cursor;
+    cursor = qx_align_u64(dir_offset + table->tensor_count * sizeof(qx_tensor_dir_entry), QX_ALIGN_BYTES);
+    uint64_t data_offset = cursor;
+
+    for (uint64_t i = 0; i < table->tensor_count; i++) {
+        const qx_gguf_tensor_info *gt = &table->tensors[i];
+        qx_tensor_dir_entry *e = &entries[i];
+#ifdef _MSC_VER
+        strncpy_s(e->name, sizeof(e->name), gt->name, _TRUNCATE);
+#else
+        snprintf(e->name, sizeof(e->name), "%s", gt->name);
+#endif
+        e->dtype = (uint32_t)qx_dtype_from_ggml_type(gt->ggml_type);
+        e->quant = (uint32_t)manifest->quant_type;
+        e->rank = gt->n_dims;
+        for (uint32_t d = 0; d < gt->n_dims && d < QX_MAX_DIMS; d++) e->dims[d] = gt->dims[d];
+        e->offset = cursor;
+        e->byte_size = gt->byte_size;
+        e->group_size = (e->dtype == QX_DTYPE_F32 || e->dtype == QX_DTYPE_F16 || e->dtype == QX_DTYPE_U8) ? 0u : 64u;
+        e->flags = gt->ggml_type;
+        cursor = qx_align_u64(cursor + e->byte_size, QX_ALIGN_BYTES);
+    }
+
+    qx_header h;
+    memset(&h, 0, sizeof(h));
+    memcpy(h.magic, QX_MAGIC, 4);
+    h.version = QX_VERSION;
+    h.header_size = (uint32_t)sizeof(qx_header);
+    h.dir_entry_size = (uint32_t)sizeof(qx_tensor_dir_entry);
+    h.tensor_count = (uint32_t)table->tensor_count;
+    h.dir_offset = dir_offset;
+    h.data_offset = data_offset;
+    h.file_size = cursor;
+    h.manifest = *manifest;
+    h.manifest_checksum = qx_fnv1a64(&h.manifest, (uint64_t)sizeof(h.manifest));
+
+    FILE *src = fopen(gguf_path, "rb");
+    if (!src) { free(entries); qx_set_errno_err(err, err_len, errno); return 0; }
+    FILE *dst = fopen(out_path, "wb");
+    if (!dst) { fclose(src); free(entries); qx_set_errno_err(err, err_len, errno); return 0; }
+
+    int ok = 1;
+    if (fwrite(&h, sizeof(h), 1, dst) != 1) ok = 0;
+    for (uint64_t i = sizeof(h); ok && i < dir_offset; i++) if (fputc(0, dst) == EOF) ok = 0;
+    if (ok && fwrite(entries, sizeof(qx_tensor_dir_entry), (size_t)table->tensor_count, dst) != table->tensor_count) ok = 0;
+    uint64_t pos = dir_offset + table->tensor_count * sizeof(qx_tensor_dir_entry);
+    for (uint64_t i = pos; ok && i < data_offset; i++) if (fputc(0, dst) == EOF) ok = 0;
+
+    for (uint64_t i = 0; ok && i < table->tensor_count; i++) {
+        qx_tensor_dir_entry *e = &entries[i];
+#if defined(_WIN32)
+        if (_fseeki64(dst, (int64_t)e->offset, SEEK_SET) != 0) { ok = 0; break; }
+#else
+        if (fseeko(dst, (off_t)e->offset, SEEK_SET) != 0) { ok = 0; break; }
+#endif
+        uint64_t checksum = 0;
+        if (!copy_tensor_bytes(src, dst, table->data_offset + table->tensors[i].offset, e->byte_size, &checksum)) { ok = 0; break; }
+        e->checksum = checksum;
+    }
+
+    if (ok) {
+#if defined(_WIN32)
+        if (_fseeki64(dst, (int64_t)dir_offset, SEEK_SET) != 0) ok = 0;
+#else
+        if (fseeko(dst, (off_t)dir_offset, SEEK_SET) != 0) ok = 0;
+#endif
+        if (ok && fwrite(entries, sizeof(qx_tensor_dir_entry), (size_t)table->tensor_count, dst) != table->tensor_count) ok = 0;
+    }
+    if (fclose(dst) != 0) ok = 0;
+    fclose(src);
+    free(entries);
+    if (!ok) { qx_set_err(err, err_len, "tensor-copy write failed"); return 0; }
+    return 1;
+}
+
+
+int qx_open_file(const char *path, qx_file *out, char *err, uint64_t err_len) {
+    if (!path || !out) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    memset(out, 0, sizeof(*out));
+    out->fp = fopen(path, "rb");
+    if (!out->fp) { qx_set_errno_err(err, err_len, errno); return 0; }
+    if (!qx_read_header(out->fp, &out->header, err, err_len)) { qx_close_file(out); return 0; }
+    if (out->header.tensor_count == 0) { qx_set_err(err, err_len, "empty tensor directory"); qx_close_file(out); return 0; }
+    if (out->header.header_size != sizeof(qx_header) || out->header.dir_entry_size != sizeof(qx_tensor_dir_entry)) {
+        qx_set_err(err, err_len, "unsupported QXF structure size"); qx_close_file(out); return 0;
+    }
+#if defined(_WIN32)
+    if (_fseeki64(out->fp, 0, SEEK_END) != 0) { qx_set_err(err, err_len, "seek file end failed"); qx_close_file(out); return 0; }
+    int64_t actual_size_signed = _ftelli64(out->fp);
+#else
+    if (fseeko(out->fp, 0, SEEK_END) != 0) { qx_set_err(err, err_len, "seek file end failed"); qx_close_file(out); return 0; }
+    off_t actual_size_signed = ftello(out->fp);
+#endif
+    if (actual_size_signed < 0 || (uint64_t)actual_size_signed < out->header.file_size || out->header.file_size < sizeof(qx_header)) {
+        qx_set_err(err, err_len, "declared QXF file size outside file"); qx_close_file(out); return 0;
+    }
+    uint64_t directory_bytes = (uint64_t)out->header.tensor_count * (uint64_t)sizeof(qx_tensor_dir_entry);
+    if (out->header.dir_offset > out->header.file_size || directory_bytes > out->header.file_size - out->header.dir_offset) {
+        qx_set_err(err, err_len, "tensor directory outside file"); qx_close_file(out); return 0;
+    }
+    out->directory = (qx_tensor_dir_entry *)calloc(out->header.tensor_count, sizeof(qx_tensor_dir_entry));
+    if (!out->directory) { qx_set_err(err, err_len, "out of memory"); qx_close_file(out); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(out->fp, (int64_t)out->header.dir_offset, SEEK_SET) != 0) {
+#else
+    if (fseeko(out->fp, (off_t)out->header.dir_offset, SEEK_SET) != 0) {
+#endif
+        qx_set_err(err, err_len, "seek tensor directory failed"); qx_close_file(out); return 0;
+    }
+    if (fread(out->directory, sizeof(qx_tensor_dir_entry), out->header.tensor_count, out->fp) != out->header.tensor_count) {
+        qx_set_err(err, err_len, "short tensor directory read"); qx_close_file(out); return 0;
+    }
+    for (uint32_t i = 0; i < out->header.tensor_count; ++i) {
+        const qx_tensor_dir_entry *tensor = &out->directory[i];
+        if (!memchr(tensor->name, '\0', QX_NAME_MAX)) {
+            qx_set_err(err, err_len, "unterminated tensor name"); qx_close_file(out); return 0;
+        }
+        if (tensor->rank > QX_MAX_DIMS) {
+            qx_set_err(err, err_len, "tensor rank outside format limit"); qx_close_file(out); return 0;
+        }
+        if (tensor->offset > out->header.file_size || tensor->byte_size > out->header.file_size - tensor->offset) {
+            qx_set_err(err, err_len, "tensor range outside file"); qx_close_file(out); return 0;
+        }
+    }
+    return 1;
+}
+
+void qx_close_file(qx_file *file) {
+    if (!file) return;
+    if (file->fp) fclose(file->fp);
+    free(file->directory);
+    memset(file, 0, sizeof(*file));
+}
+
+const qx_tensor_dir_entry *qx_find_tensor(const qx_file *file, const char *name) {
+    if (!file || !file->directory || !name) return NULL;
+    for (uint32_t i = 0; i < file->header.tensor_count; i++) {
+        if (strcmp(file->directory[i].name, name) == 0) return &file->directory[i];
+    }
+    return NULL;
+}
+
+int qx_verify_tensor_checksum(qx_file *file, const qx_tensor_dir_entry *tensor, char *err, uint64_t err_len) {
+    if (!file || !file->fp || !tensor) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (tensor->offset + tensor->byte_size > file->header.file_size) {
+        qx_set_err(err, err_len, "tensor range outside file"); return 0;
+    }
+    unsigned char *buf = (unsigned char *)malloc(64 * 1024);
+    if (!buf) { qx_set_err(err, err_len, "out of memory"); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(file->fp, (int64_t)tensor->offset, SEEK_SET) != 0) {
+#else
+    if (fseeko(file->fp, (off_t)tensor->offset, SEEK_SET) != 0) {
+#endif
+        free(buf); qx_set_err(err, err_len, "seek tensor failed"); return 0;
+    }
+    uint64_t remaining = tensor->byte_size;
+    uint64_t h = 1469598103934665603ull;
+    while (remaining > 0) {
+        size_t want = remaining < 64 * 1024 ? (size_t)remaining : 64 * 1024;
+        if (fread(buf, 1, want, file->fp) != want) { free(buf); qx_set_err(err, err_len, "short tensor read"); return 0; }
+        for (size_t i = 0; i < want; i++) { h ^= (uint64_t)buf[i]; h *= 1099511628211ull; }
+        remaining -= want;
+    }
+    free(buf);
+    if (h != tensor->checksum) {
+        qx_set_err(err, err_len, "tensor checksum mismatch"); return 0;
+    }
+    return 1;
+}
+
+int qx_dump_tensor_summary(const char *path, const char *name, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "tensor not found"); return 0; }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"name\": \"%s\",\n", t->name);
+    fprintf(out, "  \"dtype\": %u,\n", t->dtype);
+    fprintf(out, "  \"ggml_type\": %u,\n", t->flags);
+    fprintf(out, "  \"quant\": %u,\n", t->quant);
+    fprintf(out, "  \"rank\": %u,\n", t->rank);
+    fprintf(out, "  \"dims\": [");
+    for (uint32_t d = 0; d < t->rank && d < QX_MAX_DIMS; d++) fprintf(out, "%s%llu", d ? ", " : "", (unsigned long long)t->dims[d]);
+    fprintf(out, "],\n");
+    fprintf(out, "  \"offset\": %llu,\n", (unsigned long long)t->offset);
+    fprintf(out, "  \"byte_size\": %llu,\n", (unsigned long long)t->byte_size);
+    fprintf(out, "  \"checksum\": %llu\n", (unsigned long long)t->checksum);
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+int qx_verify_all_tensors(const char *path, uint32_t max_tensors, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    uint32_t limit = max_tensors == 0 || max_tensors > file.header.tensor_count ? file.header.tensor_count : max_tensors;
+    for (uint32_t i = 0; i < limit; i++) {
+        if (!qx_verify_tensor_checksum(&file, &file.directory[i], err, err_len)) {
+            fprintf(out, "{\"verified\": false, \"failed_index\": %u, \"failed_tensor\": \"%s\"}\n", i, file.directory[i].name);
+            qx_close_file(&file);
+            return 0;
+        }
+    }
+    fprintf(out, "{\"verified\": true, \"checked\": %u, \"tensor_count\": %u}\n", limit, file.header.tensor_count);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static int qx_parse_layer_suffix(const char *name, const char *suffix, uint32_t *layer) {
+    unsigned int l = 0;
+    char tail[64];
+    if (sscanf(name, "blk.%u.%63s", &l, tail) != 2) return 0;
+    if (strcmp(tail, suffix) != 0) return 0;
+    *layer = (uint32_t)l;
+    return 1;
+}
+
+int qx_dump_expert_index_summary(const char *path, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const uint32_t layers = file.header.manifest.layers;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE || layers == 0) {
+        qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0;
+    }
+    unsigned char *has_router = (unsigned char *)calloc(layers, 1);
+    unsigned char *has_gate = (unsigned char *)calloc(layers, 1);
+    unsigned char *has_up = (unsigned char *)calloc(layers, 1);
+    unsigned char *has_down = (unsigned char *)calloc(layers, 1);
+    uint64_t *layer_bytes = (uint64_t *)calloc(layers, sizeof(uint64_t));
+    if (!has_router || !has_gate || !has_up || !has_down || !layer_bytes) {
+        free(has_router); free(has_gate); free(has_up); free(has_down); free(layer_bytes);
+        qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0;
+    }
+    uint64_t expert_tensor_bytes = 0;
+    uint32_t router_count = 0, gate_count = 0, up_count = 0, down_count = 0, complete_layers = 0;
+    uint64_t min_layer_bytes = UINT64_MAX, max_layer_bytes = 0;
+    for (uint32_t i = 0; i < file.header.tensor_count; i++) {
+        qx_tensor_dir_entry *t = &file.directory[i];
+        uint32_t layer = 0;
+        if (qx_parse_layer_suffix(t->name, "ffn_gate_inp.weight", &layer) && layer < layers) {
+            has_router[layer] = 1; router_count++;
+        } else if (qx_parse_layer_suffix(t->name, "ffn_gate_exps.weight", &layer) && layer < layers) {
+            has_gate[layer] = 1; gate_count++; expert_tensor_bytes += t->byte_size; layer_bytes[layer] += t->byte_size;
+        } else if (qx_parse_layer_suffix(t->name, "ffn_up_exps.weight", &layer) && layer < layers) {
+            has_up[layer] = 1; up_count++; expert_tensor_bytes += t->byte_size; layer_bytes[layer] += t->byte_size;
+        } else if (qx_parse_layer_suffix(t->name, "ffn_down_exps.weight", &layer) && layer < layers) {
+            has_down[layer] = 1; down_count++; expert_tensor_bytes += t->byte_size; layer_bytes[layer] += t->byte_size;
+        }
+    }
+    for (uint32_t l = 0; l < layers; l++) {
+        if (has_router[l] && has_gate[l] && has_up[l] && has_down[l]) complete_layers++;
+        if (layer_bytes[l] < min_layer_bytes) min_layer_bytes = layer_bytes[l];
+        if (layer_bytes[l] > max_layer_bytes) max_layer_bytes = layer_bytes[l];
+    }
+    if (min_layer_bytes == UINT64_MAX) min_layer_bytes = 0;
+    uint64_t avg_layer_bytes = layers ? expert_tensor_bytes / layers : 0;
+    uint64_t avg_expert_bytes = (layers && file.header.manifest.experts) ? expert_tensor_bytes / ((uint64_t)layers * file.header.manifest.experts) : 0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"model_type\": \"%s\",\n", qx_model_type_name(file.header.manifest.model_type));
+    fprintf(out, "  \"layers\": %u,\n", layers);
+    fprintf(out, "  \"experts_per_layer\": %u,\n", file.header.manifest.experts);
+    fprintf(out, "  \"experts_per_token\": %u,\n", file.header.manifest.experts_per_token);
+    fprintf(out, "  \"router_tensors\": %u,\n", router_count);
+    fprintf(out, "  \"expert_gate_tensors\": %u,\n", gate_count);
+    fprintf(out, "  \"expert_up_tensors\": %u,\n", up_count);
+    fprintf(out, "  \"expert_down_tensors\": %u,\n", down_count);
+    fprintf(out, "  \"complete_layers\": %u,\n", complete_layers);
+    fprintf(out, "  \"packed_expert_tensors\": %u,\n", gate_count + up_count + down_count);
+    fprintf(out, "  \"expert_tensor_bytes\": %llu,\n", (unsigned long long)expert_tensor_bytes);
+    fprintf(out, "  \"avg_layer_expert_bytes\": %llu,\n", (unsigned long long)avg_layer_bytes);
+    fprintf(out, "  \"min_layer_expert_bytes\": %llu,\n", (unsigned long long)min_layer_bytes);
+    fprintf(out, "  \"max_layer_expert_bytes\": %llu,\n", (unsigned long long)max_layer_bytes);
+    fprintf(out, "  \"avg_single_expert_bytes\": %llu\n", (unsigned long long)avg_expert_bytes);
+    fprintf(out, "}\n");
+    free(has_router); free(has_gate); free(has_up); free(has_down); free(layer_bytes);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static int qx_collect_expert_stats(const qx_file *file, uint64_t *expert_tensor_bytes, uint32_t *packed_tensors) {
+    if (!file || !expert_tensor_bytes || !packed_tensors) return 0;
+    *expert_tensor_bytes = 0;
+    *packed_tensors = 0;
+    for (uint32_t i = 0; i < file->header.tensor_count; i++) {
+        const qx_tensor_dir_entry *t = &file->directory[i];
+        uint32_t layer = 0;
+        if (qx_parse_layer_suffix(t->name, "ffn_gate_exps.weight", &layer) ||
+            qx_parse_layer_suffix(t->name, "ffn_up_exps.weight", &layer) ||
+            qx_parse_layer_suffix(t->name, "ffn_down_exps.weight", &layer)) {
+            *expert_tensor_bytes += t->byte_size;
+            *packed_tensors += 1;
+        }
+    }
+    return *packed_tensors > 0;
+}
+
+int qx_dump_expert_cache_plan(const char *path, double hot_vram_gib, double hot_ram_gib, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE || file.header.manifest.layers == 0 || file.header.manifest.experts == 0) {
+        qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0;
+    }
+    uint64_t expert_bytes = 0;
+    uint32_t packed_tensors = 0;
+    if (!qx_collect_expert_stats(&file, &expert_bytes, &packed_tensors)) {
+        qx_close_file(&file); qx_set_err(err, err_len, "no packed expert tensors"); return 0;
+    }
+    uint64_t expert_count_total = (uint64_t)file.header.manifest.layers * file.header.manifest.experts;
+    uint64_t avg_expert_bytes = expert_count_total ? expert_bytes / expert_count_total : 0;
+    uint64_t vram_bytes = (uint64_t)(hot_vram_gib * 1024.0 * 1024.0 * 1024.0);
+    uint64_t ram_bytes = (uint64_t)(hot_ram_gib * 1024.0 * 1024.0 * 1024.0);
+    uint64_t vram_slots = avg_expert_bytes ? vram_bytes / avg_expert_bytes : 0;
+    uint64_t ram_slots = avg_expert_bytes ? ram_bytes / avg_expert_bytes : 0;
+    double vram_layer_equiv = file.header.manifest.experts ? (double)vram_slots / (double)file.header.manifest.experts : 0.0;
+    double ram_layer_equiv = file.header.manifest.experts ? (double)ram_slots / (double)file.header.manifest.experts : 0.0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"avg_single_expert_bytes\": %llu,\n", (unsigned long long)avg_expert_bytes);
+    fprintf(out, "  \"total_expert_bytes\": %llu,\n", (unsigned long long)expert_bytes);
+    fprintf(out, "  \"total_experts\": %llu,\n", (unsigned long long)expert_count_total);
+    fprintf(out, "  \"hot_vram_gib\": %.3f,\n", hot_vram_gib);
+    fprintf(out, "  \"hot_ram_gib\": %.3f,\n", hot_ram_gib);
+    fprintf(out, "  \"vram_expert_slots\": %llu,\n", (unsigned long long)vram_slots);
+    fprintf(out, "  \"ram_expert_slots\": %llu,\n", (unsigned long long)ram_slots);
+    fprintf(out, "  \"vram_layer_equivalent\": %.2f,\n", vram_layer_equiv);
+    fprintf(out, "  \"ram_layer_equivalent\": %.2f,\n", ram_layer_equiv);
+    fprintf(out, "  \"experts_per_token\": %u\n", file.header.manifest.experts_per_token);
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static int qx_expert_packed_tensor_name(char *buf, uint64_t cap, uint32_t layer, const char *kind) {
+    if (!buf || cap == 0 || !kind) return 0;
+#ifdef _MSC_VER
+    return snprintf(buf, (size_t)cap, "blk.%u.ffn_%s_exps.weight", layer, kind) > 0;
+#else
+    return snprintf(buf, (size_t)cap, "blk.%u.ffn_%s_exps.weight", layer, kind) > 0;
+#endif
+}
+
+static int qx_print_expert_slice(FILE *out, const qx_tensor_dir_entry *t, uint32_t expert_count, uint32_t expert, const char *json_name, int comma) {
+    if (!t || expert_count == 0 || expert >= expert_count) return 0;
+    uint64_t slice_bytes = t->byte_size / expert_count;
+    uint64_t remainder = t->byte_size % expert_count;
+    uint64_t slice_offset = t->offset + slice_bytes * expert;
+    fprintf(out, "    \"%s\": {\"tensor\": \"%s\", \"offset\": %llu, \"byte_size\": %llu, \"packed_byte_size\": %llu, \"remainder\": %llu}%s\n",
+        json_name, t->name, (unsigned long long)slice_offset, (unsigned long long)slice_bytes,
+        (unsigned long long)t->byte_size, (unsigned long long)remainder, comma ? "," : "");
+    return remainder == 0;
+}
+
+int qx_dump_expert_slice_summary(const char *path, uint32_t layer, uint32_t expert, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) {
+        qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0;
+    }
+    if (layer >= file.header.manifest.layers) {
+        qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0;
+    }
+    if (expert >= file.header.manifest.experts) {
+        qx_close_file(&file); qx_set_err(err, err_len, "expert out of range"); return 0;
+    }
+    char name[QX_NAME_MAX];
+    qx_expert_packed_tensor_name(name, sizeof(name), layer, "gate");
+    const qx_tensor_dir_entry *gate = qx_find_tensor(&file, name);
+    qx_expert_packed_tensor_name(name, sizeof(name), layer, "up");
+    const qx_tensor_dir_entry *up = qx_find_tensor(&file, name);
+    qx_expert_packed_tensor_name(name, sizeof(name), layer, "down");
+    const qx_tensor_dir_entry *down = qx_find_tensor(&file, name);
+    if (!gate || !up || !down) {
+        qx_close_file(&file); qx_set_err(err, err_len, "missing packed expert tensor"); return 0;
+    }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"expert\": %u,\n", expert);
+    fprintf(out, "  \"experts_per_layer\": %u,\n", file.header.manifest.experts);
+    fprintf(out, "  \"slices\": {\n");
+    int ok = 1;
+    ok &= qx_print_expert_slice(out, gate, file.header.manifest.experts, expert, "gate", 1);
+    ok &= qx_print_expert_slice(out, up, file.header.manifest.experts, expert, "up", 1);
+    ok &= qx_print_expert_slice(out, down, file.header.manifest.experts, expert, "down", 0);
+    fprintf(out, "  },\n");
+    fprintf(out, "  \"slice_exact\": %s\n", ok ? "true" : "false");
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static int qx_kind_valid(const char *kind) {
+    return kind && (strcmp(kind, "gate") == 0 || strcmp(kind, "up") == 0 || strcmp(kind, "down") == 0);
+}
+
+int qx_dump_expert_load_summary(const char *path, uint32_t layer, uint32_t expert, const char *kind, FILE *out, char *err, uint64_t err_len) {
+    if (!qx_kind_valid(kind)) { qx_set_err(err, err_len, "invalid expert kind"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) {
+        qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0;
+    }
+    if (layer >= file.header.manifest.layers || expert >= file.header.manifest.experts) {
+        qx_close_file(&file); qx_set_err(err, err_len, "expert address out of range"); return 0;
+    }
+    char name[QX_NAME_MAX];
+    qx_expert_packed_tensor_name(name, sizeof(name), layer, kind);
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "packed expert tensor not found"); return 0; }
+    uint64_t slice_bytes = t->byte_size / file.header.manifest.experts;
+    uint64_t remainder = t->byte_size % file.header.manifest.experts;
+    if (remainder != 0) { qx_close_file(&file); qx_set_err(err, err_len, "packed expert tensor not evenly divisible"); return 0; }
+    uint64_t slice_offset = t->offset + slice_bytes * expert;
+    unsigned char *buf = (unsigned char *)malloc((size_t)slice_bytes);
+    if (!buf) { qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(file.fp, (int64_t)slice_offset, SEEK_SET) != 0) {
+#else
+    if (fseeko(file.fp, (off_t)slice_offset, SEEK_SET) != 0) {
+#endif
+        free(buf); qx_close_file(&file); qx_set_err(err, err_len, "seek expert slice failed"); return 0;
+    }
+    if (fread(buf, 1, (size_t)slice_bytes, file.fp) != (size_t)slice_bytes) {
+        free(buf); qx_close_file(&file); qx_set_err(err, err_len, "short expert slice read"); return 0;
+    }
+    uint64_t checksum = qx_fnv1a64(buf, slice_bytes);
+    free(buf);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"loaded\": true,\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"expert\": %u,\n", expert);
+    fprintf(out, "  \"kind\": \"%s\",\n", kind);
+    fprintf(out, "  \"tensor\": \"%s\",\n", t->name);
+    fprintf(out, "  \"offset\": %llu,\n", (unsigned long long)slice_offset);
+    fprintf(out, "  \"byte_size\": %llu,\n", (unsigned long long)slice_bytes);
+    fprintf(out, "  \"checksum\": %llu\n", (unsigned long long)checksum);
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+typedef struct qx_cache_key {
+    uint32_t layer;
+    uint32_t expert;
+    char kind[8];
+    uint64_t age;
+    int used;
+} qx_cache_key;
+
+static int qx_cache_key_equal(const qx_cache_key *a, uint32_t layer, uint32_t expert, const char *kind) {
+    return a->used && a->layer == layer && a->expert == expert && strcmp(a->kind, kind) == 0;
+}
+
+int qx_dump_cache_demo_summary(const char *path, uint32_t slots, const char *sequence, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !sequence || slots == 0) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    qx_cache_key *cache = (qx_cache_key *)calloc(slots, sizeof(qx_cache_key));
+    char *seq = (char *)malloc(strlen(sequence) + 1);
+    if (!cache || !seq) { free(cache); free(seq); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    strcpy(seq, sequence);
+    uint32_t requests = 0, hits = 0, misses = 0;
+    uint64_t age = 1;
+    char *tok = strtok(seq, ",");
+    while (tok) {
+        unsigned int layer = 0, expert = 0;
+        char kind[8] = {0};
+        if (sscanf(tok, "%u:%u:%7s", &layer, &expert, kind) != 3 || !qx_kind_valid(kind)) {
+            free(cache); free(seq); qx_close_file(&file); qx_set_err(err, err_len, "bad sequence item"); return 0;
+        }
+        requests++;
+        int hit_idx = -1;
+        for (uint32_t i = 0; i < slots; i++) {
+            if (qx_cache_key_equal(&cache[i], layer, expert, kind)) { hit_idx = (int)i; break; }
+        }
+        if (hit_idx >= 0) {
+            hits++;
+            cache[hit_idx].age = age++;
+        } else {
+            misses++;
+            uint32_t victim = 0;
+            uint64_t oldest = UINT64_MAX;
+            for (uint32_t i = 0; i < slots; i++) {
+                if (!cache[i].used) { victim = i; oldest = 0; break; }
+                if (cache[i].age < oldest) { oldest = cache[i].age; victim = i; }
+            }
+            cache[victim].used = 1;
+            cache[victim].layer = layer;
+            cache[victim].expert = expert;
+#ifdef _MSC_VER
+            strncpy_s(cache[victim].kind, sizeof(cache[victim].kind), kind, _TRUNCATE);
+#else
+            snprintf(cache[victim].kind, sizeof(cache[victim].kind), "%s", kind);
+#endif
+            cache[victim].age = age++;
+        }
+        tok = strtok(NULL, ",");
+    }
+    fprintf(out, "{\"requests\": %u, \"hits\": %u, \"misses\": %u, \"slots\": %u}\n", requests, hits, misses, slots);
+    free(cache); free(seq); qx_close_file(&file);
+    return 1;
+}
+
+
+static int qx_read_expert_slice_once(qx_file *file, uint32_t layer, uint32_t expert, const char *kind, uint64_t *bytes_read, uint64_t *checksum, char *err, uint64_t err_len) {
+    char name[QX_NAME_MAX];
+    qx_expert_packed_tensor_name(name, sizeof(name), layer, kind);
+    const qx_tensor_dir_entry *t = qx_find_tensor(file, name);
+    if (!t) { qx_set_err(err, err_len, "packed expert tensor not found"); return 0; }
+    uint64_t slice_bytes = t->byte_size / file->header.manifest.experts;
+    if (t->byte_size % file->header.manifest.experts != 0) { qx_set_err(err, err_len, "packed expert tensor not evenly divisible"); return 0; }
+    uint64_t slice_offset = t->offset + slice_bytes * expert;
+    unsigned char *buf = (unsigned char *)malloc((size_t)slice_bytes);
+    if (!buf) { qx_set_err(err, err_len, "out of memory"); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(file->fp, (int64_t)slice_offset, SEEK_SET) != 0) {
+#else
+    if (fseeko(file->fp, (off_t)slice_offset, SEEK_SET) != 0) {
+#endif
+        free(buf); qx_set_err(err, err_len, "seek expert slice failed"); return 0;
+    }
+    if (fread(buf, 1, (size_t)slice_bytes, file->fp) != (size_t)slice_bytes) {
+        free(buf); qx_set_err(err, err_len, "short expert slice read"); return 0;
+    }
+    if (checksum) *checksum ^= qx_fnv1a64(buf, slice_bytes);
+    if (bytes_read) *bytes_read += slice_bytes;
+    free(buf);
+    return 1;
+}
+
+int qx_dump_expert_load_benchmark(const char *path, uint32_t iters, const char *kind, FILE *out, char *err, uint64_t err_len) {
+    if (!kind || !qx_kind_valid(kind) || iters == 0) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) {
+        qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0;
+    }
+    uint64_t bytes = 0;
+    uint64_t checksum_mix = 0;
+    clock_t start = clock();
+    for (uint32_t i = 0; i < iters; i++) {
+        uint32_t layer = i % file.header.manifest.layers;
+        uint32_t expert = (i * 17u) % file.header.manifest.experts;
+        if (!qx_read_expert_slice_once(&file, layer, expert, kind, &bytes, &checksum_mix, err, err_len)) {
+            qx_close_file(&file); return 0;
+        }
+    }
+    clock_t end = clock();
+    double seconds = (double)(end - start) / (double)CLOCKS_PER_SEC;
+    if (seconds <= 0.0) seconds = 0.000001;
+    double mib = (double)bytes / (1024.0 * 1024.0);
+    double mib_per_sec = mib / seconds;
+    double avg_ms = (seconds * 1000.0) / (double)iters;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"loads\": %u,\n", iters);
+    fprintf(out, "  \"kind\": \"%s\",\n", kind);
+    fprintf(out, "  \"bytes\": %llu,\n", (unsigned long long)bytes);
+    fprintf(out, "  \"mib\": %.3f,\n", mib);
+    fprintf(out, "  \"seconds\": %.6f,\n", seconds);
+    fprintf(out, "  \"avg_ms\": %.3f,\n", avg_ms);
+    fprintf(out, "  \"mib_per_sec\": %.3f,\n", mib_per_sec);
+    fprintf(out, "  \"checksum_mix\": %llu\n", (unsigned long long)checksum_mix);
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+typedef struct qx_cache_slot {
+    qx_cache_key key;
+    unsigned char *data;
+    uint64_t byte_size;
+    uint64_t checksum;
+} qx_cache_slot;
+
+static void qx_free_cache_slots(qx_cache_slot *slots, uint32_t count) {
+    if (!slots) return;
+    for (uint32_t i = 0; i < count; i++) free(slots[i].data);
+    free(slots);
+}
+
+static int qx_read_expert_slice_alloc(qx_file *file, uint32_t layer, uint32_t expert, const char *kind,
+                                      unsigned char **data, uint64_t *byte_size, uint64_t *checksum,
+                                      char *err, uint64_t err_len) {
+    char name[QX_NAME_MAX];
+    qx_expert_packed_tensor_name(name, sizeof(name), layer, kind);
+    const qx_tensor_dir_entry *t = qx_find_tensor(file, name);
+    if (!t) { qx_set_err(err, err_len, "packed expert tensor not found"); return 0; }
+    uint64_t slice_bytes = t->byte_size / file->header.manifest.experts;
+    if (t->byte_size % file->header.manifest.experts != 0) { qx_set_err(err, err_len, "packed expert tensor not evenly divisible"); return 0; }
+    uint64_t slice_offset = t->offset + slice_bytes * expert;
+    unsigned char *buf = (unsigned char *)malloc((size_t)slice_bytes);
+    if (!buf) { qx_set_err(err, err_len, "out of memory"); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(file->fp, (int64_t)slice_offset, SEEK_SET) != 0) {
+#else
+    if (fseeko(file->fp, (off_t)slice_offset, SEEK_SET) != 0) {
+#endif
+        free(buf); qx_set_err(err, err_len, "seek expert slice failed"); return 0;
+    }
+    if (fread(buf, 1, (size_t)slice_bytes, file->fp) != (size_t)slice_bytes) {
+        free(buf); qx_set_err(err, err_len, "short expert slice read"); return 0;
+    }
+    *data = buf;
+    *byte_size = slice_bytes;
+    *checksum = qx_fnv1a64(buf, slice_bytes);
+    return 1;
+}
+
+int qx_dump_cache_run_summary(const char *path, uint32_t slots_count, const char *sequence, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !sequence || slots_count == 0) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    qx_cache_slot *slots = (qx_cache_slot *)calloc(slots_count, sizeof(qx_cache_slot));
+    char *seq = (char *)malloc(strlen(sequence) + 1);
+    if (!slots || !seq) { qx_free_cache_slots(slots, slots_count); free(seq); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    strcpy(seq, sequence);
+    uint32_t requests = 0, hits = 0, misses = 0;
+    uint64_t age = 1, bytes_loaded = 0, checksum_mix = 0;
+    char *tok = strtok(seq, ",");
+    while (tok) {
+        unsigned int layer = 0, expert = 0;
+        char kind[8] = {0};
+        if (sscanf(tok, "%u:%u:%7s", &layer, &expert, kind) != 3 || !qx_kind_valid(kind)) {
+            qx_free_cache_slots(slots, slots_count); free(seq); qx_close_file(&file); qx_set_err(err, err_len, "bad sequence item"); return 0;
+        }
+        requests++;
+        int hit_idx = -1;
+        for (uint32_t i = 0; i < slots_count; i++) {
+            if (qx_cache_key_equal(&slots[i].key, layer, expert, kind)) { hit_idx = (int)i; break; }
+        }
+        if (hit_idx >= 0) {
+            hits++;
+            slots[hit_idx].key.age = age++;
+            checksum_mix ^= slots[hit_idx].checksum;
+        } else {
+            misses++;
+            uint32_t victim = 0;
+            uint64_t oldest = UINT64_MAX;
+            for (uint32_t i = 0; i < slots_count; i++) {
+                if (!slots[i].key.used) { victim = i; oldest = 0; break; }
+                if (slots[i].key.age < oldest) { oldest = slots[i].key.age; victim = i; }
+            }
+            free(slots[victim].data);
+            slots[victim].data = NULL;
+            slots[victim].byte_size = 0;
+            slots[victim].checksum = 0;
+            if (!qx_read_expert_slice_alloc(&file, layer, expert, kind, &slots[victim].data, &slots[victim].byte_size, &slots[victim].checksum, err, err_len)) {
+                qx_free_cache_slots(slots, slots_count); free(seq); qx_close_file(&file); return 0;
+            }
+            slots[victim].key.used = 1;
+            slots[victim].key.layer = layer;
+            slots[victim].key.expert = expert;
+#ifdef _MSC_VER
+            strncpy_s(slots[victim].key.kind, sizeof(slots[victim].key.kind), kind, _TRUNCATE);
+#else
+            snprintf(slots[victim].key.kind, sizeof(slots[victim].key.kind), "%s", kind);
+#endif
+            slots[victim].key.age = age++;
+            bytes_loaded += slots[victim].byte_size;
+            checksum_mix ^= slots[victim].checksum;
+        }
+        tok = strtok(NULL, ",");
+    }
+    uint64_t resident_bytes = 0;
+    for (uint32_t i = 0; i < slots_count; i++) if (slots[i].key.used) resident_bytes += slots[i].byte_size;
+    fprintf(out, "{\"requests\": %u, \"hits\": %u, \"misses\": %u, \"slots\": %u, \"bytes_loaded\": %llu, \"resident_bytes\": %llu, \"checksum_mix\": %llu}\n",
+        requests, hits, misses, slots_count, (unsigned long long)bytes_loaded, (unsigned long long)resident_bytes, (unsigned long long)checksum_mix);
+    qx_free_cache_slots(slots, slots_count); free(seq); qx_close_file(&file);
+    return 1;
+}
+
+
+static int qx_read_full_expert_alloc(qx_file *file, uint32_t layer, uint32_t expert,
+                                     unsigned char **data, uint64_t *byte_size, uint64_t *checksum,
+                                     char *err, uint64_t err_len) {
+    const char *kinds[3] = {"gate", "up", "down"};
+    unsigned char *out = NULL;
+    uint64_t total = 0;
+    for (uint32_t k = 0; k < 3; k++) {
+        char name[QX_NAME_MAX];
+        qx_expert_packed_tensor_name(name, sizeof(name), layer, kinds[k]);
+        const qx_tensor_dir_entry *t = qx_find_tensor(file, name);
+        if (!t) { free(out); qx_set_err(err, err_len, "packed expert tensor not found"); return 0; }
+        if (t->byte_size % file->header.manifest.experts != 0) { free(out); qx_set_err(err, err_len, "packed expert tensor not evenly divisible"); return 0; }
+        total += t->byte_size / file->header.manifest.experts;
+    }
+    out = (unsigned char *)malloc((size_t)total);
+    if (!out) { qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint64_t pos = 0;
+    for (uint32_t k = 0; k < 3; k++) {
+        char name[QX_NAME_MAX];
+        qx_expert_packed_tensor_name(name, sizeof(name), layer, kinds[k]);
+        const qx_tensor_dir_entry *t = qx_find_tensor(file, name);
+        uint64_t slice_bytes = t->byte_size / file->header.manifest.experts;
+        uint64_t slice_offset = t->offset + slice_bytes * expert;
+#if defined(_WIN32)
+        if (_fseeki64(file->fp, (int64_t)slice_offset, SEEK_SET) != 0) {
+#else
+        if (fseeko(file->fp, (off_t)slice_offset, SEEK_SET) != 0) {
+#endif
+            free(out); qx_set_err(err, err_len, "seek expert slice failed"); return 0;
+        }
+        if (fread(out + pos, 1, (size_t)slice_bytes, file->fp) != (size_t)slice_bytes) {
+            free(out); qx_set_err(err, err_len, "short expert slice read"); return 0;
+        }
+        pos += slice_bytes;
+    }
+    *data = out;
+    *byte_size = total;
+    *checksum = qx_fnv1a64(out, total);
+    return 1;
+}
+
+int qx_dump_cache_run_expert_summary(const char *path, uint32_t slots_count, const char *sequence, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !sequence || slots_count == 0) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    qx_cache_slot *slots = (qx_cache_slot *)calloc(slots_count, sizeof(qx_cache_slot));
+    char *seq = (char *)malloc(strlen(sequence) + 1);
+    if (!slots || !seq) { qx_free_cache_slots(slots, slots_count); free(seq); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    strcpy(seq, sequence);
+    uint32_t requests = 0, expert_requests = 0, hits = 0, misses = 0;
+    uint64_t age = 1, bytes_loaded = 0, checksum_mix = 0;
+    char *tok = strtok(seq, ",");
+    while (tok) {
+        unsigned int layer = 0, expert = 0;
+        char kind[8] = {0};
+        if (sscanf(tok, "%u:%u:%7s", &layer, &expert, kind) != 3 || !qx_kind_valid(kind)) {
+            qx_free_cache_slots(slots, slots_count); free(seq); qx_close_file(&file); qx_set_err(err, err_len, "bad sequence item"); return 0;
+        }
+        requests++;
+        if (strcmp(kind, "gate") == 0) {
+            expert_requests++;
+            int hit_idx = -1;
+            for (uint32_t i = 0; i < slots_count; i++) {
+                if (slots[i].key.used && slots[i].key.layer == layer && slots[i].key.expert == expert) { hit_idx = (int)i; break; }
+            }
+            if (hit_idx >= 0) {
+                hits++;
+                slots[hit_idx].key.age = age++;
+                checksum_mix ^= slots[hit_idx].checksum;
+            } else {
+                misses++;
+                uint32_t victim = 0;
+                uint64_t oldest = UINT64_MAX;
+                for (uint32_t i = 0; i < slots_count; i++) {
+                    if (!slots[i].key.used) { victim = i; oldest = 0; break; }
+                    if (slots[i].key.age < oldest) { oldest = slots[i].key.age; victim = i; }
+                }
+                free(slots[victim].data);
+                slots[victim].data = NULL;
+                if (!qx_read_full_expert_alloc(&file, layer, expert, &slots[victim].data, &slots[victim].byte_size, &slots[victim].checksum, err, err_len)) {
+                    qx_free_cache_slots(slots, slots_count); free(seq); qx_close_file(&file); return 0;
+                }
+                slots[victim].key.used = 1;
+                slots[victim].key.layer = layer;
+                slots[victim].key.expert = expert;
+                snprintf(slots[victim].key.kind, sizeof(slots[victim].key.kind), "expert");
+                slots[victim].key.age = age++;
+                bytes_loaded += slots[victim].byte_size;
+                checksum_mix ^= slots[victim].checksum;
+            }
+        }
+        tok = strtok(NULL, ",");
+    }
+    uint64_t resident_bytes = 0;
+    for (uint32_t i = 0; i < slots_count; i++) if (slots[i].key.used) resident_bytes += slots[i].byte_size;
+    fprintf(out, "{\"requests\": %u, \"expert_requests\": %u, \"hits\": %u, \"misses\": %u, \"slots\": %u, \"bytes_loaded\": %llu, \"resident_bytes\": %llu, \"checksum_mix\": %llu}\n",
+        requests, expert_requests, hits, misses, slots_count, (unsigned long long)bytes_loaded, (unsigned long long)resident_bytes, (unsigned long long)checksum_mix);
+    qx_free_cache_slots(slots, slots_count); free(seq); qx_close_file(&file);
+    return 1;
+}
+
+
+int qx_dump_expert_complete_cache_plan(const char *path, double hot_vram_gib, double hot_ram_gib, uint32_t top_k, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) {
+        qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0;
+    }
+    if (top_k == 0) top_k = file.header.manifest.experts_per_token;
+    uint64_t expert_bytes = 0;
+    uint32_t packed_tensors = 0;
+    if (!qx_collect_expert_stats(&file, &expert_bytes, &packed_tensors)) {
+        qx_close_file(&file); qx_set_err(err, err_len, "no packed expert tensors"); return 0;
+    }
+    uint64_t total_experts = (uint64_t)file.header.manifest.layers * file.header.manifest.experts;
+    uint64_t avg_single_tensor_expert = total_experts ? expert_bytes / total_experts : 0;
+    uint64_t avg_full_expert = avg_single_tensor_expert;
+    uint64_t vram_bytes = (uint64_t)(hot_vram_gib * 1024.0 * 1024.0 * 1024.0);
+    uint64_t ram_bytes = (uint64_t)(hot_ram_gib * 1024.0 * 1024.0 * 1024.0);
+    uint64_t vram_slots = avg_full_expert ? vram_bytes / avg_full_expert : 0;
+    uint64_t ram_slots = avg_full_expert ? ram_bytes / avg_full_expert : 0;
+    uint64_t working = (uint64_t)file.header.manifest.layers * top_k;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"cache_unit\": \"full_expert\",\n");
+    fprintf(out, "  \"layers\": %u,\n", file.header.manifest.layers);
+    fprintf(out, "  \"experts_per_layer\": %u,\n", file.header.manifest.experts);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"working_set_experts_per_token\": %llu,\n", (unsigned long long)working);
+    fprintf(out, "  \"avg_full_expert_bytes\": %llu,\n", (unsigned long long)avg_full_expert);
+    fprintf(out, "  \"hot_vram_gib\": %.3f,\n", hot_vram_gib);
+    fprintf(out, "  \"hot_ram_gib\": %.3f,\n", hot_ram_gib);
+    fprintf(out, "  \"vram_expert_slots\": %llu,\n", (unsigned long long)vram_slots);
+    fprintf(out, "  \"ram_expert_slots\": %llu,\n", (unsigned long long)ram_slots);
+    fprintf(out, "  \"vram_covers_one_token\": %s,\n", vram_slots >= working ? "true" : "false");
+    fprintf(out, "  \"ram_covers_one_token\": %s\n", ram_slots >= working ? "true" : "false");
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static double qx_bytes_to_gib(uint64_t bytes) {
+    return (double)bytes / (1024.0 * 1024.0 * 1024.0);
+}
+
+int qx_dump_runtime_plan(const char *path, uint32_t ctx_tokens, const char *kv_format,
+                         double usable_vram_gib, double usable_ram_gib,
+                         double hot_vram_gib, double hot_ram_gib, uint32_t top_k,
+                         FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || ctx_tokens == 0) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    double kv_bytes_per_value = 0.0;
+    if (strcmp(kv_format, "int8") == 0) kv_bytes_per_value = 1.0;
+    else if (strcmp(kv_format, "f16") == 0) kv_bytes_per_value = 2.0;
+    else if (strcmp(kv_format, "int4") == 0) kv_bytes_per_value = 0.5;
+    else { qx_set_err(err, err_len, "unsupported kv format"); return 0; }
+
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_model_manifest *m = &file.header.manifest;
+    if (top_k == 0) top_k = m->experts_per_token ? m->experts_per_token : 1;
+
+    uint64_t expert_bytes = 0;
+    uint32_t packed_tensors = 0;
+    qx_collect_expert_stats(&file, &expert_bytes, &packed_tensors);
+    uint64_t total_experts = (uint64_t)m->layers * (m->experts ? m->experts : 1);
+    uint64_t avg_full_expert_bytes = total_experts ? expert_bytes / total_experts : 0;
+    uint64_t working_set = (uint64_t)m->layers * top_k;
+    uint64_t vram_hot_bytes = (uint64_t)(hot_vram_gib * 1024.0 * 1024.0 * 1024.0);
+    uint64_t ram_hot_bytes = (uint64_t)(hot_ram_gib * 1024.0 * 1024.0 * 1024.0);
+    uint64_t vram_slots = avg_full_expert_bytes ? vram_hot_bytes / avg_full_expert_bytes : 0;
+    uint64_t ram_slots = avg_full_expert_bytes ? ram_hot_bytes / avg_full_expert_bytes : 0;
+
+    uint64_t kv_bytes = (uint64_t)((double)m->layers * (double)ctx_tokens * (double)m->kv_heads * (double)m->head_dim * 2.0 * kv_bytes_per_value);
+    double runtime_overhead_gib = 0.75;
+    double total_model_gib = qx_bytes_to_gib(file.header.file_size);
+    double expert_gib = qx_bytes_to_gib(expert_bytes);
+    double non_expert_gib = total_model_gib > expert_gib ? total_model_gib - expert_gib : 0.0;
+    double kv_gib = qx_bytes_to_gib(kv_bytes);
+    double active_ram_gib = non_expert_gib + hot_ram_gib + kv_gib + runtime_overhead_gib;
+    double active_vram_gib = hot_vram_gib;
+    int feasible = (active_ram_gib <= usable_ram_gib && active_vram_gib <= usable_vram_gib);
+
+    fprintf(out, "{\n");
+    fprintf(out, "  \"model_type\": \"%s\",\n", m->model_type == QX_MODEL_QWEN3_MOE ? "qwen3_moe" : "qwen3_dense");
+    fprintf(out, "  \"cache_unit\": \"full_expert\",\n");
+    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
+    fprintf(out, "  \"layers\": %u,\n", m->layers);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"working_set_experts_per_token\": %llu,\n", (unsigned long long)working_set);
+    fprintf(out, "  \"total_model_gib\": %.6f,\n", total_model_gib);
+    fprintf(out, "  \"expert_gib\": %.6f,\n", expert_gib);
+    fprintf(out, "  \"non_expert_gib\": %.6f,\n", non_expert_gib);
+    fprintf(out, "  \"kv_gib\": %.6f,\n", kv_gib);
+    fprintf(out, "  \"runtime_overhead_gib\": %.3f,\n", runtime_overhead_gib);
+    fprintf(out, "  \"hot_vram_gib\": %.3f,\n", hot_vram_gib);
+    fprintf(out, "  \"hot_ram_gib\": %.3f,\n", hot_ram_gib);
+    fprintf(out, "  \"vram_expert_slots\": %llu,\n", (unsigned long long)vram_slots);
+    fprintf(out, "  \"ram_expert_slots\": %llu,\n", (unsigned long long)ram_slots);
+    fprintf(out, "  \"vram_covers_one_token\": %s,\n", vram_slots >= working_set ? "true" : "false");
+    fprintf(out, "  \"ram_covers_one_token\": %s,\n", ram_slots >= working_set ? "true" : "false");
+    fprintf(out, "  \"usable_vram_gib\": %.3f,\n", usable_vram_gib);
+    fprintf(out, "  \"usable_ram_gib\": %.3f,\n", usable_ram_gib);
+    fprintf(out, "  \"active_vram_gib\": %.3f,\n", active_vram_gib);
+    fprintf(out, "  \"active_ram_gib\": %.3f,\n", active_ram_gib);
+    fprintf(out, "  \"feasible\": %s\n", feasible ? "true" : "false");
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static uint64_t qx_embedding_row_size(const qx_tensor_dir_entry *t, uint32_t vocab) {
+    if (!t || vocab == 0) return 0;
+    uint64_t row = t->byte_size / vocab;
+    return row ? row : 1;
+}
+
+int qx_dump_token_embedding_summary(const char *path, uint32_t token_id, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, "token_embd.weight");
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "token_embd.weight not found"); return 0; }
+    uint32_t vocab = file.header.manifest.vocab;
+    if (vocab && token_id >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "token id out of range"); return 0; }
+    uint64_t row = qx_embedding_row_size(t, vocab ? vocab : (uint32_t)(t->dims[1] ? t->dims[1] : 1));
+    uint64_t offset = t->offset + row * token_id;
+    if (offset >= t->offset + t->byte_size) offset = t->offset + t->byte_size - (row ? row : 1);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"token_id\": %u,\n", token_id);
+    fprintf(out, "  \"tensor\": \"token_embd.weight\",\n");
+    fprintf(out, "  \"dtype\": %u,\n", t->dtype);
+    fprintf(out, "  \"rank\": %u,\n", t->rank);
+    fprintf(out, "  \"hidden\": %u,\n", file.header.manifest.hidden);
+    fprintf(out, "  \"vocab\": %u,\n", vocab);
+    fprintf(out, "  \"offset\": %llu,\n", (unsigned long long)offset);
+    fprintf(out, "  \"row_byte_size\": %llu,\n", (unsigned long long)row);
+    fprintf(out, "  \"tensor_byte_size\": %llu\n", (unsigned long long)t->byte_size);
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+static const qx_tensor_dir_entry *qx_find_first_existing(qx_file *file, const char **names, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        const qx_tensor_dir_entry *t = qx_find_tensor(file, names[i]);
+        if (t) return t;
+    }
+    return NULL;
+}
+
+int qx_dump_forward_schedule(const char *path, uint32_t token_id, uint32_t top_k, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_model_manifest *m = &file.header.manifest;
+    if (top_k == 0) top_k = m->experts_per_token ? m->experts_per_token : 1;
+    const qx_tensor_dir_entry *emb = qx_find_tensor(&file, "token_embd.weight");
+    if (!emb) { qx_close_file(&file); qx_set_err(err, err_len, "token_embd.weight not found"); return 0; }
+    uint64_t row = qx_embedding_row_size(emb, m->vocab ? m->vocab : 1);
+    uint64_t emb_offset = emb->offset + row * token_id;
+    if (emb_offset >= emb->offset + emb->byte_size) emb_offset = emb->offset;
+    char router_name[QX_NAME_MAX];
+    snprintf(router_name, sizeof(router_name), "blk.0.ffn_gate_inp.weight");
+    const char *attn_names[] = {"blk.0.attn_q.weight", "blk.0.attn_qkv.weight", "blk.0.attn_output.weight"};
+    const qx_tensor_dir_entry *attn = qx_find_first_existing(&file, attn_names, 3);
+    const qx_tensor_dir_entry *router = qx_find_tensor(&file, router_name);
+    const qx_tensor_dir_entry *gate = qx_find_tensor(&file, "blk.0.ffn_gate_exps.weight");
+    const qx_tensor_dir_entry *up = qx_find_tensor(&file, "blk.0.ffn_up_exps.weight");
+    const qx_tensor_dir_entry *down = qx_find_tensor(&file, "blk.0.ffn_down_exps.weight");
+    fprintf(out, "{\n");
+    fprintf(out, "  \"mock_forward\": true,\n");
+    fprintf(out, "  \"token_id\": %u,\n", token_id);
+    fprintf(out, "  \"layers\": %u,\n", m->layers);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"steps_per_layer\": 5,\n");
+    fprintf(out, "  \"embedding\": {\"tensor\": \"token_embd.weight\", \"offset\": %llu, \"row_byte_size\": %llu},\n", (unsigned long long)emb_offset, (unsigned long long)row);
+    fprintf(out, "  \"layer0\": {\n");
+    fprintf(out, "    \"attention\": %s,\n", attn ? "true" : "false");
+    fprintf(out, "    \"router\": %s,\n", router ? "true" : "false");
+    fprintf(out, "    \"expert_gate\": %s,\n", gate ? "true" : "false");
+    fprintf(out, "    \"expert_up\": %s,\n", up ? "true" : "false");
+    fprintf(out, "    \"expert_down\": %s\n", down ? "true" : "false");
+    fprintf(out, "  },\n");
+    fprintf(out, "  \"planned_ops\": %llu\n", (unsigned long long)((uint64_t)m->layers * 5u + 1u));
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static uint64_t qx_quant_probe_block_size(const qx_tensor_dir_entry *t) {
+    if (!t) return 0;
+    if (t->byte_size == 0) return 0;
+    uint64_t block = 256;
+    if (t->group_size && t->group_size > block) block = t->group_size;
+    if (block > t->byte_size) block = t->byte_size;
+    return block;
+}
+
+static int qx_read_raw_span(qx_file *file, uint64_t offset, uint64_t size, unsigned char **data, char *err, uint64_t err_len) {
+    unsigned char *buf = (unsigned char *)malloc((size_t)size);
+    if (!buf) { qx_set_err(err, err_len, "out of memory"); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(file->fp, (int64_t)offset, SEEK_SET) != 0) {
+#else
+    if (fseeko(file->fp, (off_t)offset, SEEK_SET) != 0) {
+#endif
+        free(buf); qx_set_err(err, err_len, "seek failed"); return 0;
+    }
+    if (fread(buf, 1, (size_t)size, file->fp) != (size_t)size) {
+        free(buf); qx_set_err(err, err_len, "short read"); return 0;
+    }
+    *data = buf;
+    return 1;
+}
+
+static int qx_read_raw_span_into(qx_file *file, uint64_t offset, uint64_t size, unsigned char *buf, char *err, uint64_t err_len) {
+    if (!file || !buf) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(file->fp, (int64_t)offset, SEEK_SET) != 0) {
+#else
+    if (fseeko(file->fp, (off_t)offset, SEEK_SET) != 0) {
+#endif
+        qx_set_err(err, err_len, "seek failed"); return 0;
+    }
+    if (fread(buf, 1, (size_t)size, file->fp) != (size_t)size) {
+        qx_set_err(err, err_len, "short read"); return 0;
+    }
+    return 1;
+}
+
+int qx_dump_quant_block_summary(const char *path, const char *name, uint64_t block_index, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "tensor not found"); return 0; }
+    uint64_t block_size = qx_quant_probe_block_size(t);
+    uint64_t block_count = block_size ? (t->byte_size + block_size - 1) / block_size : 0;
+    if (block_index >= block_count) { qx_close_file(&file); qx_set_err(err, err_len, "block out of range"); return 0; }
+    uint64_t block_offset = t->offset + block_index * block_size;
+    uint64_t remaining = (t->offset + t->byte_size) - block_offset;
+    uint64_t read_size = remaining < block_size ? remaining : block_size;
+    unsigned char *buf = NULL;
+    if (!qx_read_raw_span(&file, block_offset, read_size, &buf, err, err_len)) { qx_close_file(&file); return 0; }
+    uint64_t checksum = qx_fnv1a64(buf, read_size);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"tensor\": \"%s\",\n", t->name);
+    fprintf(out, "  \"dtype\": %u,\n", t->dtype);
+    fprintf(out, "  \"ggml_type\": %u,\n", t->flags);
+    fprintf(out, "  \"quant\": %u,\n", t->quant);
+    fprintf(out, "  \"group_size\": %u,\n", t->group_size);
+    fprintf(out, "  \"block_index\": %llu,\n", (unsigned long long)block_index);
+    fprintf(out, "  \"block_count\": %llu,\n", (unsigned long long)block_count);
+    fprintf(out, "  \"block_offset\": %llu,\n", (unsigned long long)block_offset);
+    fprintf(out, "  \"block_byte_size\": %llu,\n", (unsigned long long)read_size);
+    fprintf(out, "  \"checksum\": %llu,\n", (unsigned long long)checksum);
+    fprintf(out, "  \"dequantized\": false,\n");
+    fprintf(out, "  \"note\": \"raw quant block probe; numeric dequant kernel not implemented\"\n");
+    fprintf(out, "}\n");
+    free(buf);
+    qx_close_file(&file);
+    return 1;
+}
+
+int qx_dump_matvec_stub_summary(const char *path, const char *name, uint32_t rows, FILE *out, char *err, uint64_t err_len) {
+    if (rows == 0) rows = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "tensor not found"); return 0; }
+    uint64_t block_size = qx_quant_probe_block_size(t);
+    uint64_t span = block_size * rows;
+    if (span > t->byte_size) span = t->byte_size;
+    unsigned char *buf = NULL;
+    if (!qx_read_raw_span(&file, t->offset, span, &buf, err, err_len)) { qx_close_file(&file); return 0; }
+    uint64_t mix = qx_fnv1a64(buf, span);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"stub\": true,\n");
+    fprintf(out, "  \"tensor\": \"%s\",\n", t->name);
+    fprintf(out, "  \"rows\": %u,\n", rows);
+    fprintf(out, "  \"dtype\": %u,\n", t->dtype);
+    fprintf(out, "  \"quant\": %u,\n", t->quant);
+    fprintf(out, "  \"block_byte_size\": %llu,\n", (unsigned long long)block_size);
+    fprintf(out, "  \"bytes_read\": %llu,\n", (unsigned long long)span);
+    fprintf(out, "  \"checksum_mix\": %llu,\n", (unsigned long long)mix);
+    fprintf(out, "  \"numeric_kernel\": false\n");
+    fprintf(out, "}\n");
+    free(buf);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static float qx_fp16_to_f32(uint16_t h) {
+    uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
+    uint32_t exp = (h >> 10) & 0x1fu;
+    uint32_t mant = h & 0x03ffu;
+    uint32_t bits;
+    if (exp == 0) {
+        if (mant == 0) {
+            bits = sign;
+        } else {
+            exp = 1;
+            while ((mant & 0x0400u) == 0) { mant <<= 1; exp--; }
+            mant &= 0x03ffu;
+            bits = sign | ((exp + 127u - 15u) << 23) | (mant << 13);
+        }
+    } else if (exp == 31) {
+        bits = sign | 0x477fe000u;
+    } else {
+        bits = sign | ((exp + 127u - 15u) << 23) | (mant << 13);
+    }
+    float f;
+    memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+
+static uint16_t qx_rd_le16(const unsigned char *p) {
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t qx_rd_le32(const unsigned char *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static int qx_decode_iq2_xs_block(const unsigned char *buf, float out[256]) {
+    const uint16_t d16 = qx_rd_le16(buf);
+    const uint16_t *qs = (const uint16_t *)(const void *)(buf + 2);
+    const unsigned char *scales = buf + 2 + 64;
+    const float d = qx_fp16_to_f32(d16);
+    for (int ib32 = 0; ib32 < 8; ++ib32) {
+        float db0 = d * (0.5f + (float)(scales[ib32] & 0x0f)) * 0.25f;
+        float db1 = d * (0.5f + (float)(scales[ib32] >> 4)) * 0.25f;
+        for (int l = 0; l < 4; ++l) {
+            uint16_t q = qs[4*ib32 + l];
+            const unsigned char *grid = (const unsigned char *)(const void *)&qx_iq2xs_grid[q & 511u];
+            unsigned char signs = qx_ksigns_iq2xs[q >> 9];
+            float db = (l < 2) ? db0 : db1;
+            for (int j = 0; j < 8; ++j) {
+                out[ib32*32 + l*8 + j] = db * (float)grid[j] * ((signs & qx_kmask_iq2xs[j]) ? -1.0f : 1.0f);
+            }
+        }
+    }
+    return 1;
+}
+
+static int qx_decode_iq3_xxs_block(const unsigned char *buf, float out[256]) {
+    const uint16_t d16 = qx_rd_le16(buf);
+    const unsigned char *qs = buf + 2;
+    const unsigned char *scales_and_signs = qs + 64;
+    const float d = qx_fp16_to_f32(d16);
+    int y = 0;
+    for (int ib32 = 0; ib32 < 8; ++ib32) {
+        uint32_t aux32 = qx_rd_le32(scales_and_signs + 4*ib32);
+        const float db = d * (0.5f + (float)(aux32 >> 28)) * 0.5f;
+        for (int l = 0; l < 4; ++l) {
+            const unsigned char signs = qx_ksigns_iq2xs[(aux32 >> (7*l)) & 127u];
+            const uint32_t grid1 = qx_iq3xxs_grid[qs[2*l + 0]];
+            const uint32_t grid2 = qx_iq3xxs_grid[qs[2*l + 1]];
+            for (int j = 0; j < 4; ++j) {
+                const unsigned char g1 = (unsigned char)((grid1 >> (8*j)) & 0xffu);
+                const unsigned char g2 = (unsigned char)((grid2 >> (8*j)) & 0xffu);
+                out[y + j + 0] = db * (float)g1 * ((signs & qx_kmask_iq2xs[j + 0]) ? -1.0f : 1.0f);
+                out[y + j + 4] = db * (float)g2 * ((signs & qx_kmask_iq2xs[j + 4]) ? -1.0f : 1.0f);
+            }
+            y += 8;
+        }
+        qs += 8;
+    }
+    return 1;
+}
+
+static int qx_decode_iq2_s_block(const unsigned char *buf, float out[256]) {
+    const float d = qx_fp16_to_f32(qx_rd_le16(buf));
+    const unsigned char *qs = buf + 2;
+    const unsigned char *qh = buf + 66;
+    const unsigned char *scales = buf + 74;
+    const unsigned char *signs = qs + 32;
+    int y = 0;
+    for (int ib32 = 0; ib32 < 8; ++ib32) {
+        const float db0 = d * (0.5f + (float)(scales[ib32] & 0x0f)) * 0.25f;
+        const float db1 = d * (0.5f + (float)(scales[ib32] >> 4)) * 0.25f;
+        for (int l = 0; l < 4; ++l) {
+            const float dl = (l < 2) ? db0 : db1;
+            const unsigned int idx = (unsigned int)qs[l] | (((unsigned int)qh[ib32] << (8 - 2*l)) & 0x300u);
+            const unsigned long long grid64 = qx_iq2s_grid[idx & 1023u];
+            for (int j = 0; j < 8; ++j) {
+                const unsigned char g = (unsigned char)((grid64 >> (8*j)) & 0xffu);
+                out[y + j] = dl * (float)g * ((signs[l] & qx_kmask_iq2xs[j]) ? -1.0f : 1.0f);
+            }
+            y += 8;
+        }
+        qs += 4;
+        signs += 4;
+    }
+    return 1;
+}
+
+static int qx_decode_iq3_s_block(const unsigned char *buf, float out[256]) {
+    const float d = qx_fp16_to_f32(qx_rd_le16(buf));
+    const unsigned char *qs = buf + 2;
+    const unsigned char *qh = buf + 66;
+    const unsigned char *signs = buf + 74;
+    const unsigned char *scales = buf + 106;
+    int y = 0;
+    for (int ib32 = 0; ib32 < 8; ib32 += 2) {
+        const float db1 = d * (1.0f + 2.0f * (float)(scales[ib32/2] & 0x0f));
+        const float db2 = d * (1.0f + 2.0f * (float)(scales[ib32/2] >> 4));
+        for (int l = 0; l < 4; ++l) {
+            const unsigned int idx1 = (unsigned int)qs[2*l+0] | (((unsigned int)qh[0] << (8 - 2*l)) & 256u);
+            const unsigned int idx2 = (unsigned int)qs[2*l+1] | (((unsigned int)qh[0] << (7 - 2*l)) & 256u);
+            const unsigned int grid1 = qx_iq3s_grid[idx1 & 511u];
+            const unsigned int grid2 = qx_iq3s_grid[idx2 & 511u];
+            for (int j = 0; j < 4; ++j) {
+                const unsigned char g1 = (unsigned char)((grid1 >> (8*j)) & 0xffu);
+                const unsigned char g2 = (unsigned char)((grid2 >> (8*j)) & 0xffu);
+                out[y + j + 0] = db1 * (float)g1 * ((signs[l] & qx_kmask_iq2xs[j + 0]) ? -1.0f : 1.0f);
+                out[y + j + 4] = db1 * (float)g2 * ((signs[l] & qx_kmask_iq2xs[j + 4]) ? -1.0f : 1.0f);
+            }
+            y += 8;
+        }
+        qs += 8;
+        signs += 4;
+        for (int l = 0; l < 4; ++l) {
+            const unsigned int idx1 = (unsigned int)qs[2*l+0] | (((unsigned int)qh[1] << (8 - 2*l)) & 256u);
+            const unsigned int idx2 = (unsigned int)qs[2*l+1] | (((unsigned int)qh[1] << (7 - 2*l)) & 256u);
+            const unsigned int grid1 = qx_iq3s_grid[idx1 & 511u];
+            const unsigned int grid2 = qx_iq3s_grid[idx2 & 511u];
+            for (int j = 0; j < 4; ++j) {
+                const unsigned char g1 = (unsigned char)((grid1 >> (8*j)) & 0xffu);
+                const unsigned char g2 = (unsigned char)((grid2 >> (8*j)) & 0xffu);
+                out[y + j + 0] = db2 * (float)g1 * ((signs[l] & qx_kmask_iq2xs[j + 0]) ? -1.0f : 1.0f);
+                out[y + j + 4] = db2 * (float)g2 * ((signs[l] & qx_kmask_iq2xs[j + 4]) ? -1.0f : 1.0f);
+            }
+            y += 8;
+        }
+        qh += 2;
+        qs += 8;
+        signs += 4;
+    }
+    return 1;
+}
+
+static const signed char qx_kvalues_iq4nl[16] = {-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113};
+
+static float qx_deterministic_input(uint32_t *state);
+
+static int qx_decode_iq4_xs_block(const unsigned char *buf, float out[256]) {
+    const float d = qx_fp16_to_f32(qx_rd_le16(buf));
+    const uint16_t scales_h = qx_rd_le16(buf + 2);
+    const unsigned char *scales_l = buf + 4;
+    const unsigned char *qs = buf + 8;
+    int y = 0;
+    for (int ib = 0; ib < 8; ++ib) {
+        const int ls = ((scales_l[ib/2] >> (4*(ib%2))) & 0x0f) | (((scales_h >> (2*ib)) & 3) << 4);
+        const float dl = d * (float)(ls - 32);
+        for (int j = 0; j < 16; ++j) {
+            out[y + j + 0] = dl * (float)qx_kvalues_iq4nl[qs[j] & 0x0f];
+            out[y + j + 16] = dl * (float)qx_kvalues_iq4nl[qs[j] >> 4];
+        }
+        y += 32;
+        qs += 16;
+    }
+    return 1;
+}
+
+static double qx_dot_iq4_xs_prefix(const unsigned char *buf, uint32_t dims, const float *residual, uint32_t residual_n, uint32_t *st) {
+    const float d = qx_fp16_to_f32(qx_rd_le16(buf));
+    const uint16_t scales_h = qx_rd_le16(buf + 2);
+    const unsigned char *scales_l = buf + 4;
+    const unsigned char *qs = buf + 8;
+    if (dims > 256u) dims = 256u;
+    double dot = 0.0;
+    uint32_t y = 0;
+    for (uint32_t ib = 0; ib < 8u && y < dims; ++ib) {
+        const int ls = ((scales_l[ib/2u] >> (4u*(ib%2u))) & 0x0f) | (((scales_h >> (2u*ib)) & 3u) << 4);
+        const float dl = d * (float)(ls - 32);
+        for (uint32_t j = 0; j < 16u && y < dims; ++j, ++y) {
+            double x = (residual && residual_n) ? (double)residual[y % residual_n] : (double)qx_deterministic_input(st);
+            dot += (double)(dl * (float)qx_kvalues_iq4nl[qs[j] & 0x0f]) * x;
+        }
+        for (uint32_t j = 0; j < 16u && y < dims; ++j, ++y) {
+            double x = (residual && residual_n) ? (double)residual[y % residual_n] : (double)qx_deterministic_input(st);
+            dot += (double)(dl * (float)qx_kvalues_iq4nl[qs[j] >> 4]) * x;
+        }
+        qs += 16;
+    }
+    return dot;
+}
+
+static void qx_get_scale_min_k4(int j, const unsigned char *q, unsigned char *d, unsigned char *m) {
+    if (j < 4) {
+        *d = q[j] & 63u;
+        *m = q[j + 4] & 63u;
+    } else {
+        *d = (q[j + 4] & 0x0fu) | ((q[j - 4] >> 6) << 4);
+        *m = (q[j + 4] >> 4) | ((q[j] >> 6) << 4);
+    }
+}
+
+static int qx_decode_q4_k_block(const unsigned char *buf, float out[256]) {
+    const float d = qx_fp16_to_f32(qx_rd_le16(buf));
+    const float dmin = qx_fp16_to_f32(qx_rd_le16(buf + 2));
+    const unsigned char *scales = buf + 4;
+    const unsigned char *q = buf + 16;
+    int y = 0;
+    int is = 0;
+    for (int j = 0; j < 256; j += 64) {
+        unsigned char sc = 0, m = 0;
+        qx_get_scale_min_k4(is + 0, scales, &sc, &m);
+        const float d1 = d * (float)sc;
+        const float m1 = dmin * (float)m;
+        qx_get_scale_min_k4(is + 1, scales, &sc, &m);
+        const float d2 = d * (float)sc;
+        const float m2 = dmin * (float)m;
+        for (int l = 0; l < 32; ++l) out[y++] = d1 * (float)(q[l] & 0x0f) - m1;
+        for (int l = 0; l < 32; ++l) out[y++] = d2 * (float)(q[l] >> 4) - m2;
+        q += 32;
+        is += 2;
+    }
+    return 1;
+}
+
+static int qx_decode_q5_k_block(const unsigned char *buf, float out[256]) {
+    const float d = qx_fp16_to_f32(qx_rd_le16(buf));
+    const float dmin = qx_fp16_to_f32(qx_rd_le16(buf + 2));
+    const unsigned char *scales = buf + 4;
+    const unsigned char *qh = buf + 16;
+    const unsigned char *q = buf + 48;
+    int y = 0;
+    int is = 0;
+    for (int j = 0; j < 256; j += 64) {
+        unsigned char sc = 0, m = 0;
+        qx_get_scale_min_k4(is + 0, scales, &sc, &m);
+        const float d1 = d * (float)sc;
+        const float m1 = dmin * (float)m;
+        qx_get_scale_min_k4(is + 1, scales, &sc, &m);
+        const float d2 = d * (float)sc;
+        const float m2 = dmin * (float)m;
+        for (int l = 0; l < 32; ++l) {
+            int idx = j + l;
+            int hi = (qh[idx >> 3] >> (idx & 7)) & 1;
+            out[y++] = d1 * (float)((q[l] & 0x0f) | (hi << 4)) - m1;
+        }
+        for (int l = 0; l < 32; ++l) {
+            int idx = j + 32 + l;
+            int hi = (qh[idx >> 3] >> (idx & 7)) & 1;
+            out[y++] = d2 * (float)((q[l] >> 4) | (hi << 4)) - m2;
+        }
+        q += 32;
+        is += 2;
+    }
+    return 1;
+}
+
+static int qx_decode_q6_k_block(const unsigned char *buf, float out[256]) {
+    const unsigned char *ql = buf;
+    const unsigned char *qh = buf + 128;
+    const signed char *scales = (const signed char *)(buf + 192);
+    const float d = qx_fp16_to_f32(qx_rd_le16(buf + 208));
+    int y = 0;
+    for (int group = 0; group < 16; ++group) {
+        const int base = group * 16;
+        const float scale = d * (float)scales[group];
+        for (int j = 0; j < 16; ++j) {
+            const int idx = base + j;
+            const unsigned char lo = (idx < 128) ? (ql[idx] & 0x0fu) : (ql[idx - 128] >> 4);
+            const unsigned char hb = qh[idx >> 2];
+            const unsigned char hi = (hb >> (2 * (idx & 3))) & 0x03u;
+            const int q = (int)(lo | (hi << 4)) - 32;
+            out[y++] = scale * (float)q;
+        }
+    }
+    return 1;
+}
+
+static int qx_decoder_info(uint32_t ggml_type, const char **decoder, uint64_t *block_size) {
+    if (ggml_type == 12u) { if (decoder) *decoder = "Q4_K"; if (block_size) *block_size = 144; return 1; }
+    if (ggml_type == 13u) { if (decoder) *decoder = "Q5_K"; if (block_size) *block_size = 176; return 1; }
+    if (ggml_type == 14u) { if (decoder) *decoder = "Q6_K"; if (block_size) *block_size = 210; return 1; }
+    if (ggml_type == 17u) { if (decoder) *decoder = "IQ2_XS"; if (block_size) *block_size = 74; return 1; }
+    if (ggml_type == 18u) { if (decoder) *decoder = "IQ3_XXS"; if (block_size) *block_size = 98; return 1; }
+    if (ggml_type == 21u) { if (decoder) *decoder = "IQ3_S"; if (block_size) *block_size = 110; return 1; }
+    if (ggml_type == 22u) { if (decoder) *decoder = "IQ2_S"; if (block_size) *block_size = 82; return 1; }
+    if (ggml_type == 23u) { if (decoder) *decoder = "IQ4_XS"; if (block_size) *block_size = 136; return 1; }
+    return 0;
+}
+
+static int qx_decode_supported_block(uint32_t ggml_type, const unsigned char *buf, float out[256]) {
+    if (ggml_type == 12u) return qx_decode_q4_k_block(buf, out);
+    if (ggml_type == 13u) return qx_decode_q5_k_block(buf, out);
+    if (ggml_type == 14u) return qx_decode_q6_k_block(buf, out);
+    if (ggml_type == 17u) return qx_decode_iq2_xs_block(buf, out);
+    if (ggml_type == 18u) return qx_decode_iq3_xxs_block(buf, out);
+    if (ggml_type == 21u) return qx_decode_iq3_s_block(buf, out);
+    if (ggml_type == 22u) return qx_decode_iq2_s_block(buf, out);
+    if (ggml_type == 23u) return qx_decode_iq4_xs_block(buf, out);
+    return 0;
+}
+
+int qx_dump_decode_block_summary(const char *path, const char *name, uint64_t block_index, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "tensor not found"); return 0; }
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!qx_decoder_info(t->flags, &decoder, &block_size)) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported GGML type for decode-block"); return 0; }
+    uint64_t block_count = t->byte_size / block_size;
+    if (block_index >= block_count) { qx_close_file(&file); qx_set_err(err, err_len, "block out of range"); return 0; }
+    uint64_t block_offset = t->offset + block_index * block_size;
+    unsigned char *buf = NULL;
+    if (!qx_read_raw_span(&file, block_offset, block_size, &buf, err, err_len)) { qx_close_file(&file); return 0; }
+    float vals[256];
+    qx_decode_supported_block(t->flags, buf, vals);
+    double sum = 0.0;
+    float minv = vals[0], maxv = vals[0];
+    for (int i = 0; i < 256; ++i) {
+        sum += vals[i];
+        if (vals[i] < minv) minv = vals[i];
+        if (vals[i] > maxv) maxv = vals[i];
+    }
+    uint64_t raw_checksum = qx_fnv1a64(buf, block_size);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"tensor\": \"%s\",\n", t->name);
+    fprintf(out, "  \"ggml_type\": %u,\n", t->flags);
+    fprintf(out, "  \"decoder\": \"%s\",\n", decoder);
+    fprintf(out, "  \"decoded\": true,\n");
+    fprintf(out, "  \"block_index\": %llu,\n", (unsigned long long)block_index);
+    fprintf(out, "  \"block_offset\": %llu,\n", (unsigned long long)block_offset);
+    fprintf(out, "  \"block_byte_size\": %llu,\n", (unsigned long long)block_size);
+    fprintf(out, "  \"values\": 256,\n");
+    fprintf(out, "  \"sum\": %.9g,\n", sum);
+    fprintf(out, "  \"min\": %.9g,\n", (double)minv);
+    fprintf(out, "  \"max\": %.9g,\n", (double)maxv);
+    fprintf(out, "  \"raw_checksum\": %llu,\n", (unsigned long long)raw_checksum);
+    fprintf(out, "  \"first8\": [");
+    for (int i = 0; i < 8; ++i) fprintf(out, "%s%.9g", i ? ", " : "", (double)vals[i]);
+    fprintf(out, "]\n");
+    fprintf(out, "}\n");
+    free(buf);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static float qx_deterministic_input(uint32_t *state) {
+    *state = (*state * 1664525u) + 1013904223u;
+    int v = (int)((*state >> 16) & 0xffffu) - 32768;
+    return (float)v / 32768.0f;
+}
+
+int qx_dump_block_dot_summary(const char *path, const char *name, uint64_t block_index, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "tensor not found"); return 0; }
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!qx_decoder_info(t->flags, &decoder, &block_size)) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported GGML type for block-dot"); return 0; }
+    uint64_t block_count = t->byte_size / block_size;
+    if (block_index >= block_count) { qx_close_file(&file); qx_set_err(err, err_len, "block out of range"); return 0; }
+    uint64_t block_offset = t->offset + block_index * block_size;
+    unsigned char *buf = NULL;
+    if (!qx_read_raw_span(&file, block_offset, block_size, &buf, err, err_len)) { qx_close_file(&file); return 0; }
+    float weights[256];
+    qx_decode_supported_block(t->flags, buf, weights);
+    uint32_t state = seed ? seed : 1u;
+    double dot = 0.0;
+    double input_sum = 0.0;
+    double weight_sum = 0.0;
+    for (int i = 0; i < 256; ++i) {
+        float x = qx_deterministic_input(&state);
+        dot += (double)weights[i] * (double)x;
+        input_sum += (double)x;
+        weight_sum += (double)weights[i];
+    }
+    uint64_t raw_checksum = qx_fnv1a64(buf, block_size);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"tensor\": \"%s\",\n", t->name);
+    fprintf(out, "  \"ggml_type\": %u,\n", t->flags);
+    fprintf(out, "  \"decoder\": \"%s\",\n", decoder);
+    fprintf(out, "  \"block_index\": %llu,\n", (unsigned long long)block_index);
+    fprintf(out, "  \"block_offset\": %llu,\n", (unsigned long long)block_offset);
+    fprintf(out, "  \"block_byte_size\": %llu,\n", (unsigned long long)block_size);
+    fprintf(out, "  \"values\": 256,\n");
+    fprintf(out, "  \"input_seed\": %u,\n", seed);
+    fprintf(out, "  \"input_kind\": \"deterministic_lcg_unit\",\n");
+    fprintf(out, "  \"dot\": %.9g,\n", dot);
+    fprintf(out, "  \"input_sum\": %.9g,\n", input_sum);
+    fprintf(out, "  \"weight_sum\": %.9g,\n", weight_sum);
+    fprintf(out, "  \"raw_checksum\": %llu\n", (unsigned long long)raw_checksum);
+    fprintf(out, "}\n");
+    free(buf);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+int qx_dump_matvec_row_summary(const char *path, const char *name, uint64_t start_block, uint32_t blocks, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "tensor not found"); return 0; }
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!qx_decoder_info(t->flags, &decoder, &block_size)) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported GGML type for matvec-row"); return 0; }
+    uint64_t block_count = t->byte_size / block_size;
+    if (start_block >= block_count || (uint64_t)blocks > block_count - start_block) {
+        qx_close_file(&file); qx_set_err(err, err_len, "block range out of range"); return 0;
+    }
+    uint64_t span = (uint64_t)blocks * block_size;
+    uint64_t start_offset = t->offset + start_block * block_size;
+    unsigned char *buf = NULL;
+    if (!qx_read_raw_span(&file, start_offset, span, &buf, err, err_len)) { qx_close_file(&file); return 0; }
+    uint32_t state = seed ? seed : 1u;
+    double dot = 0.0;
+    double input_sum = 0.0;
+    double weight_sum = 0.0;
+    uint64_t checksum_mix = 1469598103934665603ull;
+    for (uint32_t b = 0; b < blocks; ++b) {
+        const unsigned char *block = buf + (uint64_t)b * block_size;
+        float weights[256];
+        qx_decode_supported_block(t->flags, block, weights);
+        checksum_mix ^= qx_fnv1a64(block, block_size);
+        checksum_mix *= 1099511628211ull;
+        for (int i = 0; i < 256; ++i) {
+            float x = qx_deterministic_input(&state);
+            dot += (double)weights[i] * (double)x;
+            input_sum += (double)x;
+            weight_sum += (double)weights[i];
+        }
+    }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"tensor\": \"%s\",\n", t->name);
+    fprintf(out, "  \"ggml_type\": %u,\n", t->flags);
+    fprintf(out, "  \"decoder\": \"%s\",\n", decoder);
+    fprintf(out, "  \"start_block\": %llu,\n", (unsigned long long)start_block);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"block_byte_size\": %llu,\n", (unsigned long long)block_size);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)blocks * 256ull);
+    fprintf(out, "  \"bytes_read\": %llu,\n", (unsigned long long)span);
+    fprintf(out, "  \"input_seed\": %u,\n", seed);
+    fprintf(out, "  \"input_kind\": \"deterministic_lcg_unit\",\n");
+    fprintf(out, "  \"dot\": %.9g,\n", dot);
+    fprintf(out, "  \"input_sum\": %.9g,\n", input_sum);
+    fprintf(out, "  \"weight_sum\": %.9g,\n", weight_sum);
+    fprintf(out, "  \"checksum_mix\": %llu\n", (unsigned long long)checksum_mix);
+    fprintf(out, "}\n");
+    free(buf);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+int qx_dump_expert_row_summary(const char *path, uint32_t layer, uint32_t expert, const char *kind, uint64_t start_block, uint32_t blocks, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!qx_kind_valid(kind)) { qx_set_err(err, err_len, "invalid expert kind"); return 0; }
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) {
+        qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0;
+    }
+    if (layer >= file.header.manifest.layers || expert >= file.header.manifest.experts) {
+        qx_close_file(&file); qx_set_err(err, err_len, "expert address out of range"); return 0;
+    }
+    char name[QX_NAME_MAX];
+    qx_expert_packed_tensor_name(name, sizeof(name), layer, kind);
+    const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
+    if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "packed expert tensor not found"); return 0; }
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!qx_decoder_info(t->flags, &decoder, &block_size)) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported GGML type for expert-row"); return 0; }
+    uint64_t slice_bytes = t->byte_size / file.header.manifest.experts;
+    uint64_t remainder = t->byte_size % file.header.manifest.experts;
+    if (remainder != 0) { qx_close_file(&file); qx_set_err(err, err_len, "packed expert tensor not evenly divisible"); return 0; }
+    uint64_t slice_offset = t->offset + slice_bytes * expert;
+    uint64_t slice_block_count = slice_bytes / block_size;
+    uint64_t slice_block_remainder = slice_bytes % block_size;
+    if (start_block >= slice_block_count || (uint64_t)blocks > slice_block_count - start_block) {
+        qx_close_file(&file); qx_set_err(err, err_len, "expert row block range out of range"); return 0;
+    }
+    uint64_t span = (uint64_t)blocks * block_size;
+    uint64_t start_offset = slice_offset + start_block * block_size;
+    unsigned char *buf = NULL;
+    if (!qx_read_raw_span(&file, start_offset, span, &buf, err, err_len)) { qx_close_file(&file); return 0; }
+    uint32_t state = seed ? seed : 1u;
+    double dot = 0.0;
+    double input_sum = 0.0;
+    double weight_sum = 0.0;
+    uint64_t checksum_mix = 1469598103934665603ull;
+    for (uint32_t b = 0; b < blocks; ++b) {
+        const unsigned char *block = buf + (uint64_t)b * block_size;
+        float weights[256];
+        qx_decode_supported_block(t->flags, block, weights);
+        checksum_mix ^= qx_fnv1a64(block, block_size);
+        checksum_mix *= 1099511628211ull;
+        for (int i = 0; i < 256; ++i) {
+            float x = qx_deterministic_input(&state);
+            dot += (double)weights[i] * (double)x;
+            input_sum += (double)x;
+            weight_sum += (double)weights[i];
+        }
+    }
+    uint64_t absolute_start_block = (start_offset - t->offset) / block_size;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"expert\": %u,\n", expert);
+    fprintf(out, "  \"kind\": \"%s\",\n", kind);
+    fprintf(out, "  \"tensor\": \"%s\",\n", t->name);
+    fprintf(out, "  \"ggml_type\": %u,\n", t->flags);
+    fprintf(out, "  \"decoder\": \"%s\",\n", decoder);
+    fprintf(out, "  \"slice_offset\": %llu,\n", (unsigned long long)slice_offset);
+    fprintf(out, "  \"slice_byte_size\": %llu,\n", (unsigned long long)slice_bytes);
+    fprintf(out, "  \"slice_block_count\": %llu,\n", (unsigned long long)slice_block_count);
+    fprintf(out, "  \"slice_block_remainder\": %llu,\n", (unsigned long long)slice_block_remainder);
+    fprintf(out, "  \"slice_start_block\": %llu,\n", (unsigned long long)start_block);
+    fprintf(out, "  \"absolute_start_block\": %llu,\n", (unsigned long long)absolute_start_block);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"block_byte_size\": %llu,\n", (unsigned long long)block_size);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)blocks * 256ull);
+    fprintf(out, "  \"bytes_read\": %llu,\n", (unsigned long long)span);
+    fprintf(out, "  \"input_seed\": %u,\n", seed);
+    fprintf(out, "  \"input_kind\": \"deterministic_lcg_unit\",\n");
+    fprintf(out, "  \"dot\": %.9g,\n", dot);
+    fprintf(out, "  \"input_sum\": %.9g,\n", input_sum);
+    fprintf(out, "  \"weight_sum\": %.9g,\n", weight_sum);
+    fprintf(out, "  \"checksum_mix\": %llu\n", (unsigned long long)checksum_mix);
+    fprintf(out, "}\n");
+    free(buf);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static int qx_expert_row_dot_calc(qx_file *file, uint32_t layer, uint32_t expert, const char *kind,
+                                  uint64_t start_block, uint32_t blocks, uint32_t seed,
+                                  double *dot, double *input_sum, double *weight_sum,
+                                  const char **decoder, uint32_t *ggml_type, uint64_t *slice_offset,
+                                  uint64_t *slice_bytes, uint64_t *block_size_out, uint64_t *checksum_mix,
+                                  char *err, uint64_t err_len) {
+    if (!qx_kind_valid(kind)) { qx_set_err(err, err_len, "invalid expert kind"); return 0; }
+    if (file->header.manifest.model_type != QX_MODEL_QWEN3_MOE) { qx_set_err(err, err_len, "not a MoE QXF"); return 0; }
+    if (layer >= file->header.manifest.layers || expert >= file->header.manifest.experts) { qx_set_err(err, err_len, "expert address out of range"); return 0; }
+    char name[QX_NAME_MAX];
+    qx_expert_packed_tensor_name(name, sizeof(name), layer, kind);
+    const qx_tensor_dir_entry *t = qx_find_tensor(file, name);
+    if (!t) { qx_set_err(err, err_len, "packed expert tensor not found"); return 0; }
+    const char *dec = NULL;
+    uint64_t block_size = 0;
+    if (!qx_decoder_info(t->flags, &dec, &block_size)) { qx_set_err(err, err_len, "unsupported GGML type for expert forward probe"); return 0; }
+    uint64_t sbytes = t->byte_size / file->header.manifest.experts;
+    if (t->byte_size % file->header.manifest.experts != 0) { qx_set_err(err, err_len, "packed expert tensor not evenly divisible"); return 0; }
+    uint64_t sbcount = sbytes / block_size;
+    if (start_block >= sbcount || (uint64_t)blocks > sbcount - start_block) { qx_set_err(err, err_len, "expert row block range out of range"); return 0; }
+    uint64_t soff = t->offset + sbytes * expert;
+    uint64_t span = (uint64_t)blocks * block_size;
+    uint64_t start_offset = soff + start_block * block_size;
+    unsigned char *buf = NULL;
+    if (!qx_read_raw_span(file, start_offset, span, &buf, err, err_len)) return 0;
+    uint32_t state = seed ? seed : 1u;
+    double d = 0.0, isum = 0.0, wsum = 0.0;
+    uint64_t mix = 1469598103934665603ull;
+    for (uint32_t b = 0; b < blocks; ++b) {
+        const unsigned char *block = buf + (uint64_t)b * block_size;
+        float weights[256];
+        qx_decode_supported_block(t->flags, block, weights);
+        mix ^= qx_fnv1a64(block, block_size);
+        mix *= 1099511628211ull;
+        for (int i = 0; i < 256; ++i) {
+            float x = qx_deterministic_input(&state);
+            d += (double)weights[i] * (double)x;
+            isum += (double)x;
+            wsum += (double)weights[i];
+        }
+    }
+    free(buf);
+    if (dot) *dot = d;
+    if (input_sum) *input_sum = isum;
+    if (weight_sum) *weight_sum = wsum;
+    if (decoder) *decoder = dec;
+    if (ggml_type) *ggml_type = t->flags;
+    if (slice_offset) *slice_offset = soff;
+    if (slice_bytes) *slice_bytes = sbytes;
+    if (block_size_out) *block_size_out = block_size;
+    if (checksum_mix) *checksum_mix = mix;
+    return 1;
+}
+
+static double qx_silu(double x) {
+    return x / (1.0 + exp(-x));
+}
+
+int qx_dump_expert_forward_probe_summary(const char *path, uint32_t layer, uint32_t expert, uint64_t start_block, uint32_t blocks, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    double gate_dot = 0.0, up_dot = 0.0, down_dot = 0.0;
+    double gate_input_sum = 0.0, up_input_sum = 0.0, down_input_sum = 0.0;
+    double gate_weight_sum = 0.0, up_weight_sum = 0.0, down_weight_sum = 0.0;
+    const char *gate_decoder = NULL, *up_decoder = NULL, *down_decoder = NULL;
+    uint32_t gate_type = 0, up_type = 0, down_type = 0;
+    uint64_t gate_soff = 0, up_soff = 0, down_soff = 0;
+    uint64_t gate_sbytes = 0, up_sbytes = 0, down_sbytes = 0;
+    uint64_t gate_bsize = 0, up_bsize = 0, down_bsize = 0;
+    uint64_t gate_mix = 0, up_mix = 0, down_mix = 0;
+    if (!qx_expert_row_dot_calc(&file, layer, expert, "gate", start_block, blocks, seed, &gate_dot, &gate_input_sum, &gate_weight_sum, &gate_decoder, &gate_type, &gate_soff, &gate_sbytes, &gate_bsize, &gate_mix, err, err_len) ||
+        !qx_expert_row_dot_calc(&file, layer, expert, "up", start_block, blocks, seed, &up_dot, &up_input_sum, &up_weight_sum, &up_decoder, &up_type, &up_soff, &up_sbytes, &up_bsize, &up_mix, err, err_len) ||
+        !qx_expert_row_dot_calc(&file, layer, expert, "down", start_block, blocks, seed, &down_dot, &down_input_sum, &down_weight_sum, &down_decoder, &down_type, &down_soff, &down_sbytes, &down_bsize, &down_mix, err, err_len)) {
+        qx_close_file(&file); return 0;
+    }
+    double gate_act = qx_silu(gate_dot);
+    double hidden_probe = gate_act * up_dot;
+    double projected_probe = hidden_probe * down_dot;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"expert_forward\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"expert\": %u,\n", expert);
+    fprintf(out, "  \"start_block\": %llu,\n", (unsigned long long)start_block);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)blocks * 256ull);
+    fprintf(out, "  \"input_seed\": %u,\n", seed);
+    fprintf(out, "  \"gate_decoder\": \"%s\",\n", gate_decoder);
+    fprintf(out, "  \"up_decoder\": \"%s\",\n", up_decoder);
+    fprintf(out, "  \"down_decoder\": \"%s\",\n", down_decoder);
+    fprintf(out, "  \"gate_ggml_type\": %u,\n", gate_type);
+    fprintf(out, "  \"up_ggml_type\": %u,\n", up_type);
+    fprintf(out, "  \"down_ggml_type\": %u,\n", down_type);
+    fprintf(out, "  \"gate_dot\": %.9g,\n", gate_dot);
+    fprintf(out, "  \"up_dot\": %.9g,\n", up_dot);
+    fprintf(out, "  \"down_dot\": %.9g,\n", down_dot);
+    fprintf(out, "  \"gate_silu\": %.9g,\n", gate_act);
+    fprintf(out, "  \"hidden_probe\": %.9g,\n", hidden_probe);
+    fprintf(out, "  \"projected_probe\": %.9g,\n", projected_probe);
+    fprintf(out, "  \"gate_slice_offset\": %llu,\n", (unsigned long long)gate_soff);
+    fprintf(out, "  \"up_slice_offset\": %llu,\n", (unsigned long long)up_soff);
+    fprintf(out, "  \"down_slice_offset\": %llu,\n", (unsigned long long)down_soff);
+    fprintf(out, "  \"gate_checksum_mix\": %llu,\n", (unsigned long long)gate_mix);
+    fprintf(out, "  \"up_checksum_mix\": %llu,\n", (unsigned long long)up_mix);
+    fprintf(out, "  \"down_checksum_mix\": %llu\n", (unsigned long long)down_mix);
+    fprintf(out, "}\n");
+    (void)gate_input_sum; (void)up_input_sum; (void)down_input_sum;
+    (void)gate_weight_sum; (void)up_weight_sum; (void)down_weight_sum;
+    (void)gate_sbytes; (void)up_sbytes; (void)down_sbytes;
+    (void)gate_bsize; (void)up_bsize; (void)down_bsize;
+    qx_close_file(&file);
+    return 1;
+}
+
+
+static float qx_rd_le_f32(const unsigned char *p) {
+    uint32_t bits = qx_rd_le32(p);
+    float f;
+    memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+
+int qx_dump_router_topk_probe_summary(const char *path, uint32_t layer, uint32_t top_k, uint32_t blocks, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (top_k == 0) top_k = 1;
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) { qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0; }
+    if (layer >= file.header.manifest.layers) { qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0; }
+    char name[QX_NAME_MAX];
+    snprintf(name, sizeof(name), "blk.%u.ffn_gate_inp.weight", layer);
+    const qx_tensor_dir_entry *router = qx_find_tensor(&file, name);
+    if (!router) { qx_close_file(&file); qx_set_err(err, err_len, "router tensor not found"); return 0; }
+    if (router->flags != 0u) { qx_close_file(&file); qx_set_err(err, err_len, "router-topk-probe supports F32 router only"); return 0; }
+    uint32_t hidden = router->rank > 0 ? (uint32_t)router->dims[0] : file.header.manifest.hidden;
+    uint32_t experts = router->rank > 1 ? (uint32_t)router->dims[1] : file.header.manifest.experts;
+    if (experts == 0 || hidden == 0) { qx_close_file(&file); qx_set_err(err, err_len, "bad router dimensions"); return 0; }
+    if (top_k > experts) top_k = experts;
+    uint64_t values = (uint64_t)blocks * 256ull;
+    if (values > hidden) values = hidden;
+    uint64_t row_bytes = (uint64_t)hidden * 4ull;
+    if (router->byte_size < row_bytes * experts) { qx_close_file(&file); qx_set_err(err, err_len, "router tensor too small for F32 rows"); return 0; }
+    double *logits = (double *)calloc(experts, sizeof(double));
+    int *picked = (int *)calloc(experts, sizeof(int));
+    uint32_t *selected = (uint32_t *)calloc(top_k, sizeof(uint32_t));
+    if (!logits || !picked || !selected) { free(logits); free(picked); free(selected); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint64_t bytes_read = 0;
+    uint64_t checksum_mix = 1469598103934665603ull;
+    for (uint32_t e = 0; e < experts; ++e) {
+        uint64_t off = router->offset + (uint64_t)e * row_bytes;
+        unsigned char *buf = NULL;
+        uint64_t span = values * 4ull;
+        if (!qx_read_raw_span(&file, off, span, &buf, err, err_len)) { free(logits); free(picked); free(selected); qx_close_file(&file); return 0; }
+        uint32_t state = seed ? seed : 1u;
+        double dot = 0.0;
+        for (uint64_t i = 0; i < values; ++i) {
+            float w = qx_rd_le_f32(buf + i*4ull);
+            float x = qx_deterministic_input(&state);
+            dot += (double)w * (double)x;
+        }
+        logits[e] = dot;
+        checksum_mix ^= qx_fnv1a64(buf, span);
+        checksum_mix *= 1099511628211ull;
+        bytes_read += span;
+        free(buf);
+    }
+    for (uint32_t k = 0; k < top_k; ++k) {
+        uint32_t best = 0;
+        double best_logit = -1.0e300;
+        for (uint32_t e = 0; e < experts; ++e) {
+            if (!picked[e] && logits[e] > best_logit) { best = e; best_logit = logits[e]; }
+        }
+        selected[k] = best;
+        picked[best] = 1;
+    }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"router_topk\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"router_tensor\": \"%s\",\n", router->name);
+    fprintf(out, "  \"router_kernel\": \"F32_PREFIX_DOT\",\n");
+    fprintf(out, "  \"router_ggml_type\": %u,\n", router->flags);
+    fprintf(out, "  \"experts\": %u,\n", experts);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)values);
+    fprintf(out, "  \"input_seed\": %u,\n", seed);
+    fprintf(out, "  \"bytes_read\": %llu,\n", (unsigned long long)bytes_read);
+    fprintf(out, "  \"checksum_mix\": %llu,\n", (unsigned long long)checksum_mix);
+    fprintf(out, "  \"selected_experts\": [\n");
+    for (uint32_t k = 0; k < top_k; ++k) {
+        uint32_t e = selected[k];
+        double gate_dot = 0.0, up_dot = 0.0, down_dot = 0.0;
+        const char *dec = NULL;
+        uint32_t typ = 0;
+        uint64_t dummy64 = 0, mix = 0;
+        if (!qx_expert_row_dot_calc(&file, layer, e, "gate", 0, blocks, seed, &gate_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len) ||
+            !qx_expert_row_dot_calc(&file, layer, e, "up", 0, blocks, seed, &up_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len) ||
+            !qx_expert_row_dot_calc(&file, layer, e, "down", 0, blocks, seed, &down_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len)) {
+            free(logits); free(picked); free(selected); qx_close_file(&file); return 0;
+        }
+        double hidden_probe = qx_silu(gate_dot) * up_dot;
+        double projected_probe = hidden_probe * down_dot;
+        fprintf(out, "    {\"rank\": %u, \"expert\": %u, \"logit\": %.9g, \"gate_dot\": %.9g, \"up_dot\": %.9g, \"down_dot\": %.9g, \"projected_probe\": %.9g}%s\n",
+            k, e, logits[e], gate_dot, up_dot, down_dot, projected_probe, (k + 1 < top_k) ? "," : "");
+    }
+    fprintf(out, "  ]\n");
+    fprintf(out, "}\n");
+    free(logits); free(picked); free(selected);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+int qx_dump_layer_forward_probe_summary(const char *path, uint32_t layer, uint32_t top_k, uint32_t blocks, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (top_k == 0) top_k = 1;
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) { qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0; }
+    if (layer >= file.header.manifest.layers) { qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0; }
+    char name[QX_NAME_MAX];
+    snprintf(name, sizeof(name), "blk.%u.ffn_gate_inp.weight", layer);
+    const qx_tensor_dir_entry *router = qx_find_tensor(&file, name);
+    if (!router) { qx_close_file(&file); qx_set_err(err, err_len, "router tensor not found"); return 0; }
+    if (router->flags != 0u) { qx_close_file(&file); qx_set_err(err, err_len, "layer-forward-probe supports F32 router only"); return 0; }
+    uint32_t hidden = router->rank > 0 ? (uint32_t)router->dims[0] : file.header.manifest.hidden;
+    uint32_t experts = router->rank > 1 ? (uint32_t)router->dims[1] : file.header.manifest.experts;
+    if (experts == 0 || hidden == 0) { qx_close_file(&file); qx_set_err(err, err_len, "bad router dimensions"); return 0; }
+    if (top_k > experts) top_k = experts;
+    uint64_t values = (uint64_t)blocks * 256ull;
+    if (values > hidden) values = hidden;
+    uint64_t row_bytes = (uint64_t)hidden * 4ull;
+    if (router->byte_size < row_bytes * experts) { qx_close_file(&file); qx_set_err(err, err_len, "router tensor too small for F32 rows"); return 0; }
+    double *logits = (double *)calloc(experts, sizeof(double));
+    int *picked = (int *)calloc(experts, sizeof(int));
+    uint32_t *selected = (uint32_t *)calloc(top_k, sizeof(uint32_t));
+    if (!logits || !picked || !selected) { free(logits); free(picked); free(selected); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint64_t bytes_read = 0;
+    uint64_t checksum_mix = 1469598103934665603ull;
+    for (uint32_t e = 0; e < experts; ++e) {
+        unsigned char *buf = NULL;
+        uint64_t span = values * 4ull;
+        uint64_t off = router->offset + (uint64_t)e * row_bytes;
+        if (!qx_read_raw_span(&file, off, span, &buf, err, err_len)) { free(logits); free(picked); free(selected); qx_close_file(&file); return 0; }
+        uint32_t state = seed ? seed : 1u;
+        double dot = 0.0;
+        for (uint64_t i = 0; i < values; ++i) {
+            dot += (double)qx_rd_le_f32(buf + i*4ull) * (double)qx_deterministic_input(&state);
+        }
+        logits[e] = dot;
+        checksum_mix ^= qx_fnv1a64(buf, span);
+        checksum_mix *= 1099511628211ull;
+        bytes_read += span;
+        free(buf);
+    }
+    for (uint32_t k = 0; k < top_k; ++k) {
+        uint32_t best = 0;
+        double best_logit = -1.0e300;
+        for (uint32_t e = 0; e < experts; ++e) {
+            if (!picked[e] && logits[e] > best_logit) { best = e; best_logit = logits[e]; }
+        }
+        selected[k] = best;
+        picked[best] = 1;
+    }
+    double expert_outputs_sum = 0.0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"layer_forward\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"router_tensor\": \"%s\",\n", router->name);
+    fprintf(out, "  \"router_kernel\": \"F32_PREFIX_DOT\",\n");
+    fprintf(out, "  \"experts\": %u,\n", experts);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)values);
+    fprintf(out, "  \"input_seed\": %u,\n", seed);
+    fprintf(out, "  \"router_bytes_read\": %llu,\n", (unsigned long long)bytes_read);
+    fprintf(out, "  \"router_checksum_mix\": %llu,\n", (unsigned long long)checksum_mix);
+    fprintf(out, "  \"selected_experts\": [\n");
+    for (uint32_t k = 0; k < top_k; ++k) {
+        uint32_t e = selected[k];
+        double gate_dot = 0.0, up_dot = 0.0, down_dot = 0.0;
+        const char *dec = NULL;
+        uint32_t typ = 0;
+        uint64_t dummy64 = 0, mix = 0;
+        if (!qx_expert_row_dot_calc(&file, layer, e, "gate", 0, blocks, seed, &gate_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len) ||
+            !qx_expert_row_dot_calc(&file, layer, e, "up", 0, blocks, seed, &up_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len) ||
+            !qx_expert_row_dot_calc(&file, layer, e, "down", 0, blocks, seed, &down_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len)) {
+            free(logits); free(picked); free(selected); qx_close_file(&file); return 0;
+        }
+        double hidden_probe = qx_silu(gate_dot) * up_dot;
+        double projected_probe = hidden_probe * down_dot;
+        expert_outputs_sum += projected_probe;
+        fprintf(out, "    {\"rank\": %u, \"expert\": %u, \"logit\": %.9g, \"gate_dot\": %.9g, \"up_dot\": %.9g, \"down_dot\": %.9g, \"projected_probe\": %.9g}%s\n",
+            k, e, logits[e], gate_dot, up_dot, down_dot, projected_probe, (k + 1 < top_k) ? "," : "");
+    }
+    fprintf(out, "  ],\n");
+    fprintf(out, "  \"expert_outputs_sum\": %.9g,\n", expert_outputs_sum);
+    fprintf(out, "  \"layer_output_probe\": %.9g\n", expert_outputs_sum);
+    fprintf(out, "}\n");
+    free(logits); free(picked); free(selected);
+    qx_close_file(&file);
+    return 1;
+}
+
+
+int qx_dump_moe_forward_probe_summary(const char *path, uint32_t layers, uint32_t top_k, uint32_t blocks, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (layers == 0) layers = 1;
+    if (top_k == 0) top_k = 1;
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) { qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0; }
+    uint32_t max_layers = file.header.manifest.layers;
+    if (layers > max_layers) layers = max_layers;
+    double moe_output = 0.0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"moe_forward\",\n");
+    fprintf(out, "  \"layers_requested\": %u,\n", layers);
+    fprintf(out, "  \"layers_run\": %u,\n", layers);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"input_seed\": %u,\n", seed);
+    fprintf(out, "  \"layers\": [\n");
+    for (uint32_t layer = 0; layer < layers; ++layer) {
+        char name[QX_NAME_MAX];
+        snprintf(name, sizeof(name), "blk.%u.ffn_gate_inp.weight", layer);
+        const qx_tensor_dir_entry *router = qx_find_tensor(&file, name);
+        if (!router) { qx_close_file(&file); qx_set_err(err, err_len, "router tensor not found for requested layer"); return 0; }
+        if (router->flags != 0u) { qx_close_file(&file); qx_set_err(err, err_len, "moe-forward-probe supports F32 router only"); return 0; }
+        uint32_t hidden = router->rank > 0 ? (uint32_t)router->dims[0] : file.header.manifest.hidden;
+        uint32_t experts = router->rank > 1 ? (uint32_t)router->dims[1] : file.header.manifest.experts;
+        if (experts == 0 || hidden == 0) { qx_close_file(&file); qx_set_err(err, err_len, "bad router dimensions"); return 0; }
+        uint32_t k_eff = top_k > experts ? experts : top_k;
+        uint64_t values = (uint64_t)blocks * 256ull;
+        if (values > hidden) values = hidden;
+        uint64_t row_bytes = (uint64_t)hidden * 4ull;
+        if (router->byte_size < row_bytes * experts) { qx_close_file(&file); qx_set_err(err, err_len, "router tensor too small for F32 rows"); return 0; }
+        double *logits = (double *)calloc(experts, sizeof(double));
+        int *picked = (int *)calloc(experts, sizeof(int));
+        uint32_t *selected = (uint32_t *)calloc(k_eff, sizeof(uint32_t));
+        if (!logits || !picked || !selected) { free(logits); free(picked); free(selected); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+        for (uint32_t e = 0; e < experts; ++e) {
+            unsigned char *buf = NULL;
+            uint64_t span = values * 4ull;
+            uint64_t off = router->offset + (uint64_t)e * row_bytes;
+            if (!qx_read_raw_span(&file, off, span, &buf, err, err_len)) { free(logits); free(picked); free(selected); qx_close_file(&file); return 0; }
+            uint32_t state = seed ? seed : 1u;
+            double dot = 0.0;
+            for (uint64_t i = 0; i < values; ++i) {
+                dot += (double)qx_rd_le_f32(buf + i*4ull) * (double)qx_deterministic_input(&state);
+            }
+            logits[e] = dot;
+            free(buf);
+        }
+        for (uint32_t k = 0; k < k_eff; ++k) {
+            uint32_t best = 0;
+            double best_logit = -1.0e300;
+            for (uint32_t e = 0; e < experts; ++e) {
+                if (!picked[e] && logits[e] > best_logit) { best = e; best_logit = logits[e]; }
+            }
+            selected[k] = best;
+            picked[best] = 1;
+        }
+        double layer_sum = 0.0;
+        fprintf(out, "    {\n");
+        fprintf(out, "      \"layer\": %u,\n", layer);
+        fprintf(out, "      \"router_kernel\": \"F32_PREFIX_DOT\",\n");
+        fprintf(out, "      \"top_k\": %u,\n", k_eff);
+        fprintf(out, "      \"selected_experts\": [\n");
+        for (uint32_t k = 0; k < k_eff; ++k) {
+            uint32_t e = selected[k];
+            double gate_dot = 0.0, up_dot = 0.0, down_dot = 0.0;
+            const char *dec = NULL;
+            uint32_t typ = 0;
+            uint64_t dummy64 = 0, mix = 0;
+            int ok = qx_expert_row_dot_calc(&file, layer, e, "gate", 0, blocks, seed, &gate_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len) &&
+                     qx_expert_row_dot_calc(&file, layer, e, "up", 0, blocks, seed, &up_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len) &&
+                     qx_expert_row_dot_calc(&file, layer, e, "down", 0, blocks, seed, &down_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len);
+            if (ok) {
+                double hidden_probe = qx_silu(gate_dot) * up_dot;
+                double projected_probe = hidden_probe * down_dot;
+                layer_sum += projected_probe;
+                fprintf(out, "        {\"rank\": %u, \"expert\": %u, \"logit\": %.9g, \"supported\": true, \"projected_probe\": %.9g}%s\n",
+                    k, e, logits[e], projected_probe, (k + 1 < k_eff) ? "," : "");
+            } else {
+                fprintf(out, "        {\"rank\": %u, \"expert\": %u, \"logit\": %.9g, \"supported\": false, \"reason\": \"unsupported_expert_quant\", \"projected_probe\": 0}%s\n",
+                    k, e, logits[e], (k + 1 < k_eff) ? "," : "");
+            }
+        }
+        moe_output += layer_sum;
+        fprintf(out, "      ],\n");
+        fprintf(out, "      \"layer_output_probe\": %.9g\n", layer_sum);
+        fprintf(out, "    }%s\n", (layer + 1 < layers) ? "," : "");
+        free(logits); free(picked); free(selected);
+    }
+    fprintf(out, "  ],\n");
+    fprintf(out, "  \"moe_output_probe\": %.9g\n", moe_output);
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+int qx_dump_expert_quant_coverage_summary(const char *path, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    uint32_t complete = 0;
+    uint32_t supported = 0;
+    uint32_t missing = 0;
+    uint32_t unsupported = 0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"expert_quant_coverage\",\n");
+    fprintf(out, "  \"layers_total\": %u,\n", file.header.manifest.layers);
+    fprintf(out, "  \"experts_per_layer\": %u,\n", file.header.manifest.experts);
+    fprintf(out, "  \"layers\": [\n");
+    int first = 1;
+    for (uint32_t layer = 0; layer < file.header.manifest.layers; ++layer) {
+        char gate_name[QX_NAME_MAX], up_name[QX_NAME_MAX], down_name[QX_NAME_MAX];
+        qx_expert_packed_tensor_name(gate_name, sizeof(gate_name), layer, "gate");
+        qx_expert_packed_tensor_name(up_name, sizeof(up_name), layer, "up");
+        qx_expert_packed_tensor_name(down_name, sizeof(down_name), layer, "down");
+        const qx_tensor_dir_entry *gate = qx_find_tensor(&file, gate_name);
+        const qx_tensor_dir_entry *up = qx_find_tensor(&file, up_name);
+        const qx_tensor_dir_entry *down = qx_find_tensor(&file, down_name);
+        if (!gate && !up && !down) continue;
+        const char *gd = NULL, *ud = NULL, *dd = NULL;
+        uint64_t gb = 0, ub = 0, db = 0;
+        int gs = gate && qx_decoder_info(gate->flags, &gd, &gb);
+        int us = up && qx_decoder_info(up->flags, &ud, &ub);
+        int ds = down && qx_decoder_info(down->flags, &dd, &db);
+        int is_complete = gate && up && down;
+        int is_supported = is_complete && gs && us && ds;
+        if (is_complete) complete++; else missing++;
+        if (is_supported) supported++; else unsupported++;
+        fprintf(out, "%s    {\n", first ? "" : ",\n");
+        first = 0;
+        fprintf(out, "      \"layer\": %u,\n", layer);
+        fprintf(out, "      \"complete\": %s,\n", is_complete ? "true" : "false");
+        fprintf(out, "      \"supported\": %s,\n", is_supported ? "true" : "false");
+        fprintf(out, "      \"gate_ggml_type\": %u,\n", gate ? gate->flags : 0u);
+        fprintf(out, "      \"gate_decoder\": %s%s%s,\n", gd ? "\"" : "", gd ? gd : "null", gd ? "\"" : "");
+        fprintf(out, "      \"up_ggml_type\": %u,\n", up ? up->flags : 0u);
+        fprintf(out, "      \"up_decoder\": %s%s%s,\n", ud ? "\"" : "", ud ? ud : "null", ud ? "\"" : "");
+        fprintf(out, "      \"down_ggml_type\": %u,\n", down ? down->flags : 0u);
+        fprintf(out, "      \"down_decoder\": %s%s%s,\n", dd ? "\"" : "", dd ? dd : "null", dd ? "\"" : "");
+        fprintf(out, "      \"gate_block_byte_size\": %llu,\n", (unsigned long long)gb);
+        fprintf(out, "      \"up_block_byte_size\": %llu,\n", (unsigned long long)ub);
+        fprintf(out, "      \"down_block_byte_size\": %llu\n", (unsigned long long)db);
+        fprintf(out, "    }");
+    }
+    fprintf(out, "\n  ],\n");
+    fprintf(out, "  \"complete_layers\": %u,\n", complete);
+    fprintf(out, "  \"supported_layers\": %u,\n", supported);
+    fprintf(out, "  \"missing_layers\": %u,\n", missing);
+    fprintf(out, "  \"unsupported_layers\": %u\n", unsupported);
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+static int qx_tensor_block_dot_calc(qx_file *file, const qx_tensor_dir_entry *t, uint32_t blocks, uint32_t seed, double *dot_out, double *sum_out, const char **decoder_out, uint64_t *values_out, uint64_t *checksum_out, char *err, uint64_t err_len);
+
+
+
+typedef struct {
+    uint32_t token;
+    double logit;
+    uint64_t checksum;
+} qx_top_token;
+
+static const qx_tensor_dir_entry *qx_select_lm_head_tensor(qx_file *file, const char **name_out, int *tied_out) {
+    const qx_tensor_dir_entry *t = qx_find_tensor(file, "output.weight");
+    if (t) { if (name_out) *name_out = "output.weight"; if (tied_out) *tied_out = 0; return t; }
+    t = qx_find_tensor(file, "lm_head.weight");
+    if (t) { if (name_out) *name_out = "lm_head.weight"; if (tied_out) *tied_out = 0; return t; }
+    t = qx_find_tensor(file, "token_embd.weight");
+    if (t) { if (name_out) *name_out = "token_embd.weight"; if (tied_out) *tied_out = 1; return t; }
+    return NULL;
+}
+
+static double qx_logit_row_score(qx_file *file, const qx_tensor_dir_entry *lm, uint32_t vocab, uint32_t token, double activation, uint32_t seed, uint64_t *checksum_out, char *err, uint64_t err_len) {
+    uint64_t row = qx_embedding_row_size(lm, vocab ? vocab : (uint32_t)(lm->dims[1] ? lm->dims[1] : 1));
+    uint64_t off = lm->offset + (uint64_t)token * row;
+    if (off >= lm->offset + lm->byte_size) off = lm->offset + lm->byte_size - (row ? row : 1u);
+    uint64_t span = row;
+    if (off + span > lm->offset + lm->byte_size) span = (lm->offset + lm->byte_size) - off;
+    unsigned char *buf = NULL;
+    if (span == 0 || !qx_read_raw_span(file, off, span, &buf, err, err_len)) return -1.0e300;
+    uint64_t chk = qx_fnv1a64(buf, span);
+    if (checksum_out) *checksum_out = chk;
+    double score = 0.0;
+    const char *decoder = NULL;
+    uint64_t bs = 0;
+    if (qx_decoder_info(lm->flags, &decoder, &bs) && bs > 0 && span >= bs) {
+        uint64_t blocks = span / bs;
+        if (blocks > 4) blocks = 4;
+        uint32_t st = (seed ? seed : 1u) ^ token;
+        for (uint64_t b = 0; b < blocks; ++b) {
+            float vals[256];
+            qx_decode_supported_block(lm->flags, buf + b * bs, vals);
+            for (int i = 0; i < 256; ++i) score += (double)vals[i] * (double)qx_deterministic_input(&st);
+        }
+    } else {
+        uint64_t n = span < 256 ? span : 256;
+        for (uint64_t i = 0; i < n; ++i) score += (((double)buf[i] - 127.5) / 127.5) * (double)((chk >> ((i & 7u) * 8u)) & 255u) / 255.0;
+    }
+    free(buf);
+    return score * activation;
+}
+
+static int qx_collect_top_logits(qx_file *file, double activation, uint32_t top_n, uint32_t scan, uint32_t seed, const char **lm_name, int *tied, uint32_t *scanned_out, qx_top_token *top, char *err, uint64_t err_len) {
+    if (top_n == 0) top_n = 1;
+    if (scan == 0) scan = 64;
+    if (top_n > scan) top_n = scan;
+    const qx_tensor_dir_entry *lm = qx_select_lm_head_tensor(file, lm_name, tied);
+    if (!lm) { qx_set_err(err, err_len, "lm head/output/token embedding tensor not found"); return 0; }
+    uint32_t vocab = file->header.manifest.vocab ? file->header.manifest.vocab : (uint32_t)(lm->dims[1] ? lm->dims[1] : scan);
+    if (scan > vocab) scan = vocab;
+    for (uint32_t i = 0; i < top_n; ++i) { top[i].token = 0; top[i].logit = -1.0e300; top[i].checksum = 0; }
+    for (uint32_t token = 0; token < scan; ++token) {
+        uint64_t chk = 0;
+        double logit = qx_logit_row_score(file, lm, vocab, token, activation, seed, &chk, err, err_len);
+        for (uint32_t i = 0; i < top_n; ++i) {
+            if (logit > top[i].logit) {
+                for (uint32_t j = top_n - 1; j > i; --j) top[j] = top[j - 1];
+                top[i].token = token; top[i].logit = logit; top[i].checksum = chk;
+                break;
+            }
+        }
+    }
+    if (scanned_out) *scanned_out = scan;
+    return 1;
+}
+
+int qx_dump_logits_probe_summary(const char *path, double activation, uint32_t top_n, uint32_t scan, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (top_n == 0) top_n = 1;
+    if (top_n > 32) top_n = 32;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    qx_top_token top[32];
+    const char *lm_name = NULL;
+    int tied = 0;
+    uint32_t scanned = 0;
+    if (!qx_collect_top_logits(&file, activation, top_n, scan, seed, &lm_name, &tied, &scanned, top, err, err_len)) { qx_close_file(&file); return 0; }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"logits\",\n");
+    fprintf(out, "  \"lm_head_tensor\": \"%s\",\n", lm_name ? lm_name : "null");
+    fprintf(out, "  \"tied_embedding_fallback\": %s,\n", tied ? "true" : "false");
+    fprintf(out, "  \"activation\": %.9g,\n", activation);
+    fprintf(out, "  \"top_n\": %u,\n", top_n);
+    fprintf(out, "  \"scanned\": %u,\n", scanned);
+    fprintf(out, "  \"top_tokens\": [");
+    for (uint32_t i = 0; i < top_n; ++i) {
+        fprintf(out, "%s{\"token\": %u, \"logit\": %.9g, \"checksum\": %llu}", i ? ", " : "", top[i].token, top[i].logit, (unsigned long long)top[i].checksum);
+    }
+    fprintf(out, "]\n}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+
+typedef struct {
+    uint32_t selected_token;
+    uint32_t selected_rank;
+    double selected_logit;
+    double selected_prob;
+    double prob_sum;
+    double random_u;
+    const char *strategy;
+} qx_sample_result;
+
+static qx_sample_result qx_sample_from_top(const qx_top_token *top, uint32_t top_k, double temperature, uint32_t seed) {
+    qx_sample_result r;
+    memset(&r, 0, sizeof(r));
+    if (top_k == 0) top_k = 1;
+    if (temperature <= 0.0) {
+        r.selected_token = top[0].token;
+        r.selected_rank = 0;
+        r.selected_logit = top[0].logit;
+        r.selected_prob = 1.0;
+        r.prob_sum = 1.0;
+        r.strategy = "argmax";
+        return r;
+    }
+    double max_logit = top[0].logit;
+    for (uint32_t i = 1; i < top_k; ++i) if (top[i].logit > max_logit) max_logit = top[i].logit;
+    double probs[32];
+    double sum = 0.0;
+    for (uint32_t i = 0; i < top_k; ++i) {
+        probs[i] = exp((top[i].logit - max_logit) / temperature);
+        sum += probs[i];
+    }
+    if (sum <= 0.0) sum = 1.0;
+    for (uint32_t i = 0; i < top_k; ++i) probs[i] /= sum;
+    uint32_t st = seed ? seed : 1u;
+    double u = ((double)qx_deterministic_input(&st) + 1.0) * 0.5;
+    double acc = 0.0;
+    uint32_t rank = top_k - 1;
+    for (uint32_t i = 0; i < top_k; ++i) {
+        acc += probs[i];
+        if (u <= acc) { rank = i; break; }
+    }
+    r.selected_token = top[rank].token;
+    r.selected_rank = rank;
+    r.selected_logit = top[rank].logit;
+    r.selected_prob = probs[rank];
+    r.prob_sum = 0.0;
+    for (uint32_t i = 0; i < top_k; ++i) r.prob_sum += probs[i];
+    r.random_u = u;
+    r.strategy = "temperature_top_k";
+    return r;
+}
+
+static void qx_print_sampler_json(FILE *out, const qx_sample_result *r, int enabled, uint32_t top_k, uint32_t scan, double temperature) {
+    fprintf(out, "{\"enabled\": %s, \"strategy\": \"%s\", \"top_k\": %u, \"scan\": %u, \"temperature\": %.9g, \"selected_token\": %u, \"selected_rank\": %u, \"selected_logit\": %.9g, \"selected_prob\": %.9g, \"prob_sum\": %.9g, \"random_u\": %.9g}",
+        enabled ? "true" : "false", r->strategy ? r->strategy : "disabled", top_k, scan, temperature, r->selected_token, r->selected_rank, r->selected_logit, r->selected_prob, r->prob_sum, r->random_u);
+}
+
+int qx_dump_sampler_probe_summary(const char *path, double activation, uint32_t top_k, uint32_t scan, double temperature, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (top_k == 0) top_k = 1;
+    if (top_k > 32) top_k = 32;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    qx_top_token top[32];
+    const char *lm_name = NULL;
+    int tied = 0;
+    uint32_t scanned = 0;
+    if (!qx_collect_top_logits(&file, activation, top_k, scan, seed, &lm_name, &tied, &scanned, top, err, err_len)) { qx_close_file(&file); return 0; }
+    qx_sample_result sr = qx_sample_from_top(top, top_k, temperature, seed);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"sampler\",\n");
+    fprintf(out, "  \"lm_head_tensor\": \"%s\",\n", lm_name ? lm_name : "null");
+    fprintf(out, "  \"tied_embedding_fallback\": %s,\n", tied ? "true" : "false");
+    fprintf(out, "  \"strategy\": \"%s\",\n", sr.strategy);
+    fprintf(out, "  \"activation\": %.9g,\n", activation);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"scan\": %u,\n", scanned);
+    fprintf(out, "  \"temperature\": %.9g,\n", temperature);
+    fprintf(out, "  \"selected_token\": %u,\n", sr.selected_token);
+    fprintf(out, "  \"selected_rank\": %u,\n", sr.selected_rank);
+    fprintf(out, "  \"selected_logit\": %.9g,\n", sr.selected_logit);
+    fprintf(out, "  \"selected_prob\": %.9g,\n", sr.selected_prob);
+    fprintf(out, "  \"prob_sum\": %.9g,\n", sr.prob_sum);
+    fprintf(out, "  \"random_u\": %.9g,\n", sr.random_u);
+    fprintf(out, "  \"candidates\": [");
+    for (uint32_t i = 0; i < top_k; ++i) fprintf(out, "%s{\"token\": %u, \"logit\": %.9g}", i ? ", " : "", top[i].token, top[i].logit);
+    fprintf(out, "]\n}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+
+static void qx_token_piece_fallback(uint32_t token_id, char *buf, size_t cap) {
+    if (!buf || cap == 0) return;
+#ifdef _MSC_VER
+    sprintf_s(buf, cap, "<tok_%u>", token_id);
+#else
+    snprintf(buf, cap, "<tok_%u>", token_id);
+#endif
+}
+
+
+static void qx_unescape_tsv_piece(char *s) {
+    char *w = s;
+    for (char *r = s; *r; ++r) {
+        if (*r == '\\' && r[1]) {
+            ++r;
+            if (*r == 't') *w++ = '\t';
+            else if (*r == 'n') *w++ = '\n';
+            else if (*r == 'r') *w++ = '\r';
+            else *w++ = *r;
+        } else {
+            *w++ = *r;
+        }
+    }
+    *w = 0;
+}
+
+static int qx_lookup_token_piece_sidecar(const char *tokens_path, uint32_t token_id, char *piece, size_t cap) {
+    if (!tokens_path || !piece || cap == 0) return 0;
+    FILE *f = fopen(tokens_path, "rb");
+    if (!f) return 0;
+    char line[8192];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#') continue;
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        unsigned long id = strtoul(line, NULL, 10);
+        if ((uint32_t)id != token_id) continue;
+        char *val = tab + 1;
+        size_t n = strlen(val);
+        while (n && (val[n-1] == '\n' || val[n-1] == '\r')) val[--n] = 0;
+#ifdef _MSC_VER
+        strncpy_s(piece, cap, val, _TRUNCATE);
+#else
+        snprintf(piece, cap, "%s", val);
+#endif
+        qx_unescape_tsv_piece(piece);
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+    return 0;
+}
+
+static void qx_json_print_escaped(FILE *out, const char *s) {
+    fputc('"', out);
+    if (s) {
+        for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+            if (*p == '"' || *p == '\\') { fputc('\\', out); fputc(*p, out); }
+            else if (*p == '\n') fputs("\\n", out);
+            else if (*p == '\r') fputs("\\r", out);
+            else if (*p == '\t') fputs("\\t", out);
+            else if (*p < 32) fprintf(out, "\\u%04x", (unsigned int)*p);
+            else fputc(*p, out);
+        }
+    }
+    fputc('"', out);
+}
+
+static void qx_emit_decoded_token_object(FILE *out, uint32_t token_id, int enabled, const char *tokens_path) {
+    char piece[64];
+    char sidecar_piece[8192];
+    const char *source = "fallback_token_id";
+    qx_token_piece_fallback(token_id, piece, sizeof(piece));
+    if (tokens_path && qx_lookup_token_piece_sidecar(tokens_path, token_id, sidecar_piece, sizeof(sidecar_piece))) {
+        source = "sidecar";
+        fprintf(out, "{\"enabled\": %s, \"token_id\": %u, \"source\": \"%s\", \"piece\": ", enabled ? "true" : "false", token_id, source);
+        qx_json_print_escaped(out, sidecar_piece);
+        fprintf(out, ", \"note\": \"decoded from tokenizer sidecar\"}");
+        return;
+    }
+    fprintf(out, "{\"enabled\": %s, \"token_id\": %u, \"source\": \"%s\", \"piece\": ", enabled ? "true" : "false", token_id, source);
+    qx_json_print_escaped(out, piece);
+    fprintf(out, ", \"note\": \"QXF currently does not persist GGUF tokenizer arrays; fallback preserves token identity\"}");
+}
+
+int qx_dump_tokenizer_probe_summary(const char *path, const char *tokens_path, uint32_t token_id, FILE *out, char *err, uint64_t err_len) {
+    if (!path) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    uint32_t vocab = file.header.manifest.vocab;
+    if (vocab && token_id >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "token id out of vocab"); return 0; }
+    char piece[64];
+    char sidecar_piece[8192];
+    const char *source = "fallback_token_id";
+    qx_token_piece_fallback(token_id, piece, sizeof(piece));
+    if (tokens_path && qx_lookup_token_piece_sidecar(tokens_path, token_id, sidecar_piece, sizeof(sidecar_piece))) {
+        source = "sidecar";
+#ifdef _MSC_VER
+        strncpy_s(piece, sizeof(piece), sidecar_piece, _TRUNCATE);
+#else
+        snprintf(piece, sizeof(piece), "%s", sidecar_piece);
+#endif
+    }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"tokenizer\",\n");
+    fprintf(out, "  \"token_id\": %u,\n", token_id);
+    fprintf(out, "  \"vocab\": %u,\n", vocab);
+    fprintf(out, "  \"source\": \"%s\",\n", source);
+    fprintf(out, "  \"piece\": "); qx_json_print_escaped(out, piece); fprintf(out, ",\n");
+    fprintf(out, "  \"note\": \"QXF currently does not persist GGUF tokenizer.ggml.tokens; fallback is reversible identity text\"\n");
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+
+int qx_dump_generate_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t top_k, uint32_t scan, double temperature, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (steps == 0) steps = 1;
+    if (steps > 64) steps = 64;
+    if (top_k == 0) top_k = 1;
+    if (top_k > 32) top_k = 32;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    uint32_t vocab = file.header.manifest.vocab ? file.header.manifest.vocab : 151936u;
+    if (prompt_token >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "prompt token out of range"); return 0; }
+    uint32_t current = prompt_token;
+    char generated[32768];
+    generated[0] = 0;
+    size_t generated_len = 0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"generate\",\n");
+    fprintf(out, "  \"prompt_token\": %u,\n", prompt_token);
+    fprintf(out, "  \"steps\": %u,\n", steps);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"scan\": %u,\n", scan);
+    fprintf(out, "  \"temperature\": %.9g,\n", temperature);
+    fprintf(out, "  \"tokens\": [");
+    for (uint32_t step = 0; step < steps; ++step) {
+        qx_top_token top[32];
+        const char *lm_name = NULL;
+        int tied = 0;
+        uint32_t scanned = 0;
+        double activation = 0.125 + ((double)(current % 997u) / 9970.0) + (double)step * 0.001;
+        if (!qx_collect_top_logits(&file, activation, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) { qx_close_file(&file); return 0; }
+        qx_sample_result sr = qx_sample_from_top(top, top_k, temperature, seed + step * 101u + current);
+        char piece[8192];
+        char fallback[64];
+        const char *source = "fallback_token_id";
+        if (tokens_path && qx_lookup_token_piece_sidecar(tokens_path, sr.selected_token, piece, sizeof(piece))) source = "sidecar";
+        else { qx_token_piece_fallback(sr.selected_token, fallback, sizeof(fallback));
+#ifdef _MSC_VER
+            strncpy_s(piece, sizeof(piece), fallback, _TRUNCATE);
+#else
+            snprintf(piece, sizeof(piece), "%s", fallback);
+#endif
+        }
+        size_t plen = strlen(piece);
+        if (generated_len + plen < sizeof(generated)) {
+            memcpy(generated + generated_len, piece, plen + 1);
+            generated_len += plen;
+        }
+        fprintf(out, "%s{\"step\": %u, \"input_token\": %u, \"token\": %u, \"rank\": %u, \"logit\": %.9g, \"prob\": %.9g, \"source\": \"%s\", \"piece\": ", step ? ", " : "", step, current, sr.selected_token, sr.selected_rank, sr.selected_logit, sr.selected_prob, source);
+        qx_json_print_escaped(out, piece);
+        fprintf(out, "}");
+        current = sr.selected_token;
+    }
+    fprintf(out, "],\n");
+    fprintf(out, "  \"final_token\": %u,\n", current);
+    fprintf(out, "  \"generated_text\": ");
+    qx_json_print_escaped(out, generated);
+    fprintf(out, ",\n");
+    fprintf(out, "  \"note\": \"minimal probe loop: sampled token feeds next step activation; not full autoregressive transformer state yet\"\n");
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+
+
+static int qx_kv_bytes_for_format(const char *kv_format, uint64_t values_per_k_or_v, uint64_t *bytes_per_k_or_v, uint32_t *bytes_per_value) {
+    if (!kv_format || !bytes_per_k_or_v || !bytes_per_value) return 0;
+    if (strcmp(kv_format, "int8") == 0) { *bytes_per_value = 1; *bytes_per_k_or_v = values_per_k_or_v; return 1; }
+    if (strcmp(kv_format, "f16") == 0 || strcmp(kv_format, "fp16") == 0) { *bytes_per_value = 2; *bytes_per_k_or_v = values_per_k_or_v * 2ull; return 1; }
+    if (strcmp(kv_format, "int4") == 0) { *bytes_per_value = 0; *bytes_per_k_or_v = (values_per_k_or_v + 1ull) / 2ull; return 1; }
+    return 0;
+}
+
+static void qx_fill_kv_append(unsigned char *buf, uint64_t n, uint32_t token, uint32_t step, uint32_t layer, uint32_t seed, int is_v) {
+    uint32_t st = seed ^ (token * 2654435761u) ^ (step * 2246822519u) ^ (layer * 3266489917u) ^ (is_v ? 0x9e3779b9u : 0x85ebca6bu);
+    for (uint64_t i = 0; i < n; ++i) {
+        st = st * 1664525u + 1013904223u;
+        buf[i] = (unsigned char)((st >> 24) & 0xffu);
+    }
+}
+
+
+
+static int qx_fill_kv_from_projection(qx_file *file, const qx_tensor_dir_entry *t, unsigned char *buf, uint64_t n, uint32_t token, uint32_t step, uint32_t layer, uint32_t seed, uint64_t *values_out, char *err, uint64_t err_len) {
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!t || !qx_decoder_info(t->flags, &decoder, &block_size) || block_size == 0) { qx_set_err(err, err_len, "unsupported projection tensor"); return 0; }
+    uint64_t block_count = t->byte_size / block_size;
+    if (block_count == 0) { qx_set_err(err, err_len, "empty projection tensor"); return 0; }
+    uint64_t block_index = ((uint64_t)token * 1315423911ull + (uint64_t)step * 2654435761ull + (uint64_t)layer * 97531ull + (uint64_t)seed) % block_count;
+    unsigned char *raw = NULL;
+    if (!qx_read_raw_span(file, t->offset + block_index * block_size, block_size, &raw, err, err_len)) return 0;
+    float vals[256];
+    qx_decode_supported_block(t->flags, raw, vals);
+    for (uint64_t i = 0; i < n; ++i) {
+        float v = vals[i % 256u];
+        int q = (int)lrintf(v * 127.0f);
+        if (q < -128) q = -128;
+        if (q > 127) q = 127;
+        buf[i] = (unsigned char)(q & 0xff);
+    }
+    if (values_out) *values_out = n;
+    free(raw);
+    return 1;
+}
+
+
+
+
+
+static int qx_apply_f32_rmsnorm(qx_file *file, const qx_tensor_dir_entry *norm, const float *src, float *dst, uint32_t dims, double *rms_out, char *err, uint64_t err_len) {
+    if (!file || !norm || !src || !dst || !dims || norm->flags != 0u || norm->byte_size < (uint64_t)dims * 4ull) {
+        qx_set_err(err, err_len, "invalid F32 RMSNorm argument"); return 0;
+    }
+    double sumsq = 0.0;
+    for (uint32_t i = 0; i < dims; ++i) sumsq += (double)src[i] * (double)src[i];
+    double rms = sqrt(sumsq / (double)dims + 1.0e-6);
+    unsigned char *weights = NULL;
+    if (!qx_read_raw_span(file, norm->offset, (uint64_t)dims * 4ull, &weights, err, err_len)) return 0;
+    for (uint32_t i = 0; i < dims; ++i) dst[i] = (float)((double)src[i] / rms) * qx_rd_le_f32(weights + (uint64_t)i * 4ull);
+    free(weights);
+    if (rms_out) *rms_out = rms;
+    return 1;
+}
+
+static int qx_fill_residual_vector_from_embedding(qx_file *file, uint32_t token_id, const char *norm_name, float *dst, uint32_t dims, double *rms_out, uint64_t *checksum_out, char *err, uint64_t err_len) {
+    if (!file || !dst || dims == 0) { qx_set_err(err, err_len, "invalid residual vector argument"); return 0; }
+    const qx_tensor_dir_entry *emb = qx_find_tensor(file, "token_embd.weight");
+    if (!emb) { qx_set_err(err, err_len, "token_embd.weight not found"); return 0; }
+    uint32_t vocab = file->header.manifest.vocab ? file->header.manifest.vocab : (uint32_t)(emb->dims[1] ? emb->dims[1] : 1);
+    if (token_id >= vocab) { qx_set_err(err, err_len, "token id out of range"); return 0; }
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    uint64_t row = qx_embedding_row_size(emb, vocab);
+    uint64_t off = emb->offset + (uint64_t)token_id * row;
+    if (off >= emb->offset + emb->byte_size) off = emb->offset;
+    uint64_t read = row;
+    if (qx_decoder_info(emb->flags, &decoder, &block_size) && block_size > 0 && read < block_size && emb->byte_size >= block_size) { off = emb->offset; read = block_size; }
+    if (off + read > emb->offset + emb->byte_size) read = (emb->offset + emb->byte_size) - off;
+    unsigned char *raw = NULL;
+    if (!qx_read_raw_span(file, off, read, &raw, err, err_len)) return 0;
+    uint32_t produced = 0;
+    if (decoder && block_size > 0 && read >= block_size) {
+        uint64_t available_blocks = read / block_size;
+        uint32_t needed_blocks = (dims + 255u) / 256u;
+        for (uint32_t block = 0; block < needed_blocks; ++block) {
+            float vals[256];
+            uint64_t source_block = block < available_blocks ? block : (block % available_blocks);
+            if (!qx_decode_supported_block(emb->flags, raw + source_block * block_size, vals)) { free(raw); qx_set_err(err, err_len, "embedding block decode failed"); return 0; }
+            uint32_t take = dims - produced;
+            if (take > 256u) take = 256u;
+            memcpy(dst + produced, vals, (size_t)take * sizeof(float));
+            produced += take;
+        }
+    } else {
+        for (uint32_t i = 0; i < dims; ++i) dst[i] = ((float)raw[i % read] - 127.5f) / 127.5f;
+        produced = dims;
+    }
+    uint64_t chk = qx_fnv1a64(raw, read);
+    free(raw);
+    double sumsq = 0.0;
+    for (uint32_t i = 0; i < produced; ++i) sumsq += (double)dst[i] * (double)dst[i];
+    double rms = sqrt(sumsq / (double)(produced ? produced : 1u) + 1.0e-6);
+    if (norm_name && *norm_name) {
+        const qx_tensor_dir_entry *norm = qx_find_tensor(file, norm_name);
+        if (!norm || norm->flags != 0u) { qx_set_err(err, err_len, "norm tensor not found or not F32"); return 0; }
+        uint64_t nvals = norm->byte_size / 4ull;
+        uint64_t take = dims < nvals ? dims : nvals;
+        unsigned char *nbuf = NULL;
+        if (!qx_read_raw_span(file, norm->offset, take * 4ull, &nbuf, err, err_len)) return 0;
+        for (uint64_t i = 0; i < take; ++i) {
+            uint32_t bits = qx_rd_le32(nbuf + i * 4ull);
+            float w;
+            memcpy(&w, &bits, sizeof(float));
+            dst[i] = (float)((double)dst[i] / rms) * w;
+        }
+        chk ^= qx_fnv1a64(nbuf, take * 4ull);
+        chk *= 1099511628211ull;
+        free(nbuf);
+    }
+    if (rms_out) *rms_out = rms;
+    if (checksum_out) *checksum_out = chk;
+    return 1;
+}
+
+int qx_dump_residual_vector_probe_summary(const char *path, uint32_t token_id, const char *norm_name, uint32_t dims, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    (void)seed;
+    if (!path) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (dims == 0) dims = 64;
+    if (dims > 2048) dims = 2048;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    float *vec = (float *)malloc((size_t)dims * sizeof(float));
+    if (!vec) { qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    double rms = 0.0;
+    uint64_t chk = 0;
+    if (!qx_fill_residual_vector_from_embedding(&file, token_id, norm_name, vec, dims, &rms, &chk, err, err_len)) { free(vec); qx_close_file(&file); return 0; }
+    const qx_tensor_dir_entry *emb = qx_find_tensor(&file, "token_embd.weight");
+    const char *embedding_decoder = NULL;
+    uint64_t embedding_block_size = 0;
+    uint64_t embedding_row_bytes = emb ? qx_embedding_row_size(emb, file.header.manifest.vocab ? file.header.manifest.vocab : (uint32_t)emb->dims[1]) : 0;
+    qx_decoder_info(emb ? emb->flags : 0u, &embedding_decoder, &embedding_block_size);
+    uint32_t embedding_blocks_decoded = embedding_block_size ? (uint32_t)((dims + 255u) / 256u) : 0u;
+    uint64_t available_embedding_blocks = embedding_block_size ? embedding_row_bytes / embedding_block_size : 0u;
+    if (available_embedding_blocks && embedding_blocks_decoded > available_embedding_blocks) embedding_blocks_decoded = (uint32_t)available_embedding_blocks;
+    if (embedding_blocks_decoded == 0 && embedding_block_size) embedding_blocks_decoded = 1;
+    double sum = 0.0, l2 = 0.0;
+    for (uint32_t i = 0; i < dims; ++i) { sum += vec[i]; l2 += (double)vec[i] * vec[i]; }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"residual_vector\",\n");
+    fprintf(out, "  \"token_id\": %u,\n", token_id);
+    fprintf(out, "  \"dims\": %u,\n", dims);
+    fprintf(out, "  \"source\": \"embedding_rmsnorm\",\n");
+    fprintf(out, "  \"embedding_layout\": \"contiguous_row_blocks\",\n");
+    fprintf(out, "  \"embedding_blocks_decoded\": %u,\n", embedding_blocks_decoded);
+    fprintf(out, "  \"embedding_tensor\": \"token_embd.weight\",\n");
+    fprintf(out, "  \"norm_tensor\": \"%s\",\n", norm_name ? norm_name : "");
+    fprintf(out, "  \"values\": %u,\n", dims);
+    fprintf(out, "  \"rms\": %.9g,\n", rms);
+    fprintf(out, "  \"sum\": %.9g,\n", sum);
+    fprintf(out, "  \"l2\": %.9g,\n", sqrt(l2));
+    fprintf(out, "  \"checksum\": %llu,\n", (unsigned long long)chk);
+    fprintf(out, "  \"first4\": [");
+    for (uint32_t i = 0; i < dims && i < 4; ++i) fprintf(out, "%s%.9g", i ? ", " : "", (double)vec[i]);
+    fprintf(out, "],\n  \"vector_samples\": [");
+    for (uint32_t i = 0; i < dims && i < 8; ++i) fprintf(out, "%s%.9g", i ? ", " : "", (double)vec[i]);
+    fprintf(out, "]\n}\n");
+    free(vec); qx_close_file(&file); return 1;
+}
+
+static int qx_projection_matvec_fill(qx_file *file, const qx_tensor_dir_entry *t, unsigned char *buf, float *float_out, uint32_t rows, uint32_t dims, const float *residual, uint32_t residual_n, uint32_t token, uint32_t layer, uint32_t seed, double *probe_out, uint64_t *values_out, char *err, uint64_t err_len) {
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!t || !qx_decoder_info(t->flags, &decoder, &block_size) || block_size == 0) { qx_set_err(err, err_len, "unsupported projection tensor"); return 0; }
+    uint64_t input_dims = t->dims[0] ? t->dims[0] : 256u;
+    uint64_t output_rows = t->rank > 1 && t->dims[1] ? t->dims[1] : (t->byte_size / block_size);
+    uint64_t blocks_per_row = (input_dims + 255u) / 256u;
+    uint64_t row_bytes = blocks_per_row * block_size;
+    if (blocks_per_row == 0 || row_bytes == 0 || output_rows == 0 || row_bytes > t->byte_size) { qx_set_err(err, err_len, "invalid projection tensor layout"); return 0; }
+    if (dims == 0 || dims > input_dims) dims = (uint32_t)input_dims;
+    double probe = 0.0;
+    uint64_t window_capacity = rows < 16u ? rows : 16u;
+    if (window_capacity > output_rows) window_capacity = output_rows;
+    if (window_capacity == 0) window_capacity = 1;
+    unsigned char *window = (unsigned char *)malloc((size_t)(window_capacity * row_bytes));
+    if (!window) { qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint64_t window_start = UINT64_MAX;
+    uint64_t window_count = 0;
+    for (uint32_t r = 0; r < rows; ++r) {
+        if ((uint64_t)r >= output_rows) {
+            if (float_out) float_out[r] = 0.0f;
+            buf[r] = 0;
+            continue;
+        }
+        uint32_t st = seed ^ (token * 2654435761u) ^ (r * 2246822519u) ^ (layer * 3266489917u);
+        double dot = 0.0;
+        if (window_start == UINT64_MAX || r < window_start || r >= window_start + window_count) {
+            window_start = r;
+            window_count = output_rows - r;
+            if (window_count > window_capacity) window_count = window_capacity;
+            if (!qx_read_raw_span_into(file, t->offset + window_start * row_bytes, window_count * row_bytes, window, err, err_len)) { free(window); return 0; }
+        }
+        const unsigned char *row_raw = window + ((uint64_t)r - window_start) * row_bytes;
+        uint32_t consumed = 0;
+        for (uint64_t block = 0; block < blocks_per_row && consumed < dims; ++block) {
+            const unsigned char *raw = row_raw + block * block_size;
+            uint32_t take = dims - consumed;
+            if (take > 256u) take = 256u;
+            if (t->flags == 23u && (!residual || residual_n >= consumed + take)) {
+                const float *segment = residual ? residual + consumed : NULL;
+                dot += qx_dot_iq4_xs_prefix(raw, take, segment, take, &st);
+            } else {
+                float vals[256];
+                if (!qx_decode_supported_block(t->flags, raw, vals)) { free(window); qx_set_err(err, err_len, "projection block decode failed"); return 0; }
+                for (uint32_t d = 0; d < take; ++d) {
+                    double x = (residual && residual_n) ? (double)residual[(consumed + d) % residual_n] : (double)qx_deterministic_input(&st);
+                    dot += (double)vals[d] * x;
+                }
+            }
+            consumed += take;
+        }
+        if (!isfinite(dot)) dot = 0.0;
+        if (float_out) float_out[r] = (float)dot;
+        int q = (int)lrint(dot * 32.0);
+        if (q < -128) q = -128;
+        if (q > 127) q = 127;
+        buf[r] = (unsigned char)(q & 0xff);
+        probe += dot;
+    }
+    free(window);
+    if (probe_out) *probe_out = probe;
+    if (values_out) *values_out = rows;
+    return 1;
+}
+
+static float qx_quantize_int8_vector(const float *src, unsigned char *dst, uint32_t n) {
+    float max_abs = 0.0f;
+    for (uint32_t i = 0; i < n; ++i) {
+        float a = isfinite(src[i]) ? fabsf(src[i]) : 0.0f;
+        if (a > max_abs) max_abs = a;
+    }
+    float scale = max_abs > 0.0f ? max_abs / 127.0f : 1.0f;
+    for (uint32_t i = 0; i < n; ++i) {
+        int q = isfinite(src[i]) ? (int)lrintf(src[i] / scale) : 0;
+        if (q < -127) q = -127;
+        if (q > 127) q = 127;
+        dst[i] = (unsigned char)(q & 0xff);
+    }
+    return scale;
+}
+
+int qx_dump_projection_matvec_probe_summary(const char *path, uint32_t layer, uint32_t token_id, uint32_t rows, uint32_t dims, const char *kv_format, int residual_vector, const char *norm_name, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || strcmp(kv_format, "int8") != 0) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (rows == 0) rows = 1;
+    if (rows > 4096) rows = 4096;
+    if (dims == 0) dims = 64;
+    if (dims > 256) dims = 256;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    char kn[QX_NAME_MAX], vn[QX_NAME_MAX];
+    snprintf(kn, sizeof(kn), "blk.%u.attn_k.weight", layer);
+    snprintf(vn, sizeof(vn), "blk.%u.attn_v.weight", layer);
+    const qx_tensor_dir_entry *kt = qx_find_tensor(&file, kn);
+    const qx_tensor_dir_entry *vt = qx_find_tensor(&file, vn);
+    if (!kt || !vt) { qx_close_file(&file); qx_set_err(err, err_len, "projection tensor not found"); return 0; }
+    unsigned char *kbuf = (unsigned char *)malloc(rows);
+    unsigned char *vbuf = (unsigned char *)malloc(rows);
+    float *kfloat = (float *)malloc((size_t)rows * sizeof(float));
+    float *vfloat = (float *)malloc((size_t)rows * sizeof(float));
+    if (!kbuf || !vbuf || !kfloat || !vfloat) { free(kbuf); free(vbuf); free(kfloat); free(vfloat); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    double kprobe = 0.0, vprobe = 0.0;
+    uint64_t kvals = 0, vvals = 0;
+    float *rvec = NULL;
+    uint32_t rvals = 0;
+    double rrms = 0.0;
+    uint64_t rchk = 0;
+    if (residual_vector) {
+        rvec = (float *)malloc((size_t)dims * sizeof(float));
+        if (!rvec) { free(kbuf); free(vbuf); free(kfloat); free(vfloat); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+        if (!qx_fill_residual_vector_from_embedding(&file, token_id, norm_name, rvec, dims, &rrms, &rchk, err, err_len)) { free(rvec); free(kbuf); free(vbuf); free(kfloat); free(vfloat); qx_close_file(&file); return 0; }
+        rvals = dims;
+    }
+    if (!qx_projection_matvec_fill(&file, kt, kbuf, kfloat, rows, dims, rvec, rvals, token_id, layer, seed, &kprobe, &kvals, err, err_len) ||
+        !qx_projection_matvec_fill(&file, vt, vbuf, vfloat, rows, dims, rvec, rvals, token_id, layer, seed ^ 0x9e3779b9u, &vprobe, &vvals, err, err_len)) {
+        free(rvec); free(kbuf); free(vbuf); free(kfloat); free(vfloat); qx_close_file(&file); return 0;
+    }
+    uint64_t kchk = qx_fnv1a64(kbuf, rows);
+    uint64_t vchk = qx_fnv1a64(vbuf, rows);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"projection_matvec\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"token_id\": %u,\n", token_id);
+    fprintf(out, "  \"rows\": %u,\n", rows);
+    fprintf(out, "  \"dims\": %u,\n", dims);
+    fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
+    fprintf(out, "  \"k_tensor\": \"%s\",\n", kt->name);
+    fprintf(out, "  \"v_tensor\": \"%s\",\n", vt->name);
+    fprintf(out, "  \"k_ggml_type\": %u,\n", kt->flags);
+    fprintf(out, "  \"v_ggml_type\": %u,\n", vt->flags);
+    fprintf(out, "  \"projection_kernel\": \"%s\",\n", (kt->flags == 23u && vt->flags == 23u) ? "iq4_xs_window_dot" : "quant_window_decode_dot");
+    fprintf(out, "  \"projection_layout\": \"contiguous_tensor_rows\",\n");
+    fprintf(out, "  \"input_dims\": %llu,\n", (unsigned long long)kt->dims[0]);
+    fprintf(out, "  \"blocks_per_row\": %llu,\n", (unsigned long long)((kt->dims[0] + 255u) / 256u));
+    fprintf(out, "  \"residual_source\": \"%s\",\n", residual_vector ? "embedding_rmsnorm" : "deterministic_probe");
+    fprintf(out, "  \"residual_values\": %u,\n", rvals);
+    if (residual_vector) fprintf(out, "  \"residual_rms\": %.9g,\n  \"residual_checksum\": %llu,\n", rrms, (unsigned long long)rchk);
+    fprintf(out, "  \"k_values\": %llu,\n", (unsigned long long)kvals);
+    fprintf(out, "  \"v_values\": %llu,\n", (unsigned long long)vvals);
+    fprintf(out, "  \"k_probe\": %.9g,\n", kprobe);
+    fprintf(out, "  \"v_probe\": %.9g,\n", vprobe);
+    uint32_t samples = rows < 4u ? rows : 4u;
+    fprintf(out, "  \"k_float_samples\": [");
+    for (uint32_t i = 0; i < samples; ++i) fprintf(out, "%s%.9g", i ? ", " : "", kfloat[i]);
+    fprintf(out, "],\n  \"v_float_samples\": [");
+    for (uint32_t i = 0; i < samples; ++i) fprintf(out, "%s%.9g", i ? ", " : "", vfloat[i]);
+    fprintf(out, "],\n");
+    fprintf(out, "  \"k_checksum\": %llu,\n", (unsigned long long)kchk);
+    fprintf(out, "  \"v_checksum\": %llu,\n", (unsigned long long)vchk);
+    fprintf(out, "  \"note\": \"partial projection matvec: decoded quant rows dotted with deterministic residual probe and quantized into INT8 KV bytes\"\n");
+    fprintf(out, "}\n");
+    free(rvec); free(kbuf); free(vbuf); free(kfloat); free(vfloat); qx_close_file(&file); return 1;
+}
+
+static int qx_causal_attention_partial(
+    qx_file *file, uint32_t layer, uint32_t step, uint32_t ctx_tokens,
+    uint64_t bytes_per_k_or_v, const unsigned char *kcache, const unsigned char *vcache,
+    const float *kscales, const float *vscales,
+    const float *residual, uint32_t dims, uint32_t token, uint32_t seed,
+    float *out_vec, double *softmax_sum_out, uint64_t *q_values_out,
+    const char **q_name_out, const char **o_name_out, char *err, uint64_t err_len) {
+    char qn[QX_NAME_MAX], on[QX_NAME_MAX];
+    snprintf(qn, sizeof(qn), "blk.%u.attn_q.weight", layer);
+    snprintf(on, sizeof(on), "blk.%u.attn_output.weight", layer);
+    const qx_tensor_dir_entry *qt = qx_find_tensor(file, qn);
+    const qx_tensor_dir_entry *ot = qx_find_tensor(file, on);
+    if ((!qt || !ot) && layer != 0) {
+        qt = qx_find_tensor(file, "blk.0.attn_q.weight");
+        ot = qx_find_tensor(file, "blk.0.attn_output.weight");
+    }
+    if (!qt || !ot) { qx_set_err(err, err_len, "q/output projection tensor not found"); return 0; }
+    unsigned char *qbuf = (unsigned char *)malloc(dims);
+    float *qfloat = (float *)malloc((size_t)dims * sizeof(float));
+    unsigned char *obuf = (unsigned char *)malloc(dims);
+    float *context = (float *)calloc(dims, sizeof(float));
+    double *scores = (double *)malloc((size_t)(step + 1u) * sizeof(double));
+    double *weights = (double *)malloc((size_t)(step + 1u) * sizeof(double));
+    if (!qbuf || !qfloat || !obuf || !context || !scores || !weights) {
+        free(qbuf); free(qfloat); free(obuf); free(context); free(scores); free(weights);
+        qx_set_err(err, err_len, "out of memory"); return 0;
+    }
+    double qprobe = 0.0;
+    uint64_t qvals = 0;
+    if (!qx_projection_matvec_fill(file, qt, qbuf, qfloat, dims, dims, residual, dims, token, layer, seed ^ 0xa511e9b3u, &qprobe, &qvals, err, err_len)) {
+        free(qbuf); free(qfloat); free(obuf); free(context); free(scores); free(weights); return 0;
+    }
+    double max_score = -1e300;
+    for (uint32_t t = 0; t <= step; ++t) {
+        const unsigned char *kp = kcache + (((uint64_t)layer * ctx_tokens + t) * bytes_per_k_or_v);
+        float kscale = kscales[(uint64_t)layer * ctx_tokens + t];
+        double score = 0.0;
+        for (uint32_t d = 0; d < dims; ++d) {
+            score += (double)qfloat[d] * ((double)(int8_t)kp[d % bytes_per_k_or_v] * kscale);
+        }
+        score /= sqrt((double)dims);
+        if (!isfinite(score)) score = 0.0;
+        scores[t] = score;
+        if (score > max_score) max_score = score;
+    }
+    double denom = 0.0;
+    for (uint32_t t = 0; t <= step; ++t) { weights[t] = exp(scores[t] - max_score); denom += weights[t]; }
+    if (!isfinite(denom) || denom <= 0.0) {
+        for (uint32_t t = 0; t <= step; ++t) weights[t] = 0.0;
+        weights[step] = 1.0;
+        denom = 1.0;
+    }
+    double softmax_sum = 0.0;
+    for (uint32_t t = 0; t <= step; ++t) {
+        weights[t] = denom > 0.0 ? weights[t] / denom : 0.0;
+        softmax_sum += weights[t];
+        const unsigned char *vp = vcache + (((uint64_t)layer * ctx_tokens + t) * bytes_per_k_or_v);
+        float vscale = vscales[(uint64_t)layer * ctx_tokens + t];
+        for (uint32_t d = 0; d < dims; ++d) context[d] += (float)(weights[t] * ((double)(int8_t)vp[d % bytes_per_k_or_v] * vscale));
+    }
+    double oprobe = 0.0;
+    uint64_t ovals = 0;
+    if (!qx_projection_matvec_fill(file, ot, obuf, out_vec, dims, dims, context, dims, token, layer, seed ^ 0x63d83595u, &oprobe, &ovals, err, err_len)) {
+        free(qbuf); free(qfloat); free(obuf); free(context); free(scores); free(weights); return 0;
+    }
+
+    if (softmax_sum_out) *softmax_sum_out = softmax_sum;
+    if (q_values_out) *q_values_out = qvals;
+    if (q_name_out) *q_name_out = qt->name;
+    if (o_name_out) *o_name_out = ot->name;
+    free(qbuf); free(qfloat); free(obuf); free(context); free(scores); free(weights);
+    return 1;
+}
+
+static void qx_apply_rope(float *vec, uint32_t heads, uint32_t head_dim, uint32_t position, double theta) {
+    if (!vec || head_dim < 2 || (head_dim & 1u)) return;
+    uint32_t half = head_dim / 2u;
+    for (uint32_t h = 0; h < heads; ++h) {
+        float *head = vec + (uint64_t)h * head_dim;
+        for (uint32_t i = 0; i < half; ++i) {
+            double frequency = pow(theta, -(2.0 * (double)i) / (double)head_dim);
+            double angle = (double)position * frequency;
+            double c = cos(angle);
+            double sn = sin(angle);
+            float x0 = head[i];
+            float x1 = head[i + half];
+            head[i] = (float)((double)x0 * c - (double)x1 * sn);
+            head[i + half] = (float)((double)x0 * sn + (double)x1 * c);
+        }
+    }
+}
+
+int qx_dump_rope_gqa_golden_probe_summary(uint32_t tokens, uint32_t q_heads_run, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    (void)seed;
+    const uint32_t q_heads_total = 32u;
+    const uint32_t kv_heads_total = 4u;
+    const uint32_t head_dim = 128u;
+    const uint32_t group_size = q_heads_total / kv_heads_total;
+    const double rope_theta = 1000000.0;
+    if (!out || tokens == 0 || tokens > 64 || q_heads_run == 0 || q_heads_run > q_heads_total) {
+        qx_set_err(err, err_len, "invalid golden probe argument"); return 0;
+    }
+    uint32_t q_values = q_heads_run * head_dim;
+    uint32_t kv_values = kv_heads_total * head_dim;
+    float *q = (float *)malloc((size_t)q_values * sizeof(float));
+    float *k = (float *)malloc((size_t)kv_values * sizeof(float));
+    float *v = (float *)malloc((size_t)kv_values * sizeof(float));
+    unsigned char *kcache = (unsigned char *)malloc((size_t)tokens * kv_values);
+    unsigned char *vcache = (unsigned char *)malloc((size_t)tokens * kv_values);
+    float *kscales = (float *)malloc((size_t)tokens * sizeof(float));
+    float *vscales = (float *)malloc((size_t)tokens * sizeof(float));
+    double *scores = (double *)malloc((size_t)q_heads_run * tokens * sizeof(double));
+    double *weights = (double *)malloc((size_t)q_heads_run * tokens * sizeof(double));
+    double *context = (double *)calloc(q_values, sizeof(double));
+    if (!q || !k || !v || !kcache || !vcache || !kscales || !vscales || !scores || !weights || !context) {
+        free(q); free(k); free(v); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context);
+        qx_set_err(err, err_len, "out of memory"); return 0;
+    }
+    for (uint32_t i = 0; i < q_values; ++i) q[i] = (float)((int)(i % 17u) - 8) / 8.0f;
+    qx_apply_rope(q, q_heads_run, head_dim, tokens - 1u, rope_theta);
+    for (uint32_t token = 0; token < tokens; ++token) {
+        for (uint32_t i = 0; i < kv_values; ++i) {
+            k[i] = (float)((int)(((token + 1u) * (i + 3u)) % 23u) - 11) / 11.0f;
+            v[i] = (float)((int)(((token + 2u) * (i + 5u)) % 19u) - 9) / 9.0f;
+        }
+        qx_apply_rope(k, kv_heads_total, head_dim, token, rope_theta);
+        kscales[token] = qx_quantize_int8_vector(k, kcache + (uint64_t)token * kv_values, kv_values);
+        vscales[token] = qx_quantize_int8_vector(v, vcache + (uint64_t)token * kv_values, kv_values);
+    }
+    double sum_min = 1e300;
+    double sum_max = -1e300;
+    for (uint32_t qh = 0; qh < q_heads_run; ++qh) {
+        uint32_t kvh = qh / group_size;
+        double max_score = -1e300;
+        for (uint32_t token = 0; token < tokens; ++token) {
+            const unsigned char *kp = kcache + (uint64_t)token * kv_values;
+            double score = 0.0;
+            for (uint32_t d = 0; d < head_dim; ++d) {
+                score += (double)q[qh * head_dim + d] * (double)(int8_t)kp[kvh * head_dim + d] * (double)kscales[token];
+            }
+            score /= sqrt((double)head_dim);
+            scores[(uint64_t)qh * tokens + token] = score;
+            if (score > max_score) max_score = score;
+        }
+        double denom = 0.0;
+        for (uint32_t token = 0; token < tokens; ++token) {
+            double weight = exp(scores[(uint64_t)qh * tokens + token] - max_score);
+            weights[(uint64_t)qh * tokens + token] = weight;
+            denom += weight;
+        }
+        double head_sum = 0.0;
+        for (uint32_t token = 0; token < tokens; ++token) {
+            double weight = weights[(uint64_t)qh * tokens + token] / denom;
+            weights[(uint64_t)qh * tokens + token] = weight;
+            head_sum += weight;
+            const unsigned char *vp = vcache + (uint64_t)token * kv_values;
+            for (uint32_t d = 0; d < head_dim; ++d) {
+                context[qh * head_dim + d] += weight * (double)(int8_t)vp[kvh * head_dim + d] * (double)vscales[token];
+            }
+        }
+        if (head_sum < sum_min) sum_min = head_sum;
+        if (head_sum > sum_max) sum_max = head_sum;
+    }
+    uint32_t last_head = q_heads_run - 1u;
+    uint32_t sample_token = tokens > 1u ? 1u : 0u;
+    uint32_t context_index_2 = last_head * head_dim;
+    uint32_t context_index_3 = context_index_2 + head_dim / 2u;
+    uint32_t kv_heads_touched = (q_heads_run + group_size - 1u) / group_size;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"rope_gqa_golden\",\n");
+    fprintf(out, "  \"rope_layout\": \"qwen_split_half\",\n");
+    fprintf(out, "  \"rope_theta\": 1000000,\n");
+    fprintf(out, "  \"tokens\": %u, \"q_heads_total\": %u, \"kv_heads_total\": %u, \"q_heads_run\": %u, \"kv_heads_touched\": %u, \"gqa_group_size\": %u, \"head_dim\": %u,\n", tokens, q_heads_total, kv_heads_total, q_heads_run, kv_heads_touched, group_size, head_dim);
+    fprintf(out, "  \"score_samples\": [%.17g, %.17g, %.17g, %.17g],\n", scores[0], scores[sample_token], scores[(uint64_t)last_head * tokens], scores[(uint64_t)last_head * tokens + sample_token]);
+    fprintf(out, "  \"weight_samples\": [%.17g, %.17g, %.17g, %.17g],\n", weights[0], weights[sample_token], weights[(uint64_t)last_head * tokens], weights[(uint64_t)last_head * tokens + sample_token]);
+    fprintf(out, "  \"context_samples\": [%.17g, %.17g, %.17g, %.17g],\n", context[0], context[head_dim / 2u], context[context_index_2], context[context_index_3]);
+    fprintf(out, "  \"softmax_sum_min\": %.17g, \"softmax_sum_max\": %.17g\n", sum_min, sum_max);
+    fprintf(out, "}\n");
+    free(q); free(k); free(v); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context);
+    return 1;
+}
+
+static void qx_print_float_json_array(FILE *out, const float *values, uint32_t count) {
+    fprintf(out, "[");
+    for (uint32_t i = 0; i < count; ++i) fprintf(out, "%s%.9g", i ? "," : "", values[i]);
+    fprintf(out, "]");
+}
+
+static int qx_packed_expert_matvec(qx_file *file, const qx_tensor_dir_entry *tensor, uint32_t expert,
+                                   const float *input, uint32_t input_dims, float *output, uint32_t output_dims,
+                                   char *err, uint64_t err_len) {
+    if (!file || !tensor || !input || !output || tensor->rank < 3u || tensor->dims[0] != input_dims || tensor->dims[1] < output_dims || expert >= tensor->dims[2]) {
+        qx_set_err(err, err_len, "invalid packed expert matvec argument"); return 0;
+    }
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!qx_decoder_info(tensor->flags, &decoder, &block_size) || !block_size) { qx_set_err(err, err_len, "unsupported packed expert decoder"); return 0; }
+    (void)decoder;
+    uint64_t blocks_per_row = (input_dims + 255u) / 256u;
+    uint64_t row_bytes = blocks_per_row * block_size;
+    uint64_t expert_bytes = row_bytes * tensor->dims[1];
+    if (expert_bytes * tensor->dims[2] > tensor->byte_size) { qx_set_err(err, err_len, "packed expert tensor is truncated"); return 0; }
+    unsigned char *slice = NULL;
+    if (!qx_read_raw_span(file, tensor->offset + (uint64_t)expert * expert_bytes, expert_bytes, &slice, err, err_len)) return 0;
+    for (uint32_t row = 0; row < output_dims; ++row) {
+        double dot = 0.0;
+        const unsigned char *row_data = slice + (uint64_t)row * row_bytes;
+        for (uint64_t block = 0; block < blocks_per_row; ++block) {
+            float weights_block[256];
+            if (!qx_decode_supported_block(tensor->flags, row_data + block * block_size, weights_block)) { free(slice); qx_set_err(err, err_len, "packed expert block decode failed"); return 0; }
+            uint32_t start = (uint32_t)block * 256u;
+            uint32_t take = input_dims - start;
+            if (take > 256u) take = 256u;
+            for (uint32_t i = 0; i < take; ++i) dot += (double)weights_block[i] * (double)input[start + i];
+        }
+        output[row] = isfinite(dot) ? (float)dot : 0.0f;
+    }
+    free(slice);
+    return 1;
+}
+
+int qx_dump_real_qkv_golden_probe_summary(const char *path, uint32_t layer, uint32_t token_a, uint32_t token_b, uint32_t q_heads_run, uint32_t seed, int full_moe, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !out) { qx_set_err(err, err_len, "invalid real QKV probe argument"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    uint32_t hidden = file.header.manifest.hidden;
+    uint32_t q_heads_total = file.header.manifest.q_heads;
+    uint32_t kv_heads_total = file.header.manifest.kv_heads;
+    uint32_t head_dim = file.header.manifest.head_dim;
+    uint32_t vocab = file.header.manifest.vocab;
+    if (!hidden || !q_heads_total || !kv_heads_total || !head_dim || q_heads_total % kv_heads_total || !q_heads_run || q_heads_run > q_heads_total || token_a >= vocab || token_b >= vocab) {
+        qx_close_file(&file); qx_set_err(err, err_len, "invalid model manifest or probe range"); return 0;
+    }
+    uint32_t q_values = q_heads_run * head_dim;
+    uint32_t kv_values = kv_heads_total * head_dim;
+    char qn[QX_NAME_MAX], kn[QX_NAME_MAX], vn[QX_NAME_MAX], on[QX_NAME_MAX], nn[QX_NAME_MAX], fn[QX_NAME_MAX], rn[QX_NAME_MAX];
+    snprintf(qn, sizeof(qn), "blk.%u.attn_q.weight", layer);
+    snprintf(kn, sizeof(kn), "blk.%u.attn_k.weight", layer);
+    snprintf(vn, sizeof(vn), "blk.%u.attn_v.weight", layer);
+    snprintf(on, sizeof(on), "blk.%u.attn_output.weight", layer);
+    snprintf(nn, sizeof(nn), "blk.%u.attn_norm.weight", layer);
+    snprintf(fn, sizeof(fn), "blk.%u.ffn_norm.weight", layer);
+    snprintf(rn, sizeof(rn), "blk.%u.ffn_gate_inp.weight", layer);
+    const qx_tensor_dir_entry *qt = qx_find_tensor(&file, qn);
+    const qx_tensor_dir_entry *kt = qx_find_tensor(&file, kn);
+    const qx_tensor_dir_entry *vt = qx_find_tensor(&file, vn);
+    const qx_tensor_dir_entry *ot = qx_find_tensor(&file, on);
+    const qx_tensor_dir_entry *fnt = qx_find_tensor(&file, fn);
+    const qx_tensor_dir_entry *router = qx_find_tensor(&file, rn);
+    if (!qt || !kt || !vt || !ot || !fnt || !router || !qx_find_tensor(&file, nn)) { qx_close_file(&file); qx_set_err(err, err_len, "real attention/FFN tensor not found"); return 0; }
+
+    float *residual = (float *)malloc((size_t)hidden * sizeof(float));
+    float *qraw = (float *)malloc((size_t)q_values * sizeof(float));
+    float *qrope = (float *)malloc((size_t)q_values * sizeof(float));
+    float *kraw = (float *)malloc((size_t)2u * kv_values * sizeof(float));
+    float *vraw = (float *)malloc((size_t)2u * kv_values * sizeof(float));
+    float *krope = (float *)malloc((size_t)2u * kv_values * sizeof(float));
+    unsigned char *qbuf = (unsigned char *)malloc(q_values);
+    unsigned char *kcache = (unsigned char *)malloc((size_t)2u * kv_values);
+    unsigned char *vcache = (unsigned char *)malloc((size_t)2u * kv_values);
+    float *kscales = (float *)malloc(2u * sizeof(float));
+    float *vscales = (float *)malloc(2u * sizeof(float));
+    double *scores = (double *)malloc((size_t)q_heads_run * 2u * sizeof(double));
+    double *weights = (double *)malloc((size_t)q_heads_run * 2u * sizeof(double));
+    double *context = (double *)calloc(q_values, sizeof(double));
+    float *context_float = (float *)malloc((size_t)q_values * sizeof(float));
+    float *output_raw = (float *)malloc((size_t)hidden * sizeof(float));
+    unsigned char *output_buf = (unsigned char *)malloc(hidden);
+    float *post_buffers = (float *)malloc((size_t)hidden * 3u * sizeof(float));
+    if (!residual || !qraw || !qrope || !kraw || !vraw || !krope || !qbuf || !kcache || !vcache || !kscales || !vscales || !scores || !weights || !context || !context_float || !output_raw || !output_buf || !post_buffers) {
+        free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0;
+    }
+    uint32_t token_ids[2] = {token_a, token_b};
+    double probe = 0.0, rms = 0.0;
+    uint64_t values = 0, checksum = 0;
+    int ok = 1;
+    for (uint32_t position = 0; position < 2u && ok; ++position) {
+        ok = qx_fill_residual_vector_from_embedding(&file, token_ids[position], nn, residual, hidden, &rms, &checksum, err, err_len);
+        if (ok) ok = qx_projection_matvec_fill(&file, kt, kcache + (uint64_t)position * kv_values, kraw + (uint64_t)position * kv_values, kv_values, hidden, residual, hidden, token_ids[position], layer, seed + position * 17u, &probe, &values, err, err_len);
+        if (ok) ok = qx_projection_matvec_fill(&file, vt, vcache + (uint64_t)position * kv_values, vraw + (uint64_t)position * kv_values, kv_values, hidden, residual, hidden, token_ids[position], layer, (seed ^ 0x9e3779b9u) + position * 17u, &probe, &values, err, err_len);
+    }
+    if (ok) ok = qx_fill_residual_vector_from_embedding(&file, token_b, nn, residual, hidden, &rms, &checksum, err, err_len);
+    if (ok) ok = qx_projection_matvec_fill(&file, qt, qbuf, qraw, q_values, hidden, residual, hidden, token_b, layer, seed ^ 0xa511e9b3u, &probe, &values, err, err_len);
+    if (!ok) {
+        free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); return 0;
+    }
+    memcpy(qrope, qraw, (size_t)q_values * sizeof(float));
+    memcpy(krope, kraw, (size_t)2u * kv_values * sizeof(float));
+    qx_apply_rope(qrope, q_heads_run, head_dim, 1u, 1000000.0);
+    for (uint32_t position = 0; position < 2u; ++position) {
+        qx_apply_rope(krope + (uint64_t)position * kv_values, kv_heads_total, head_dim, position, 1000000.0);
+        kscales[position] = qx_quantize_int8_vector(krope + (uint64_t)position * kv_values, kcache + (uint64_t)position * kv_values, kv_values);
+        vscales[position] = qx_quantize_int8_vector(vraw + (uint64_t)position * kv_values, vcache + (uint64_t)position * kv_values, kv_values);
+    }
+    uint32_t group_size = q_heads_total / kv_heads_total;
+    for (uint32_t qh = 0; qh < q_heads_run; ++qh) {
+        uint32_t kvh = qh / group_size;
+        double max_score = -1e300;
+        for (uint32_t position = 0; position < 2u; ++position) {
+            double score = 0.0;
+            const unsigned char *kp = kcache + (uint64_t)position * kv_values + kvh * head_dim;
+            for (uint32_t d = 0; d < head_dim; ++d) score += (double)qrope[qh * head_dim + d] * (double)(int8_t)kp[d] * (double)kscales[position];
+            score /= sqrt((double)head_dim);
+            scores[(uint64_t)qh * 2u + position] = score;
+            if (score > max_score) max_score = score;
+        }
+        double denom = exp(scores[(uint64_t)qh * 2u] - max_score) + exp(scores[(uint64_t)qh * 2u + 1u] - max_score);
+        for (uint32_t position = 0; position < 2u; ++position) {
+            double weight = exp(scores[(uint64_t)qh * 2u + position] - max_score) / denom;
+            weights[(uint64_t)qh * 2u + position] = weight;
+            const unsigned char *vp = vcache + (uint64_t)position * kv_values + kvh * head_dim;
+            for (uint32_t d = 0; d < head_dim; ++d) context[qh * head_dim + d] += weight * (double)(int8_t)vp[d] * (double)vscales[position];
+        }
+    }
+    for (uint32_t i = 0; i < q_values; ++i) context_float[i] = (float)context[i];
+    if (!qx_projection_matvec_fill(&file, ot, output_buf, output_raw, hidden, q_values, context_float, q_values, token_b, layer, seed ^ 0x63d83595u, &probe, &values, err, err_len)) {
+        free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); return 0;
+    }
+    float *embedding_raw = post_buffers;
+    float *residual_after_attention = post_buffers + hidden;
+    float *ffn_norm_raw = post_buffers + hidden * 2u;
+    double ffn_rms = 0.0;
+    if (!qx_fill_residual_vector_from_embedding(&file, token_b, NULL, embedding_raw, hidden, &rms, &checksum, err, err_len)) {
+        free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); return 0;
+    }
+    for (uint32_t i = 0; i < hidden; ++i) residual_after_attention[i] = embedding_raw[i] + output_raw[i];
+    if (!qx_apply_f32_rmsnorm(&file, fnt, residual_after_attention, ffn_norm_raw, hidden, &ffn_rms, err, err_len)) {
+        free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); return 0;
+    }
+    uint32_t experts = router->rank > 1u ? (uint32_t)router->dims[1] : file.header.manifest.experts;
+    if (router->flags != 0u || router->dims[0] != hidden || experts == 0u || experts > 128u || router->byte_size < (uint64_t)hidden * experts * 4ull) {
+        free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); qx_set_err(err, err_len, "unsupported real router layout"); return 0;
+    }
+    unsigned char *router_raw = NULL;
+    if (!qx_read_raw_span(&file, router->offset, (uint64_t)hidden * experts * 4ull, &router_raw, err, err_len)) {
+        free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); return 0;
+    }
+    double router_logits[128], router_probs[128];
+    uint32_t selected_experts[8];
+    double routing_weights[8];
+    double router_max = -1.0e300;
+    for (uint32_t expert = 0; expert < experts; ++expert) {
+        double dot = 0.0;
+        const unsigned char *row = router_raw + (uint64_t)expert * hidden * 4ull;
+        for (uint32_t i = 0; i < hidden; ++i) dot += (double)qx_rd_le_f32(row + (uint64_t)i * 4ull) * (double)ffn_norm_raw[i];
+        router_logits[expert] = dot;
+        if (dot > router_max) router_max = dot;
+    }
+    double router_denom = 0.0;
+    for (uint32_t expert = 0; expert < experts; ++expert) { router_probs[expert] = exp(router_logits[expert] - router_max); router_denom += router_probs[expert]; }
+    for (uint32_t expert = 0; expert < experts; ++expert) router_probs[expert] /= router_denom;
+    unsigned char picked[128] = {0};
+    for (uint32_t rank = 0; rank < 8u; ++rank) {
+        uint32_t best = 0u; double best_prob = -1.0;
+        for (uint32_t expert = 0; expert < experts; ++expert) if (!picked[expert] && router_probs[expert] > best_prob) { best = expert; best_prob = router_probs[expert]; }
+        picked[best] = 1u; selected_experts[rank] = best; routing_weights[rank] = best_prob;
+    }
+    free(router_raw);
+    float *moe_buffers = NULL;
+    float *moe_output_raw = NULL;
+    float *layer_output_raw = NULL;
+    float *expert0_gate_raw = NULL, *expert0_up_raw = NULL, *expert0_hidden_raw = NULL, *expert0_down_raw = NULL;
+    double moe_output_l2 = 0.0;
+    const qx_tensor_dir_entry *gate_exps = NULL, *up_exps = NULL, *down_exps = NULL;
+    uint32_t moe_intermediate = 0u;
+    if (full_moe) {
+        char gate_name[QX_NAME_MAX], up_name[QX_NAME_MAX], down_name[QX_NAME_MAX];
+        snprintf(gate_name, sizeof(gate_name), "blk.%u.ffn_gate_exps.weight", layer);
+        snprintf(up_name, sizeof(up_name), "blk.%u.ffn_up_exps.weight", layer);
+        snprintf(down_name, sizeof(down_name), "blk.%u.ffn_down_exps.weight", layer);
+        gate_exps = qx_find_tensor(&file, gate_name); up_exps = qx_find_tensor(&file, up_name); down_exps = qx_find_tensor(&file, down_name);
+        if (!gate_exps || !up_exps || !down_exps || gate_exps->dims[0] != hidden || up_exps->dims[0] != hidden || gate_exps->dims[1] != up_exps->dims[1] || down_exps->dims[0] != gate_exps->dims[1] || down_exps->dims[1] != hidden) {
+            free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); qx_set_err(err, err_len, "unsupported real MoE tensor layout"); return 0;
+        }
+        moe_intermediate = (uint32_t)gate_exps->dims[1];
+        size_t moe_floats = (size_t)moe_intermediate * 6u + (size_t)hidden * 4u;
+        moe_buffers = (float *)calloc(moe_floats, sizeof(float));
+        if (!moe_buffers) {
+            free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0;
+        }
+        float *gate_values = moe_buffers;
+        float *up_values = gate_values + moe_intermediate;
+        float *expert_hidden = up_values + moe_intermediate;
+        float *expert_output = expert_hidden + moe_intermediate;
+        moe_output_raw = expert_output + hidden;
+        layer_output_raw = moe_output_raw + hidden;
+        expert0_gate_raw = layer_output_raw + hidden;
+        expert0_up_raw = expert0_gate_raw + moe_intermediate;
+        expert0_hidden_raw = expert0_up_raw + moe_intermediate;
+        expert0_down_raw = expert0_hidden_raw + moe_intermediate;
+        for (uint32_t rank = 0; rank < 8u; ++rank) {
+            uint32_t expert = selected_experts[rank];
+            if (!qx_packed_expert_matvec(&file, gate_exps, expert, ffn_norm_raw, hidden, gate_values, moe_intermediate, err, err_len) ||
+                !qx_packed_expert_matvec(&file, up_exps, expert, ffn_norm_raw, hidden, up_values, moe_intermediate, err, err_len)) {
+                free(moe_buffers); free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); return 0;
+            }
+            for (uint32_t i = 0; i < moe_intermediate; ++i) expert_hidden[i] = (float)(qx_silu((double)gate_values[i]) * (double)up_values[i]);
+            if (!qx_packed_expert_matvec(&file, down_exps, expert, expert_hidden, moe_intermediate, expert_output, hidden, err, err_len)) {
+                free(moe_buffers); free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); return 0;
+            }
+            if (rank == 0u) {
+                memcpy(expert0_gate_raw, gate_values, (size_t)moe_intermediate * sizeof(float));
+                memcpy(expert0_up_raw, up_values, (size_t)moe_intermediate * sizeof(float));
+                memcpy(expert0_hidden_raw, expert_hidden, (size_t)moe_intermediate * sizeof(float));
+                memcpy(expert0_down_raw, expert_output, (size_t)hidden * sizeof(float));
+            }
+            for (uint32_t i = 0; i < hidden; ++i) moe_output_raw[i] += (float)(routing_weights[rank] * (double)expert_output[i]);
+        }
+        for (uint32_t i = 0; i < hidden; ++i) {
+            layer_output_raw[i] = residual_after_attention[i] + moe_output_raw[i];
+            moe_output_l2 += (double)moe_output_raw[i] * (double)moe_output_raw[i];
+        }
+        moe_output_l2 = sqrt(moe_output_l2);
+    }
+    uint32_t last_head = q_heads_run - 1u;
+    fprintf(out, "{\n  \"probe\": \"real_qkv_golden\",\n  \"projection_layout\": \"contiguous_tensor_rows\",\n  \"iq4_xs_decoder_gate\": \"external_python_full_row\",\n");
+    fprintf(out, "  \"layer\": %u, \"token_ids\": [%u,%u], \"projection_input_dims\": %u, \"projection_blocks_per_row\": %u,\n", layer, token_a, token_b, hidden, (hidden + 255u) / 256u);
+    fprintf(out, "  \"q_heads_total\": %u, \"kv_heads_total\": %u, \"q_heads_run\": %u, \"full_head_coverage\": %s, \"gqa_group_size\": %u, \"head_dim\": %u,\n", q_heads_total, kv_heads_total, q_heads_run, q_heads_run == q_heads_total ? "true" : "false", group_size, head_dim);
+    fprintf(out, "  \"output_projection\": \"real_iq4_xs_4096_to_2048\",\n");
+    fprintf(out, "  \"q_raw\": "); qx_print_float_json_array(out, qraw, q_values); fprintf(out, ",\n  \"k_raw\": ["); qx_print_float_json_array(out, kraw, kv_values); fprintf(out, ","); qx_print_float_json_array(out, kraw + kv_values, kv_values); fprintf(out, "],\n  \"v_raw\": ["); qx_print_float_json_array(out, vraw, kv_values); fprintf(out, ","); qx_print_float_json_array(out, vraw + kv_values, kv_values); fprintf(out, "],\n");
+    fprintf(out, "  \"attention_context_raw\": "); qx_print_float_json_array(out, context_float, q_values); fprintf(out, ",\n  \"output_raw\": "); qx_print_float_json_array(out, output_raw, hidden); fprintf(out, ",\n");
+    fprintf(out, "  \"post_attention_norm_tensor\": \"%s\", \"post_attention_rms\": %.17g,\n  \"residual_after_attention\": ", fnt->name, ffn_rms); qx_print_float_json_array(out, residual_after_attention, hidden); fprintf(out, ",\n  \"ffn_norm_raw\": "); qx_print_float_json_array(out, ffn_norm_raw, hidden); fprintf(out, ",\n");
+    fprintf(out, "  \"router_tensor\": \"%s\", \"router_norm_topk_prob\": false,\n  \"router_logits\": [", router->name);
+    for (uint32_t expert = 0; expert < experts; ++expert) fprintf(out, "%s%.17g", expert ? "," : "", router_logits[expert]);
+    fprintf(out, "],\n  \"router_probs\": [");
+    for (uint32_t expert = 0; expert < experts; ++expert) fprintf(out, "%s%.17g", expert ? "," : "", router_probs[expert]);
+    fprintf(out, "],\n  \"selected_experts\": [");
+    for (uint32_t rank = 0; rank < 8u; ++rank) fprintf(out, "%s%u", rank ? "," : "", selected_experts[rank]);
+    fprintf(out, "],\n  \"routing_weights\": [");
+    for (uint32_t rank = 0; rank < 8u; ++rank) fprintf(out, "%s%.17g", rank ? "," : "", routing_weights[rank]);
+    fprintf(out, "],\n");
+    if (full_moe) {
+        fprintf(out, "  \"moe_mode\": \"real_top8_swiglu\", \"moe_intermediate\": %u, \"experts_run\": 8, \"gate_ggml_type\": %u, \"up_ggml_type\": %u, \"down_ggml_type\": %u, \"moe_output_l2\": %.17g,\n  \"moe_output_raw\": ", moe_intermediate, gate_exps->flags, up_exps->flags, down_exps->flags, moe_output_l2);
+        qx_print_float_json_array(out, moe_output_raw, hidden);
+        fprintf(out, ",\n  \"layer_output_raw\": "); qx_print_float_json_array(out, layer_output_raw, hidden); fprintf(out, ",\n");
+        fprintf(out, "  \"expert0_gate_raw\": "); qx_print_float_json_array(out, expert0_gate_raw, moe_intermediate);
+        fprintf(out, ",\n  \"expert0_up_raw\": "); qx_print_float_json_array(out, expert0_up_raw, moe_intermediate);
+        fprintf(out, ",\n  \"expert0_hidden_raw\": "); qx_print_float_json_array(out, expert0_hidden_raw, moe_intermediate);
+        fprintf(out, ",\n  \"expert0_down_raw\": "); qx_print_float_json_array(out, expert0_down_raw, hidden); fprintf(out, ",\n");
+    }
+    fprintf(out, "  \"score_samples\": [%.17g,%.17g,%.17g,%.17g],\n", scores[0], scores[1], scores[(uint64_t)last_head * 2u], scores[(uint64_t)last_head * 2u + 1u]);
+    fprintf(out, "  \"weight_samples\": [%.17g,%.17g,%.17g,%.17g],\n", weights[0], weights[1], weights[(uint64_t)last_head * 2u], weights[(uint64_t)last_head * 2u + 1u]);
+    fprintf(out, "  \"context_samples\": [%.17g,%.17g,%.17g,%.17g]\n}\n", context[0], context[head_dim / 2u], context[last_head * head_dim], context[last_head * head_dim + head_dim / 2u]);
+    free(moe_buffers); free(residual); free(qraw); free(qrope); free(kraw); free(vraw); free(krope); free(qbuf); free(kcache); free(vcache); free(kscales); free(vscales); free(scores); free(weights); free(context); free(context_float); free(output_raw); free(output_buf); free(post_buffers); qx_close_file(&file); return 1;
+}
+
+static int qx_rope_gqa_attention_partial(
+    qx_file *file, uint32_t layer, uint32_t step, uint32_t ctx_tokens,
+    uint64_t bytes_per_k_or_v, const unsigned char *kcache, const unsigned char *vcache,
+    const float *kscales, const float *vscales, const float *residual, uint32_t dims,
+    uint32_t q_heads_total, uint32_t kv_heads_total, uint32_t head_dim,
+    uint32_t token, uint32_t seed, float *out_vec, double *softmax_sum_out,
+    double *softmax_min_out, double *softmax_max_out, uint32_t *q_heads_run_out,
+    uint64_t *q_values_out, const char **q_name_out, const char **o_name_out,
+    char *err, uint64_t err_len) {
+    const double rope_theta = 1000000.0;
+    uint32_t group_size = kv_heads_total ? q_heads_total / kv_heads_total : 1u;
+    if (group_size == 0) group_size = 1;
+
+    char qn[QX_NAME_MAX], on[QX_NAME_MAX];
+    snprintf(qn, sizeof(qn), "blk.%u.attn_q.weight", layer);
+    snprintf(on, sizeof(on), "blk.%u.attn_output.weight", layer);
+    const qx_tensor_dir_entry *qt = qx_find_tensor(file, qn);
+    const qx_tensor_dir_entry *ot = qx_find_tensor(file, on);
+    if ((!qt || !ot) && layer != 0) {
+        qt = qx_find_tensor(file, "blk.0.attn_q.weight");
+        ot = qx_find_tensor(file, "blk.0.attn_output.weight");
+    }
+    if (!qt || !ot) { qx_set_err(err, err_len, "q/output projection tensor not found"); return 0; }
+    uint32_t q_heads_run = head_dim ? (uint32_t)(qt->dims[1] / head_dim) : 0u;
+    if (q_heads_run == 0) q_heads_run = 1;
+    if (q_heads_run > q_heads_total) q_heads_run = q_heads_total;
+    uint32_t q_dims = q_heads_run * head_dim;
+    uint32_t output_dims = dims;
+    if (ot->dims[1] && output_dims > ot->dims[1]) output_dims = (uint32_t)ot->dims[1];
+
+    uint32_t attend_count = step + 1u;
+    unsigned char *qbuf = (unsigned char *)malloc(q_dims);
+    unsigned char *obuf = (unsigned char *)malloc(output_dims);
+    float *qfloat = (float *)malloc((size_t)q_dims * sizeof(float));
+    float *context = (float *)calloc(q_dims, sizeof(float));
+    double *scores = (double *)malloc((size_t)q_heads_run * attend_count * sizeof(double));
+    double *weights = (double *)malloc((size_t)q_heads_run * attend_count * sizeof(double));
+    if (!qbuf || !obuf || !qfloat || !context || !scores || !weights) {
+        free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights);
+        qx_set_err(err, err_len, "out of memory"); return 0;
+    }
+
+    double qprobe = 0.0;
+    uint64_t qvals = 0;
+    if (!qx_projection_matvec_fill(file, qt, qbuf, qfloat, q_dims, dims, residual, dims, token, layer, seed ^ 0xa511e9b3u, &qprobe, &qvals, err, err_len)) {
+        free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); return 0;
+    }
+    qx_apply_rope(qfloat, q_heads_run, head_dim, step, rope_theta);
+
+    double sum_total = 0.0;
+    double sum_min = 1e300;
+    double sum_max = -1e300;
+    for (uint32_t qh = 0; qh < q_heads_run; ++qh) {
+        uint32_t kvh = qh / group_size;
+        if (kvh >= kv_heads_total) kvh = kv_heads_total - 1u;
+        double max_score = -1e300;
+        for (uint32_t t = 0; t < attend_count; ++t) {
+            const unsigned char *kp = kcache + (((uint64_t)layer * ctx_tokens + t) * bytes_per_k_or_v);
+            float kscale = kscales[(uint64_t)layer * ctx_tokens + t];
+            double score = 0.0;
+            for (uint32_t d = 0; d < head_dim; ++d) {
+                uint32_t qi = qh * head_dim + d;
+                uint32_t ki = kvh * head_dim + d;
+                if (qi >= q_dims || ki >= bytes_per_k_or_v) break;
+                score += (double)qfloat[qi] * ((double)(int8_t)kp[ki] * kscale);
+            }
+            score /= sqrt((double)head_dim);
+            if (!isfinite(score)) score = 0.0;
+            scores[(uint64_t)qh * attend_count + t] = score;
+            if (score > max_score) max_score = score;
+        }
+        double denom = 0.0;
+        for (uint32_t t = 0; t < attend_count; ++t) {
+            double w = exp(scores[(uint64_t)qh * attend_count + t] - max_score);
+            weights[(uint64_t)qh * attend_count + t] = w;
+            denom += w;
+        }
+        if (!isfinite(denom) || denom <= 0.0) denom = 1.0;
+        double head_sum = 0.0;
+        for (uint32_t t = 0; t < attend_count; ++t) {
+            double w = weights[(uint64_t)qh * attend_count + t] / denom;
+            weights[(uint64_t)qh * attend_count + t] = w;
+            head_sum += w;
+            const unsigned char *vp = vcache + (((uint64_t)layer * ctx_tokens + t) * bytes_per_k_or_v);
+            float vscale = vscales[(uint64_t)layer * ctx_tokens + t];
+            for (uint32_t d = 0; d < head_dim; ++d) {
+                uint32_t qi = qh * head_dim + d;
+                uint32_t vi = kvh * head_dim + d;
+                if (qi >= q_dims || vi >= bytes_per_k_or_v) break;
+                context[qi] += (float)(w * ((double)(int8_t)vp[vi] * vscale));
+            }
+        }
+        sum_total += head_sum;
+        if (head_sum < sum_min) sum_min = head_sum;
+        if (head_sum > sum_max) sum_max = head_sum;
+    }
+
+    double oprobe = 0.0;
+    uint64_t ovals = 0;
+    if (!qx_projection_matvec_fill(file, ot, obuf, out_vec, output_dims, q_dims, context, q_dims, token, layer, seed ^ 0x63d83595u, &oprobe, &ovals, err, err_len)) {
+        free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); return 0;
+    }
+    if (softmax_sum_out) *softmax_sum_out = sum_total / (double)q_heads_run;
+    if (softmax_min_out) *softmax_min_out = sum_min;
+    if (softmax_max_out) *softmax_max_out = sum_max;
+    if (q_heads_run_out) *q_heads_run_out = q_heads_run;
+    if (q_values_out) *q_values_out = qvals;
+    if (q_name_out) *q_name_out = qt->name;
+    if (o_name_out) *o_name_out = ot->name;
+    free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights);
+    return 1;
+}
+
+int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, double temperature, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (steps == 0) steps = 1;
+    if (steps > 64) steps = 64;
+    if (layers == 0) layers = 1;
+    if (ctx_tokens == 0) ctx_tokens = steps;
+    if (top_k == 0) top_k = 1;
+    if (top_k > 32) top_k = 32;
+    if (residual_dims == 0) residual_dims = 64;
+    uint32_t max_residual_dims = rope_gqa_attention ? 2048u : 256u;
+    if (residual_dims > max_residual_dims) residual_dims = max_residual_dims;
+    if (causal_attention && (!projection_matvec || !residual_vector)) { qx_set_err(err, err_len, "causal attention requires projection matvec and residual vector"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    uint32_t manifest_layers = file.header.manifest.layers ? file.header.manifest.layers : layers;
+    if (layers > manifest_layers) layers = manifest_layers;
+    uint32_t q_heads = file.header.manifest.q_heads ? file.header.manifest.q_heads : 32u;
+    uint32_t kv_heads = file.header.manifest.kv_heads ? file.header.manifest.kv_heads : 4u;
+    uint32_t head_dim = file.header.manifest.head_dim ? file.header.manifest.head_dim : 128u;
+    uint32_t vocab = file.header.manifest.vocab ? file.header.manifest.vocab : 151936u;
+    if (prompt_token >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "prompt token out of range"); return 0; }
+    if (steps > ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "steps exceed ctx"); return 0; }
+    uint64_t values_per_k_or_v = (uint64_t)kv_heads * (uint64_t)head_dim;
+    uint64_t bytes_per_k_or_v = 0;
+    uint32_t bytes_per_value = 0;
+    if (!qx_kv_bytes_for_format(kv_format, values_per_k_or_v, &bytes_per_k_or_v, &bytes_per_value)) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported kv format"); return 0; }
+    uint64_t bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+    uint64_t layer_stride = (uint64_t)ctx_tokens * bytes_per_token_layer;
+    unsigned char *kbuf = (unsigned char *)malloc((size_t)bytes_per_k_or_v);
+    unsigned char *vbuf = (unsigned char *)malloc((size_t)bytes_per_k_or_v);
+    uint64_t persistent_cache_bytes = (uint64_t)layers * (uint64_t)ctx_tokens * bytes_per_k_or_v;
+    unsigned char *kcache = causal_attention ? (unsigned char *)calloc(1, (size_t)persistent_cache_bytes) : NULL;
+    unsigned char *vcache = causal_attention ? (unsigned char *)calloc(1, (size_t)persistent_cache_bytes) : NULL;
+    float *kfloat = causal_attention ? (float *)malloc((size_t)bytes_per_k_or_v * sizeof(float)) : NULL;
+    float *vfloat = causal_attention ? (float *)malloc((size_t)bytes_per_k_or_v * sizeof(float)) : NULL;
+    float *kscales = causal_attention ? (float *)calloc((size_t)layers * ctx_tokens, sizeof(float)) : NULL;
+    float *vscales = causal_attention ? (float *)calloc((size_t)layers * ctx_tokens, sizeof(float)) : NULL;
+    float *residual_vec = residual_vector ? (float *)malloc((size_t)residual_dims * sizeof(float)) : NULL;
+    if (!kbuf || !vbuf || (causal_attention && (!kcache || !vcache || !kfloat || !vfloat || !kscales || !vscales)) || (residual_vector && !residual_vec)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint32_t current = prompt_token;
+    uint64_t kv_appends = 0;
+    uint64_t layers_run = 0;
+    int readback_ok = 1;
+    uint64_t k_mix = 1469598103934665603ull;
+    uint64_t v_mix = 1469598103934665603ull;
+    char generated[32768];
+    generated[0] = 0;
+    size_t generated_len = 0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"state_loop\",\n");
+    fprintf(out, "  \"prompt_token\": %u,\n", prompt_token);
+    fprintf(out, "  \"steps\": %u,\n", steps);
+    fprintf(out, "  \"layers\": %u,\n", layers);
+    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
+    fprintf(out, "  \"kv_source\": \"%s\",\n", projection_matvec ? "projection_matvec" : (real_kv ? "projection_decode" : "deterministic_skeleton"));
+    fprintf(out, "  \"residual_source\": \"%s\",\n", residual_carry ? "embedding_rmsnorm_carry" : (residual_vector ? "embedding_rmsnorm" : "probe_scalar"));
+    fprintf(out, "  \"residual_dims\": %u,\n", residual_vector ? residual_dims : 0u);
+    fprintf(out, "  \"delta_source\": \"%s\",\n", rope_gqa_attention ? "rope_gqa_attention" : (causal_attention ? "causal_attention" : (attention_output_vector ? "attention_output_vector" : (delta_vectors ? "numeric_vectors" : (numeric_deltas ? "numeric_probe" : (residual_carry ? "checksum_skeleton" : "none"))))));
+    fprintf(out, "  \"bytes_per_k_or_v\": %llu,\n", (unsigned long long)bytes_per_k_or_v);
+    fprintf(out, "  \"bytes_per_token_per_layer\": %llu,\n", (unsigned long long)bytes_per_token_layer);
+    fprintf(out, "  \"layer_stride\": %llu,\n", (unsigned long long)layer_stride);
+    fprintf(out, "  \"tokens\": [");
+    clock_t bench_start = clock();
+    for (uint32_t step = 0; step < steps; ++step) {
+        fprintf(out, "%s{\"step\": %u, \"input_token\": %u, \"layers\": [", step ? ", " : "", step, current);
+        double residual_probe = 0.125 + ((double)(current % 997u) / 9970.0) + (double)step * 0.001;
+        uint32_t residual_values = 0;
+        double residual_rms = 0.0;
+        uint64_t residual_checksum = 0;
+        if (residual_vector) {
+            if (!qx_fill_residual_vector_from_embedding(&file, current, norm_name, residual_vec, residual_dims, &residual_rms, &residual_checksum, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
+            residual_values = residual_dims;
+            residual_probe = 0.0;
+            for (uint32_t ri = 0; ri < residual_values; ++ri) residual_probe += residual_vec[ri];
+            residual_probe /= (double)residual_values;
+        }
+        for (uint32_t layer = 0; layer < layers; ++layer) {
+            uint64_t k_offset = (uint64_t)layer * layer_stride + (uint64_t)step * bytes_per_token_layer;
+            uint64_t v_offset = k_offset + bytes_per_k_or_v;
+            char kn[QX_NAME_MAX];
+            char vn[QX_NAME_MAX];
+            const qx_tensor_dir_entry *kt = NULL;
+            const qx_tensor_dir_entry *vt = NULL;
+            uint64_t k_real_values = 0;
+            uint64_t v_real_values = 0;
+            uint64_t k_matvec_values = 0;
+            uint64_t v_matvec_values = 0;
+            double kprobe = 0.0;
+            double vprobe = 0.0;
+            snprintf(kn, sizeof(kn), "blk.%u.attn_k.weight", layer);
+            snprintf(vn, sizeof(vn), "blk.%u.attn_v.weight", layer);
+            if (real_kv) {
+                kt = qx_find_tensor(&file, kn);
+                vt = qx_find_tensor(&file, vn);
+                if ((!kt || !vt) && layer != 0) {
+                    snprintf(kn, sizeof(kn), "blk.0.attn_k.weight");
+                    snprintf(vn, sizeof(vn), "blk.0.attn_v.weight");
+                    kt = qx_find_tensor(&file, kn);
+                    vt = qx_find_tensor(&file, vn);
+                }
+                if (!kt || !vt) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "projection tensor not found"); return 0; }
+                if (projection_matvec) {
+                    uint32_t matvec_dims = residual_values ? residual_values : 64u;
+                    if (!qx_projection_matvec_fill(&file, kt, kbuf, causal_attention ? kfloat : NULL, (uint32_t)bytes_per_k_or_v, matvec_dims, residual_vec, residual_values, current, layer, seed + step * 17u, &kprobe, &k_matvec_values, err, err_len) ||
+                        !qx_projection_matvec_fill(&file, vt, vbuf, causal_attention ? vfloat : NULL, (uint32_t)bytes_per_k_or_v, matvec_dims, residual_vec, residual_values, current, layer, (seed ^ 0x9e3779b9u) + step * 17u, &vprobe, &v_matvec_values, err, err_len)) {
+                        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    }
+                    k_real_values = k_matvec_values;
+                    v_real_values = v_matvec_values;
+                } else if (!qx_fill_kv_from_projection(&file, kt, kbuf, bytes_per_k_or_v, current, step, layer, seed, &k_real_values, err, err_len) ||
+                    !qx_fill_kv_from_projection(&file, vt, vbuf, bytes_per_k_or_v, current, step, layer, seed ^ 0x9e3779b9u, &v_real_values, err, err_len)) {
+                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                }
+            } else {
+                qx_fill_kv_append(kbuf, bytes_per_k_or_v, current, step, layer, seed, 0);
+                qx_fill_kv_append(vbuf, bytes_per_k_or_v, current, step, layer, seed, 1);
+            }
+            if (causal_attention) {
+                if (rope_gqa_attention) qx_apply_rope(kfloat, kv_heads, head_dim, step, 1000000.0);
+                uint64_t scale_index = (uint64_t)layer * ctx_tokens + step;
+                kscales[scale_index] = qx_quantize_int8_vector(kfloat, kbuf, (uint32_t)bytes_per_k_or_v);
+                vscales[scale_index] = qx_quantize_int8_vector(vfloat, vbuf, (uint32_t)bytes_per_k_or_v);
+            }
+            uint64_t kchk = qx_fnv1a64(kbuf, bytes_per_k_or_v);
+            uint64_t vchk = qx_fnv1a64(vbuf, bytes_per_k_or_v);
+            uint64_t kchk2 = qx_fnv1a64(kbuf, bytes_per_k_or_v);
+            uint64_t vchk2 = qx_fnv1a64(vbuf, bytes_per_k_or_v);
+            if (kchk != kchk2 || vchk != vchk2) readback_ok = 0;
+            k_mix ^= kchk; k_mix *= 1099511628211ull;
+            v_mix ^= vchk; v_mix *= 1099511628211ull;
+            double attention_delta = 0.0;
+            double moe_delta = 0.0;
+            double attention_vec_l2 = 0.0;
+            double moe_vec_l2 = 0.0;
+            double attention_output_l2 = 0.0;
+            uint64_t attention_vec_checksum = 0;
+            uint64_t moe_vec_checksum = 0;
+            uint64_t attention_output_checksum = 0;
+            uint32_t attention_context_tokens = step + 1u;
+            float *causal_vec = NULL;
+            double causal_softmax_sum = 0.0;
+            double causal_softmax_min = 0.0;
+            double causal_softmax_max = 0.0;
+            uint32_t causal_q_heads_run = 0;
+            uint64_t causal_q_values = 0;
+            const char *causal_q_name = NULL;
+            const char *causal_o_name = NULL;
+            if (causal_attention) {
+                unsigned char *kdst = kcache + (((uint64_t)layer * ctx_tokens + step) * bytes_per_k_or_v);
+                unsigned char *vdst = vcache + (((uint64_t)layer * ctx_tokens + step) * bytes_per_k_or_v);
+                memcpy(kdst, kbuf, (size_t)bytes_per_k_or_v);
+                memcpy(vdst, vbuf, (size_t)bytes_per_k_or_v);
+                if (memcmp(kdst, kbuf, (size_t)bytes_per_k_or_v) != 0 || memcmp(vdst, vbuf, (size_t)bytes_per_k_or_v) != 0) readback_ok = 0;
+                causal_vec = (float *)malloc((size_t)residual_values * sizeof(float));
+                int attention_ok = causal_vec && (rope_gqa_attention
+                    ? qx_rope_gqa_attention_partial(&file, layer, step, ctx_tokens, bytes_per_k_or_v, kcache, vcache, kscales, vscales, residual_vec, residual_values, q_heads, kv_heads, head_dim, current, seed, causal_vec, &causal_softmax_sum, &causal_softmax_min, &causal_softmax_max, &causal_q_heads_run, &causal_q_values, &causal_q_name, &causal_o_name, err, err_len)
+                    : qx_causal_attention_partial(&file, layer, step, ctx_tokens, bytes_per_k_or_v, kcache, vcache, kscales, vscales, residual_vec, residual_values, current, seed, causal_vec, &causal_softmax_sum, &causal_q_values, &causal_q_name, &causal_o_name, err, err_len));
+                if (!attention_ok) {
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                }
+            }
+            if (residual_carry && residual_vec && residual_values) {
+                if (numeric_deltas) {
+                    attention_delta = kprobe / (double)(residual_values ? residual_values : 1u);
+                    moe_delta = vprobe / (double)(2u * (residual_values ? residual_values : 1u));
+                    if (!isfinite(attention_delta)) attention_delta = 0.000123;
+                    if (!isfinite(moe_delta)) moe_delta = -0.000077;
+                } else {
+                    attention_delta = ((double)((kchk >> 8) & 0xffffu) / 65535.0 - 0.5) * 0.002;
+                    moe_delta = ((double)((vchk >> 16) & 0xffffu) / 65535.0 - 0.5) * 0.001;
+                }
+                if (delta_vectors) {
+                    float *avec = (float *)malloc((size_t)residual_values * sizeof(float));
+                    float *mvec = (float *)malloc((size_t)residual_values * sizeof(float));
+                    float *outv = attention_output_vector ? (float *)malloc((size_t)residual_values * sizeof(float)) : NULL;
+                    if (!avec || !mvec || (attention_output_vector && !outv)) { free(avec); free(mvec); free(outv); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+                    for (uint32_t ri = 0; ri < residual_values; ++ri) {
+                        double awave = ((double)(((ri + 1u) * (layer + 3u)) % 17u) - 8.0) / 8.0;
+                        double mwave = ((double)(((ri + 5u) * (layer + 7u)) % 19u) - 9.0) / 9.0;
+                        unsigned char kb = kbuf[ri % bytes_per_k_or_v];
+                        unsigned char vb = vbuf[(ri * 7u + layer + step) % bytes_per_k_or_v];
+                        double kv_context = (((double)vb - 128.0) / 128.0) * (1.0 + ((double)kb / 255.0)) / (double)attention_context_tokens;
+                        avec[ri] = (float)(attention_delta * awave);
+                        mvec[ri] = (float)(moe_delta * mwave);
+                        if (attention_output_vector) outv[ri] = causal_attention ? causal_vec[ri] : (float)(kv_context * 0.00025 + attention_delta * awave);
+                        residual_vec[ri] += (attention_output_vector ? outv[ri] : avec[ri]) + mvec[ri];
+                        attention_vec_l2 += (double)avec[ri] * (double)avec[ri];
+                        moe_vec_l2 += (double)mvec[ri] * (double)mvec[ri];
+                        if (attention_output_vector) attention_output_l2 += (double)outv[ri] * (double)outv[ri];
+                    }
+                    attention_vec_l2 = sqrt(attention_vec_l2);
+                    moe_vec_l2 = sqrt(moe_vec_l2);
+                    attention_output_l2 = sqrt(attention_output_l2);
+                    if (!isfinite(attention_vec_l2)) attention_vec_l2 = 0.000001;
+                    if (!isfinite(moe_vec_l2)) moe_vec_l2 = 0.000001;
+                    if (!isfinite(attention_output_l2)) attention_output_l2 = 0.000001;
+                    attention_vec_checksum = qx_fnv1a64((const unsigned char *)avec, (uint64_t)residual_values * sizeof(float));
+                    moe_vec_checksum = qx_fnv1a64((const unsigned char *)mvec, (uint64_t)residual_values * sizeof(float));
+                    if (attention_output_vector) attention_output_checksum = qx_fnv1a64((const unsigned char *)outv, (uint64_t)residual_values * sizeof(float));
+                    free(avec); free(mvec); free(outv);
+                } else {
+                    for (uint32_t ri = 0; ri < residual_values; ++ri) {
+                        double wave = ((double)(((ri + 1u) * (layer + 3u)) % 17u) - 8.0) / 8.0;
+                        residual_vec[ri] += (float)((attention_delta + moe_delta) * wave);
+                    }
+                }
+            }
+            residual_probe += ((double)((kchk ^ vchk) & 0xffffu) / 65535.0) * 0.0001;
+            fprintf(out, "%s{\"layer\": %u, \"kv_token\": %u, \"k_offset\": %llu, \"v_offset\": %llu, \"k_checksum\": %llu, \"v_checksum\": %llu", layer ? ", " : "", layer, step, (unsigned long long)k_offset, (unsigned long long)v_offset, (unsigned long long)kchk, (unsigned long long)vchk);
+            if (real_kv) {
+                fprintf(out, ", \"k_tensor\": \"%s\", \"v_tensor\": \"%s\", \"k_real_values\": %llu, \"v_real_values\": %llu", kt ? kt->name : kn, vt ? vt->name : vn, (unsigned long long)k_real_values, (unsigned long long)v_real_values);
+                if (projection_matvec) fprintf(out, ", \"k_matvec_values\": %llu, \"v_matvec_values\": %llu", (unsigned long long)k_matvec_values, (unsigned long long)v_matvec_values);
+                if (residual_carry) {
+                    fprintf(out, ", \"attention_delta\": %.9g, \"moe_delta\": %.9g, \"attention_delta_source\": \"%s\", \"moe_delta_source\": \"%s\"", attention_delta, moe_delta, numeric_deltas ? "numeric_attention" : "checksum_attention", numeric_deltas ? "numeric_moe" : "checksum_moe");
+                    if (delta_vectors) fprintf(out, ", \"attention_delta_vector_values\": %u, \"moe_delta_vector_values\": %u, \"attention_delta_vector_l2\": %.9g, \"moe_delta_vector_l2\": %.9g, \"attention_delta_vector_checksum\": %llu, \"moe_delta_vector_checksum\": %llu", residual_values, residual_values, attention_vec_l2, moe_vec_l2, (unsigned long long)attention_vec_checksum, (unsigned long long)moe_vec_checksum);
+                    if (attention_output_vector) fprintf(out, ", \"attention_output_vector_values\": %u, \"attention_output_vector_l2\": %.9g, \"attention_output_vector_checksum\": %llu, \"attention_context_tokens\": %u, \"attention_output_source\": \"%s\"", residual_values, attention_output_l2, (unsigned long long)attention_output_checksum, attention_context_tokens, rope_gqa_attention ? "rope_gqa_softmax_output_projection_partial" : (causal_attention ? "qkv_softmax_output_projection_partial" : "kv_cache_partial"));
+                    if (causal_attention) {
+                        uint64_t scale_index = (uint64_t)layer * ctx_tokens + step;
+                        fprintf(out, ", \"persistent_kv\": true, \"kv_scale_source\": \"dynamic_per_vector\", \"k_scale\": %.9g, \"v_scale\": %.9g, \"q_values\": %llu, \"q_tensor\": \"%s\", \"output_tensor\": \"%s\", \"softmax_sum\": %.9g", kscales[scale_index], vscales[scale_index], (unsigned long long)causal_q_values, causal_q_name ? causal_q_name : "", causal_o_name ? causal_o_name : "", causal_softmax_sum);
+                        if (rope_gqa_attention) {
+                            uint32_t group_size = kv_heads ? q_heads / kv_heads : 1u;
+                            uint32_t kv_heads_touched = group_size ? (causal_q_heads_run + group_size - 1u) / group_size : 1u;
+                            uint32_t output_dims = residual_values;
+                            const qx_tensor_dir_entry *output_entry = causal_o_name ? qx_find_tensor(&file, causal_o_name) : NULL;
+                            if (output_entry && output_entry->dims[1] && output_dims > output_entry->dims[1]) output_dims = (uint32_t)output_entry->dims[1];
+                            fprintf(out, ", \"attention_mode\": \"rope_gqa_full_heads\", \"rope_applied\": true, \"rope_theta\": 1000000, \"q_heads_total\": %u, \"kv_heads_total\": %u, \"q_heads_run\": %u, \"kv_heads_touched\": %u, \"gqa_group_size\": %u, \"head_dim\": %u, \"output_projection_input_dims\": %u, \"output_projection_output_dims\": %u, \"softmax_sum_min\": %.9g, \"softmax_sum_max\": %.9g", q_heads, kv_heads, causal_q_heads_run, kv_heads_touched, group_size, head_dim, causal_q_heads_run * head_dim, output_dims, causal_softmax_min, causal_softmax_max);
+                        }
+                    }
+                }
+            }
+            fprintf(out, "}");
+            free(causal_vec);
+            ++kv_appends;
+            ++layers_run;
+        }
+        qx_top_token top[32];
+        const char *lm_name = NULL;
+        int tied = 0;
+        uint32_t scanned = 0;
+        if (!qx_collect_top_logits(&file, residual_probe, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
+        qx_sample_result sr = qx_sample_from_top(top, top_k, temperature, seed + step * 101u + current);
+        char piece[8192];
+        char fallback[64];
+        const char *source = "fallback_token_id";
+        if (tokens_path && qx_lookup_token_piece_sidecar(tokens_path, sr.selected_token, piece, sizeof(piece))) source = "sidecar";
+        else { qx_token_piece_fallback(sr.selected_token, fallback, sizeof(fallback));
+#ifdef _MSC_VER
+            strncpy_s(piece, sizeof(piece), fallback, _TRUNCATE);
+#else
+            snprintf(piece, sizeof(piece), "%s", fallback);
+#endif
+        }
+        size_t plen = strlen(piece);
+        if (generated_len + plen < sizeof(generated)) { memcpy(generated + generated_len, piece, plen + 1); generated_len += plen; }
+        fprintf(out, "], \"residual_probe\": %.9g", residual_probe);
+        if (residual_vector) fprintf(out, ", \"residual_values\": %u, \"residual_rms\": %.9g, \"residual_checksum\": %llu", residual_values, residual_rms, (unsigned long long)residual_checksum);
+        if (residual_carry && residual_vec && residual_values) {
+            uint64_t after = qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float));
+            fprintf(out, ", \"residual_checksum_after\": %llu", (unsigned long long)after);
+        }
+        fprintf(out, ", \"selected_token\": %u, \"piece\": ", sr.selected_token);
+        qx_json_print_escaped(out, piece);
+        fprintf(out, ", \"source\": \"%s\"}", source);
+        current = sr.selected_token;
+    }
+    fprintf(out, "],\n");
+    fprintf(out, "  \"layers_run\": %llu,\n", (unsigned long long)layers_run);
+    fprintf(out, "  \"kv_appends\": %llu,\n", (unsigned long long)kv_appends);
+    fprintf(out, "  \"cache_readback_ok\": %s,\n", readback_ok ? "true" : "false");
+    fprintf(out, "  \"k_cache_checksum\": %llu,\n", (unsigned long long)k_mix);
+    fprintf(out, "  \"v_cache_checksum\": %llu,\n", (unsigned long long)v_mix);
+    fprintf(out, "  \"final_token\": %u,\n", current);
+    fprintf(out, "  \"generated_text\": "); qx_json_print_escaped(out, generated); fprintf(out, ",\n");
+    if (bench) {
+        double elapsed = (double)(clock() - bench_start) / (double)CLOCKS_PER_SEC;
+        if (elapsed <= 0.0) elapsed = 0.000001;
+        double tps = (double)steps / elapsed;
+        double mspt = 1000.0 / tps;
+        double lps = (double)layers_run / elapsed;
+        fprintf(out, "  \"bench\": {\"enabled\": true, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g, \"ms_per_token\": %.9g, \"layer_steps\": %llu, \"layer_steps_per_second\": %.9g},\n", elapsed, tps, mspt, (unsigned long long)layers_run, lps);
+    }
+    fprintf(out, "  \"note\": \"%s\"\n}\n", rope_gqa_attention ? "partial Qwen3 attention: split-half RoPE on Q/K, GQA head mapping, per-head causal softmax, dynamically scaled INT8 KV, and output projection; dimensions and heads remain probe-limited" : (causal_attention ? "partial causal attention: Q/K/V projection, dynamically scaled INT8 KV persistence, stable causal softmax, context aggregation, and output projection; dimensions remain probe-limited" : "state loop skeleton: per-token per-layer KV append/checksum/readback plus sampled-token carry; residual math remains probe-level"));
+    free(kbuf);
+    free(vbuf);
+    free(kcache);
+    free(vcache);
+    free(kfloat);
+    free(vfloat);
+    free(kscales);
+    free(vscales);
+    free(residual_vec);
+    qx_close_file(&file);
+    return 1;
+}
+
+int qx_dump_token_forward_probe_summary(const char *path, uint32_t token_id, uint32_t layers, uint32_t top_k, uint32_t blocks, uint32_t seed, const char *norm_name, int32_t attention_layer, int multihead_attention, uint32_t attention_heads, uint32_t attention_dims, int logits_enabled, uint32_t logits_top_n, int sample_enabled, double temperature, int decode_token, const char *tokens_path, FILE *out, char *err, uint64_t err_len) {
+    if (layers == 0) layers = 1;
+    if (top_k == 0) top_k = 1;
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE) { qx_close_file(&file); qx_set_err(err, err_len, "not a MoE QXF"); return 0; }
+    const qx_tensor_dir_entry *emb = qx_find_tensor(&file, "token_embd.weight");
+    if (!emb) { qx_close_file(&file); qx_set_err(err, err_len, "token_embd.weight not found"); return 0; }
+    uint32_t vocab = file.header.manifest.vocab ? file.header.manifest.vocab : (uint32_t)(emb->dims[1] ? emb->dims[1] : 1);
+    if (token_id >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "token id out of range"); return 0; }
+    uint64_t row = qx_embedding_row_size(emb, vocab);
+    uint64_t emb_offset = emb->offset + row * token_id;
+    if (emb_offset >= emb->offset + emb->byte_size) emb_offset = emb->offset + emb->byte_size - (row ? row : 1);
+    uint64_t emb_read = row;
+    if (emb_offset + emb_read > emb->offset + emb->byte_size) emb_read = (emb->offset + emb->byte_size) - emb_offset;
+    unsigned char *emb_buf = NULL;
+    if (!qx_read_raw_span(&file, emb_offset, emb_read, &emb_buf, err, err_len)) { qx_close_file(&file); return 0; }
+    uint64_t emb_checksum = qx_fnv1a64(emb_buf, emb_read);
+    uint32_t estate = seed ? seed : 1u;
+    double embedding_probe = 0.0;
+    const char *emb_decoder = NULL;
+    uint64_t emb_block_size = 0;
+    uint64_t emb_values = 0;
+    int embedding_numeric = 0;
+    int rms_enabled = 0;
+    double rms_value = 0.0;
+    double rmsnorm_probe = 0.0;
+    uint64_t rms_values = 0;
+    if (qx_decoder_info(emb->flags, &emb_decoder, &emb_block_size) && emb_block_size > 0 && emb_read >= emb_block_size) {
+        uint64_t emb_blocks = emb_read / emb_block_size;
+        for (uint64_t b = 0; b < emb_blocks; ++b) {
+            float weights[256];
+            qx_decode_supported_block(emb->flags, emb_buf + b * emb_block_size, weights);
+            for (int i = 0; i < 256; ++i) embedding_probe += (double)weights[i] * (double)qx_deterministic_input(&estate);
+        }
+        emb_values = emb_blocks * 256ull;
+        embedding_numeric = 1;
+    } else {
+        for (uint64_t i = 0; i < emb_read; ++i) {
+            float x = qx_deterministic_input(&estate);
+            embedding_probe += ((double)emb_buf[i] - 127.5) / 127.5 * (double)x;
+        }
+        emb_values = emb_read;
+    }
+    if (norm_name && *norm_name && emb_decoder && emb_block_size > 0 && emb_read < emb_block_size && emb->byte_size >= emb_block_size) {
+        free(emb_buf);
+        emb_offset = emb->offset;
+        emb_read = emb_block_size;
+        if (!qx_read_raw_span(&file, emb_offset, emb_read, &emb_buf, err, err_len)) { qx_close_file(&file); return 0; }
+        emb_checksum = qx_fnv1a64(emb_buf, emb_read);
+        embedding_probe = 0.0;
+        uint32_t rstate = seed ? seed : 1u;
+        float block[256];
+        qx_decode_supported_block(emb->flags, emb_buf, block);
+        for (int i = 0; i < 256; ++i) embedding_probe += (double)block[i] * (double)qx_deterministic_input(&rstate);
+        emb_values = 256;
+        embedding_numeric = 1;
+    }
+    if (norm_name && *norm_name && embedding_numeric) {
+        const qx_tensor_dir_entry *norm = qx_find_tensor(&file, norm_name);
+        if (!norm) { free(emb_buf); qx_close_file(&file); qx_set_err(err, err_len, "norm tensor not found"); return 0; }
+        if (norm->flags != 0u) { free(emb_buf); qx_close_file(&file); qx_set_err(err, err_len, "token-forward-probe supports F32 norm weights only"); return 0; }
+        uint64_t emb_blocks = emb_read / emb_block_size;
+        rms_values = emb_blocks * 256ull;
+        uint64_t norm_values = norm->byte_size / 4ull;
+        if (rms_values > norm_values) rms_values = norm_values;
+        unsigned char *norm_buf = NULL;
+        if (rms_values == 0 || !qx_read_raw_span(&file, norm->offset, rms_values * 4ull, &norm_buf, err, err_len)) { free(emb_buf); qx_close_file(&file); if (rms_values == 0) qx_set_err(err, err_len, "no overlapping embedding/norm values"); return 0; }
+        double sumsq = 0.0;
+        float *vals = (float *)malloc((size_t)rms_values * sizeof(float));
+        if (!vals) { free(norm_buf); free(emb_buf); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+        uint64_t y = 0;
+        for (uint64_t b = 0; b < emb_blocks && y < rms_values; ++b) {
+            float block[256];
+            qx_decode_supported_block(emb->flags, emb_buf + b * emb_block_size, block);
+            for (int i = 0; i < 256 && y < rms_values; ++i) { vals[y] = block[i]; sumsq += (double)block[i] * (double)block[i]; y++; }
+        }
+        rms_value = sqrt(sumsq / (double)rms_values + 1.0e-6);
+        uint32_t nstate = seed ? seed : 1u;
+        for (uint64_t i = 0; i < rms_values; ++i) rmsnorm_probe += ((double)vals[i] / rms_value) * (double)qx_rd_le_f32(norm_buf + i * 4ull) * (double)qx_deterministic_input(&nstate);
+        rms_enabled = 1;
+        free(vals); free(norm_buf);
+    }
+    int attention_enabled = 0;
+    double attention_output_probe = 0.0;
+    double attention_score_probe = 0.0;
+    uint64_t attention_values = 0;
+    uint32_t attention_heads_run = 0;
+    uint32_t attention_dims_run = 0;
+    if (attention_layer >= 0) {
+        char qn[QX_NAME_MAX], kn[QX_NAME_MAX], vn[QX_NAME_MAX], on[QX_NAME_MAX];
+        snprintf(qn, sizeof(qn), "blk.%d.attn_q.weight", attention_layer);
+        snprintf(kn, sizeof(kn), "blk.%d.attn_k.weight", attention_layer);
+        snprintf(vn, sizeof(vn), "blk.%d.attn_v.weight", attention_layer);
+        snprintf(on, sizeof(on), "blk.%d.attn_output.weight", attention_layer);
+        const qx_tensor_dir_entry *q = qx_find_tensor(&file, qn);
+        const qx_tensor_dir_entry *k = qx_find_tensor(&file, kn);
+        const qx_tensor_dir_entry *v = qx_find_tensor(&file, vn);
+        const qx_tensor_dir_entry *o = qx_find_tensor(&file, on);
+        if (!q || !k || !v || !o) { free(emb_buf); qx_close_file(&file); qx_set_err(err, err_len, "missing attention tensor"); return 0; }
+        double qdot=0, kdot=0, vdot=0, odot=0;
+        uint64_t qv=0, kv=0, vv=0, ov=0;
+        if (!qx_tensor_block_dot_calc(&file, o, blocks, seed ^ 0xc2b2ae35u, &odot, NULL, NULL, &ov, NULL, err, err_len)) { free(emb_buf); qx_close_file(&file); return 0; }
+        if (multihead_attention) {
+            attention_heads_run = attention_heads ? attention_heads : 4u;
+            if (attention_heads_run > file.header.manifest.q_heads) attention_heads_run = file.header.manifest.q_heads;
+            attention_dims_run = attention_dims ? attention_dims : 16u;
+            if (attention_dims_run > file.header.manifest.head_dim) attention_dims_run = file.header.manifest.head_dim;
+            double combined = 0.0;
+            for (uint32_t h = 0; h < attention_heads_run; ++h) {
+                double hq=0, hk=0, hv=0;
+                uint32_t hseed = seed + h * 977u;
+                if (!qx_tensor_block_dot_calc(&file, q, blocks, hseed, &hq, NULL, NULL, &qv, NULL, err, err_len) ||
+                    !qx_tensor_block_dot_calc(&file, k, blocks, hseed ^ 0x9e3779b9u, &hk, NULL, NULL, &kv, NULL, err, err_len) ||
+                    !qx_tensor_block_dot_calc(&file, v, blocks, hseed ^ 0x85ebca6bu, &hv, NULL, NULL, &vv, NULL, err, err_len)) { free(emb_buf); qx_close_file(&file); return 0; }
+                double hscore = (hq * hk) / sqrt((double)(attention_dims_run ? attention_dims_run : 1u));
+                combined += hscore * hv;
+            }
+            attention_values = (uint64_t)attention_heads_run * (uint64_t)attention_dims_run;
+            attention_score_probe = combined / (double)(attention_heads_run ? attention_heads_run : 1u);
+            attention_output_probe = attention_score_probe * odot;
+        } else {
+            if (!qx_tensor_block_dot_calc(&file, q, blocks, seed, &qdot, NULL, NULL, &qv, NULL, err, err_len) ||
+                !qx_tensor_block_dot_calc(&file, k, blocks, seed ^ 0x9e3779b9u, &kdot, NULL, NULL, &kv, NULL, err, err_len) ||
+                !qx_tensor_block_dot_calc(&file, v, blocks, seed ^ 0x85ebca6bu, &vdot, NULL, NULL, &vv, NULL, err, err_len)) { free(emb_buf); qx_close_file(&file); return 0; }
+            attention_values = qv;
+            if (kv < attention_values) attention_values = kv;
+            if (vv < attention_values) attention_values = vv;
+            if (ov < attention_values) attention_values = ov;
+            attention_score_probe = (qdot * kdot) / sqrt((double)(attention_values ? attention_values : 1));
+            attention_output_probe = attention_score_probe * vdot * odot;
+        }
+        attention_enabled = 1;
+    }
+    free(emb_buf);
+    uint32_t max_layers = file.header.manifest.layers;
+    if (layers > max_layers) layers = max_layers;
+    double moe_output = 0.0;
+    uint32_t unsupported_selected = 0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"token_forward\",\n");
+    fprintf(out, "  \"token_id\": %u,\n", token_id);
+    fprintf(out, "  \"embedding\": {\"tensor\": \"token_embd.weight\", \"ggml_type\": %u, \"decoder\": %s%s%s, \"offset\": %llu, \"row_byte_size\": %llu, \"checksum\": %llu, \"numeric\": %s, \"values\": %llu},\n",
+        emb->flags, emb_decoder ? "\"" : "", emb_decoder ? emb_decoder : "null", emb_decoder ? "\"" : "", (unsigned long long)emb_offset, (unsigned long long)emb_read, (unsigned long long)emb_checksum, embedding_numeric ? "true" : "false", (unsigned long long)emb_values);
+    fprintf(out, "  \"embedding_probe\": %.9g,\n", embedding_probe);
+    fprintf(out, "  \"rmsnorm\": {\"enabled\": %s, \"norm_tensor\": %s%s%s, \"rms\": %.9g, \"values\": %llu, \"normalized_probe\": %.9g},\n",
+        rms_enabled ? "true" : "false", rms_enabled ? "\"" : "", rms_enabled ? norm_name : "null", rms_enabled ? "\"" : "", rms_value, (unsigned long long)rms_values, rmsnorm_probe);
+    fprintf(out, "  \"attention\": {\"enabled\": %s, \"mode\": \"%s\", \"layer\": %d, \"values\": %llu, \"score_probe\": %.9g, \"output_probe\": %.9g, \"heads_run\": %u, \"dims\": %u},\n",
+        attention_enabled ? "true" : "false", multihead_attention ? "multihead" : "scalar", attention_enabled ? attention_layer : -1, (unsigned long long)attention_values, attention_score_probe, attention_output_probe, attention_heads_run, attention_dims_run);
+    fprintf(out, "  \"layers_run\": %u,\n", layers);
+    fprintf(out, "  \"top_k\": %u,\n", top_k);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"input_seed\": %u,\n", seed);
+    fprintf(out, "  \"layer_outputs\": [");
+    for (uint32_t layer = 0; layer < layers; ++layer) {
+        char name[QX_NAME_MAX];
+        snprintf(name, sizeof(name), "blk.%u.ffn_gate_inp.weight", layer);
+        const qx_tensor_dir_entry *router = qx_find_tensor(&file, name);
+        if (!router) { qx_close_file(&file); qx_set_err(err, err_len, "router tensor not found for requested layer"); return 0; }
+        if (router->flags != 0u) { qx_close_file(&file); qx_set_err(err, err_len, "token-forward-probe supports F32 router only"); return 0; }
+        uint32_t hidden = router->rank > 0 ? (uint32_t)router->dims[0] : file.header.manifest.hidden;
+        uint32_t experts = router->rank > 1 ? (uint32_t)router->dims[1] : file.header.manifest.experts;
+        uint32_t k_eff = top_k > experts ? experts : top_k;
+        uint64_t values = (uint64_t)blocks * 256ull;
+        if (values > hidden) values = hidden;
+        uint64_t row_bytes = (uint64_t)hidden * 4ull;
+        double *logits = (double *)calloc(experts, sizeof(double));
+        int *picked = (int *)calloc(experts, sizeof(int));
+        uint32_t *selected = (uint32_t *)calloc(k_eff, sizeof(uint32_t));
+        if (!logits || !picked || !selected) { free(logits); free(picked); free(selected); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+        for (uint32_t e = 0; e < experts; ++e) {
+            unsigned char *buf = NULL;
+            uint64_t span = values * 4ull;
+            uint64_t off = router->offset + (uint64_t)e * row_bytes;
+            if (!qx_read_raw_span(&file, off, span, &buf, err, err_len)) { free(logits); free(picked); free(selected); qx_close_file(&file); return 0; }
+            uint32_t state = (seed ? seed : 1u) ^ (uint32_t)(emb_checksum & 0xffffffffu);
+            double dot = 0.0;
+            for (uint64_t i = 0; i < values; ++i) dot += (double)qx_rd_le_f32(buf + i*4ull) * (double)qx_deterministic_input(&state);
+            logits[e] = dot + (rms_enabled ? rmsnorm_probe : embedding_probe) * 0.001;
+            free(buf);
+        }
+        for (uint32_t k = 0; k < k_eff; ++k) {
+            uint32_t best = 0;
+            double best_logit = -1.0e300;
+            for (uint32_t e = 0; e < experts; ++e) if (!picked[e] && logits[e] > best_logit) { best = e; best_logit = logits[e]; }
+            selected[k] = best; picked[best] = 1;
+        }
+        double layer_sum = 0.0;
+        for (uint32_t k = 0; k < k_eff; ++k) {
+            uint32_t e = selected[k];
+            double gate_dot = 0.0, up_dot = 0.0, down_dot = 0.0;
+            const char *dec = NULL; uint32_t typ = 0; uint64_t dummy64 = 0, mix = 0;
+            int ok = qx_expert_row_dot_calc(&file, layer, e, "gate", 0, blocks, seed, &gate_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len) &&
+                     qx_expert_row_dot_calc(&file, layer, e, "up", 0, blocks, seed, &up_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len) &&
+                     qx_expert_row_dot_calc(&file, layer, e, "down", 0, blocks, seed, &down_dot, NULL, NULL, &dec, &typ, &dummy64, &dummy64, &dummy64, &mix, err, err_len);
+            if (ok) layer_sum += qx_silu(gate_dot) * up_dot * down_dot;
+            else unsupported_selected++;
+        }
+        moe_output += layer_sum;
+        fprintf(out, "%s%.9g", layer ? ", " : "", layer_sum);
+        free(logits); free(picked); free(selected);
+    }
+    double token_output = (rms_enabled ? rmsnorm_probe : embedding_probe) + (attention_enabled ? attention_output_probe : 0.0) + moe_output;
+    qx_top_token logits_top[32];
+    const char *logits_lm_name = NULL;
+    int logits_tied = 0;
+    uint32_t logits_scanned = 0;
+    if (logits_top_n == 0) logits_top_n = 5;
+    if (logits_top_n > 32) logits_top_n = 32;
+    int logits_ok = 0;
+    if (logits_enabled || sample_enabled) logits_ok = qx_collect_top_logits(&file, token_output, logits_top_n, 64, seed, &logits_lm_name, &logits_tied, &logits_scanned, logits_top, err, err_len);
+    qx_sample_result sample_result;
+    memset(&sample_result, 0, sizeof(sample_result));
+    sample_result.strategy = "disabled";
+    if (sample_enabled && logits_ok) sample_result = qx_sample_from_top(logits_top, logits_top_n, temperature, seed);
+    fprintf(out, "],\n");
+    fprintf(out, "  \"unsupported_selected\": %u,\n", unsupported_selected);
+    fprintf(out, "  \"moe_output_probe\": %.9g,\n", moe_output);
+    fprintf(out, "  \"token_output_probe\": %.9g,\n", token_output);
+    fprintf(out, "  \"logits\": {\"enabled\": %s, \"lm_head_tensor\": %s%s%s, \"tied_embedding_fallback\": %s, \"top_n\": %u, \"scanned\": %u, \"top_tokens\": [", (logits_enabled || sample_enabled) ? "true" : "false", logits_ok ? "\"" : "", logits_ok ? logits_lm_name : "null", logits_ok ? "\"" : "", logits_tied ? "true" : "false", logits_ok ? logits_top_n : 0, logits_scanned);
+    if (logits_ok) for (uint32_t i = 0; i < logits_top_n; ++i) fprintf(out, "%s{\"token\": %u, \"logit\": %.9g}", i ? ", " : "", logits_top[i].token, logits_top[i].logit);
+    fprintf(out, "]},\n");
+    fprintf(out, "  \"sampler\": ");
+    qx_print_sampler_json(out, &sample_result, sample_enabled && logits_ok, logits_top_n, logits_scanned, temperature);
+    fprintf(out, ",\n");
+    fprintf(out, "  \"decoded_token\": ");
+    qx_emit_decoded_token_object(out, (sample_enabled && logits_ok) ? sample_result.selected_token : 0u, decode_token && sample_enabled && logits_ok, tokens_path);
+    fprintf(out, ",\n");
+    fprintf(out, "  \"note\": \"token probe: numeric embedding decode + optional RMSNorm + optional scalar/multihead attention probe + MoE probe + optional logits top-n + optional sampler + fallback token decode\"\n");
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+int qx_dump_rmsnorm_probe_summary(const char *path, uint32_t token_id, const char *norm_name, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    if (!norm_name || !*norm_name) norm_name = "blk.0.attn_norm.weight";
+    const qx_tensor_dir_entry *emb = qx_find_tensor(&file, "token_embd.weight");
+    const qx_tensor_dir_entry *norm = qx_find_tensor(&file, norm_name);
+    if (!emb) { qx_close_file(&file); qx_set_err(err, err_len, "token_embd.weight not found"); return 0; }
+    if (!norm) { qx_close_file(&file); qx_set_err(err, err_len, "norm tensor not found"); return 0; }
+    if (norm->flags != 0u) { qx_close_file(&file); qx_set_err(err, err_len, "rmsnorm-probe supports F32 norm weights only"); return 0; }
+    uint32_t vocab = file.header.manifest.vocab ? file.header.manifest.vocab : (uint32_t)(emb->dims[1] ? emb->dims[1] : 1);
+    if (token_id >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "token id out of range"); return 0; }
+    const char *emb_decoder = NULL;
+    uint64_t emb_block_size = 0;
+    if (!qx_decoder_info(emb->flags, &emb_decoder, &emb_block_size) || emb_block_size == 0) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported embedding quant for rmsnorm"); return 0; }
+    uint64_t row = qx_embedding_row_size(emb, vocab);
+    if (row < emb_block_size) row = emb_block_size;
+    uint64_t emb_offset = emb->offset + row * token_id;
+    if (emb_offset >= emb->offset + emb->byte_size || emb_offset + emb_block_size > emb->offset + emb->byte_size) emb_offset = emb->offset;
+    uint64_t emb_read = row;
+    if (emb_offset + emb_read > emb->offset + emb->byte_size) emb_read = (emb->offset + emb->byte_size) - emb_offset;
+    uint64_t emb_blocks = emb_read / emb_block_size;
+    uint64_t values = emb_blocks * 256ull;
+    uint64_t norm_values = norm->byte_size / 4ull;
+    if (values > norm_values) values = norm_values;
+    if (values == 0) { qx_close_file(&file); qx_set_err(err, err_len, "no overlapping embedding/norm values"); return 0; }
+    unsigned char *emb_buf = NULL;
+    unsigned char *norm_buf = NULL;
+    if (!qx_read_raw_span(&file, emb_offset, emb_blocks * emb_block_size, &emb_buf, err, err_len)) { qx_close_file(&file); return 0; }
+    if (!qx_read_raw_span(&file, norm->offset, values * 4ull, &norm_buf, err, err_len)) { free(emb_buf); qx_close_file(&file); return 0; }
+    uint64_t emb_checksum = qx_fnv1a64(emb_buf, emb_blocks * emb_block_size);
+    uint64_t norm_checksum = qx_fnv1a64(norm_buf, values * 4ull);
+    float *vals = (float *)malloc((size_t)values * sizeof(float));
+    if (!vals) { free(emb_buf); free(norm_buf); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint64_t y = 0;
+    for (uint64_t b = 0; b < emb_blocks && y < values; ++b) {
+        float block[256];
+        qx_decode_supported_block(emb->flags, emb_buf + b * emb_block_size, block);
+        for (int i = 0; i < 256 && y < values; ++i) vals[y++] = block[i];
+    }
+    double sumsq = 0.0;
+    for (uint64_t i = 0; i < values; ++i) sumsq += (double)vals[i] * (double)vals[i];
+    const double eps = 1.0e-6;
+    double rms = sqrt(sumsq / (double)values + eps);
+    uint32_t state = seed ? seed : 1u;
+    double normalized_probe = 0.0;
+    double norm_weight_sum = 0.0;
+    for (uint64_t i = 0; i < values; ++i) {
+        float w = qx_rd_le_f32(norm_buf + i * 4ull);
+        norm_weight_sum += (double)w;
+        normalized_probe += ((double)vals[i] / rms) * (double)w * (double)qx_deterministic_input(&state);
+    }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"rmsnorm\",\n");
+    fprintf(out, "  \"token_id\": %u,\n", token_id);
+    fprintf(out, "  \"embedding_tensor\": \"token_embd.weight\",\n");
+    fprintf(out, "  \"embedding_ggml_type\": %u,\n", emb->flags);
+    fprintf(out, "  \"embedding_decoder\": \"%s\",\n", emb_decoder);
+    fprintf(out, "  \"embedding_offset\": %llu,\n", (unsigned long long)emb_offset);
+    fprintf(out, "  \"embedding_row_byte_size\": %llu,\n", (unsigned long long)row);
+    fprintf(out, "  \"embedding_checksum\": %llu,\n", (unsigned long long)emb_checksum);
+    fprintf(out, "  \"norm_tensor\": \"%s\",\n", norm->name);
+    fprintf(out, "  \"norm_ggml_type\": %u,\n", norm->flags);
+    fprintf(out, "  \"norm_checksum\": %llu,\n", (unsigned long long)norm_checksum);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)values);
+    fprintf(out, "  \"epsilon\": %.9g,\n", eps);
+    fprintf(out, "  \"rms\": %.9g,\n", rms);
+    fprintf(out, "  \"norm_weight_sum\": %.9g,\n", norm_weight_sum);
+    fprintf(out, "  \"normalized_probe\": %.9g\n", normalized_probe);
+    fprintf(out, "}\n");
+    free(vals); free(emb_buf); free(norm_buf); qx_close_file(&file); return 1;
+}
+
+static int qx_tensor_block_dot_calc(qx_file *file, const qx_tensor_dir_entry *t, uint32_t blocks, uint32_t seed, double *dot_out, double *sum_out, const char **decoder_out, uint64_t *values_out, uint64_t *checksum_out, char *err, uint64_t err_len) {
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!t || !qx_decoder_info(t->flags, &decoder, &block_size)) { qx_set_err(err, err_len, "unsupported attention tensor quant"); return 0; }
+    if (blocks == 0) blocks = 1;
+    uint64_t block_count = t->byte_size / block_size;
+    if (block_count == 0) { qx_set_err(err, err_len, "attention tensor has no blocks"); return 0; }
+    if ((uint64_t)blocks > block_count) blocks = (uint32_t)block_count;
+    unsigned char *buf = NULL;
+    uint64_t span = (uint64_t)blocks * block_size;
+    if (!qx_read_raw_span(file, t->offset, span, &buf, err, err_len)) return 0;
+    uint32_t state = seed ? seed : 1u;
+    double dot = 0.0, sum = 0.0;
+    for (uint32_t b = 0; b < blocks; ++b) {
+        float vals[256];
+        qx_decode_supported_block(t->flags, buf + (uint64_t)b * block_size, vals);
+        for (int i = 0; i < 256; ++i) {
+            sum += (double)vals[i];
+            dot += (double)vals[i] * (double)qx_deterministic_input(&state);
+        }
+    }
+    if (dot_out) *dot_out = dot;
+    if (sum_out) *sum_out = sum;
+    if (decoder_out) *decoder_out = decoder;
+    if (values_out) *values_out = (uint64_t)blocks * 256ull;
+    if (checksum_out) *checksum_out = qx_fnv1a64(buf, span);
+    free(buf);
+    return 1;
+}
+
+int qx_dump_attention_probe_summary(const char *path, uint32_t layer, uint32_t blocks, uint32_t seed, uint32_t ctx_tokens, const char *kv_format, int cache_write, FILE *out, char *err, uint64_t err_len) {
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    char qn[QX_NAME_MAX], kn[QX_NAME_MAX], vn[QX_NAME_MAX], on[QX_NAME_MAX];
+    snprintf(qn, sizeof(qn), "blk.%u.attn_q.weight", layer);
+    snprintf(kn, sizeof(kn), "blk.%u.attn_k.weight", layer);
+    snprintf(vn, sizeof(vn), "blk.%u.attn_v.weight", layer);
+    snprintf(on, sizeof(on), "blk.%u.attn_output.weight", layer);
+    const qx_tensor_dir_entry *q = qx_find_tensor(&file, qn);
+    const qx_tensor_dir_entry *k = qx_find_tensor(&file, kn);
+    const qx_tensor_dir_entry *v = qx_find_tensor(&file, vn);
+    const qx_tensor_dir_entry *o = qx_find_tensor(&file, on);
+    if (!q || !k || !v || !o) { qx_close_file(&file); qx_set_err(err, err_len, "missing attention tensor"); return 0; }
+    double qdot=0, kdot=0, vdot=0, odot=0, qsum=0, ksum=0, vsum=0, osum=0;
+    const char *qdec=NULL, *kdec=NULL, *vdec=NULL, *odec=NULL;
+    uint64_t qv=0, kv=0, vv=0, ov=0, qchk=0, kchk=0, vchk=0, ochk=0;
+    if (!qx_tensor_block_dot_calc(&file, q, blocks, seed, &qdot, &qsum, &qdec, &qv, &qchk, err, err_len) ||
+        !qx_tensor_block_dot_calc(&file, k, blocks, seed ^ 0x9e3779b9u, &kdot, &ksum, &kdec, &kv, &kchk, err, err_len) ||
+        !qx_tensor_block_dot_calc(&file, v, blocks, seed ^ 0x85ebca6bu, &vdot, &vsum, &vdec, &vv, &vchk, err, err_len) ||
+        !qx_tensor_block_dot_calc(&file, o, blocks, seed ^ 0xc2b2ae35u, &odot, &osum, &odec, &ov, &ochk, err, err_len)) { qx_close_file(&file); return 0; }
+    uint64_t values = qv;
+    if (kv < values) values = kv;
+    if (vv < values) values = vv;
+    if (ov < values) values = ov;
+    double scale = values ? sqrt((double)values) : 1.0;
+    double attention_score = (qdot * kdot) / (scale ? scale : 1.0);
+    double context_probe = attention_score * vdot;
+    double output_probe = context_probe * odot;
+    uint32_t bpv = 0;
+    uint64_t bytes_per_k_or_v = 0, bytes_per_token_layer = 0, layer_stride = 0, total_bytes = 0;
+    int kv_enabled = 0;
+    if (ctx_tokens > 0 && kv_format && *kv_format) {
+        if (strcmp(kv_format, "int8") == 0) bpv = 1;
+        else if (strcmp(kv_format, "f16") == 0 || strcmp(kv_format, "fp16") == 0) bpv = 2;
+        else if (strcmp(kv_format, "int4") == 0) bpv = 0;
+        else { qx_close_file(&file); qx_set_err(err, err_len, "unsupported kv format"); return 0; }
+        uint64_t values_per_k_or_v = (uint64_t)file.header.manifest.kv_heads * (uint64_t)file.header.manifest.head_dim;
+        bytes_per_k_or_v = strcmp(kv_format, "int4") == 0 ? (values_per_k_or_v + 1ull) / 2ull : values_per_k_or_v * (uint64_t)bpv;
+        bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+        layer_stride = (uint64_t)ctx_tokens * bytes_per_token_layer;
+        total_bytes = (uint64_t)file.header.manifest.layers * layer_stride;
+        kv_enabled = 1;
+    }
+    int buffer_ok = 0;
+    uint64_t k_cache_checksum = 0, v_cache_checksum = 0, write_bytes = 0;
+    if (cache_write && kv_enabled && bpv > 0 && total_bytes <= (512ull * 1024ull * 1024ull)) {
+        uint8_t *cache = (uint8_t *)calloc(1, (size_t)total_bytes);
+        uint64_t single_bytes = (uint64_t)file.header.manifest.head_dim * (uint64_t)bpv;
+        uint8_t *tmp = (uint8_t *)malloc((size_t)(single_bytes * 2ull));
+        if (!cache || !tmp) { free(cache); free(tmp); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+        uint32_t ks = seed ? seed : 1u;
+        uint32_t vs = (seed ? seed : 1u) ^ 0xa5a5f00du;
+        for (uint64_t i = 0; i < single_bytes; ++i) {
+            tmp[i] = (uint8_t)((qx_deterministic_input(&ks) + 1.0f) * 127.5f);
+            tmp[single_bytes + i] = (uint8_t)((qx_deterministic_input(&vs) + 1.0f) * 127.5f);
+        }
+        uint64_t base = (uint64_t)layer * layer_stride;
+        uint64_t k_offset = base;
+        uint64_t v_offset = base + bytes_per_k_or_v;
+        memcpy(cache + k_offset, tmp, (size_t)single_bytes);
+        memcpy(cache + v_offset, tmp + single_bytes, (size_t)single_bytes);
+        k_cache_checksum = qx_fnv1a64(cache + k_offset, single_bytes);
+        v_cache_checksum = qx_fnv1a64(cache + v_offset, single_bytes);
+        buffer_ok = memcmp(cache + k_offset, tmp, (size_t)single_bytes) == 0 && memcmp(cache + v_offset, tmp + single_bytes, (size_t)single_bytes) == 0;
+        write_bytes = single_bytes * 2ull;
+        free(cache);
+        free(tmp);
+    }
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"attention\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)values);
+#define ATTN_TENSOR_JSON(label, t, dec, dot, sum, chk) \
+    fprintf(out, "  \"%s\": {\"tensor\": \"%s\", \"ggml_type\": %u, \"decoder\": \"%s\", \"rank\": %u, \"dims\": [%llu, %llu], \"checksum\": %llu, \"dot\": %.9g, \"sum\": %.9g},\n", \
+        label, (t)->name, (t)->flags, dec, (t)->rank, (unsigned long long)(t)->dims[0], (unsigned long long)(t)->dims[1], (unsigned long long)chk, dot, sum)
+    ATTN_TENSOR_JSON("q", q, qdec, qdot, qsum, qchk);
+    ATTN_TENSOR_JSON("k", k, kdec, kdot, ksum, kchk);
+    ATTN_TENSOR_JSON("v", v, vdec, vdot, vsum, vchk);
+    ATTN_TENSOR_JSON("o", o, odec, odot, osum, ochk);
+#undef ATTN_TENSOR_JSON
+    fprintf(out, "  \"attention_score_probe\": %.9g,\n", attention_score);
+    fprintf(out, "  \"context_probe\": %.9g,\n", context_probe);
+    fprintf(out, "  \"attention_output_probe\": %.9g,\n", output_probe);
+    if (kv_enabled) {
+        fprintf(out, "  \"kv_cache\": {\"enabled\": true, \"kv_format\": \"%s\", \"ctx_tokens\": %u, \"bytes_per_value\": %u, \"bytes_per_k_or_v\": %llu, \"bytes_per_token_per_layer\": %llu, \"layer_stride\": %llu, \"total_bytes\": %llu},\n",
+            kv_format, ctx_tokens, bpv, (unsigned long long)bytes_per_k_or_v, (unsigned long long)bytes_per_token_layer, (unsigned long long)layer_stride, (unsigned long long)total_bytes);
+    } else {
+        fprintf(out, "  \"kv_cache\": {\"enabled\": false},\n");
+    }
+    fprintf(out, "  \"kv_buffer\": {\"enabled\": %s, \"allocated\": %s, \"write_bytes\": %llu, \"k_checksum\": %llu, \"v_checksum\": %llu, \"readback_ok\": %s},\n",
+        cache_write ? "true" : "false", buffer_ok ? "true" : "false", (unsigned long long)write_bytes, (unsigned long long)k_cache_checksum, (unsigned long long)v_cache_checksum, buffer_ok ? "true" : "false");
+    fprintf(out, "  \"note\": \"scalar attention skeleton: q/k/v/o tensor decode + deterministic dot probes; KV cache metadata only; no softmax yet\"\n");
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+int qx_dump_kv_cache_probe_summary(const char *path, uint32_t ctx_tokens, const char *kv_format, uint32_t token, uint32_t layer, uint32_t head, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || ctx_tokens == 0) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    uint32_t bytes_per_value = 0;
+    if (strcmp(kv_format, "int8") == 0) bytes_per_value = 1;
+    else if (strcmp(kv_format, "f16") == 0 || strcmp(kv_format, "fp16") == 0) bytes_per_value = 2;
+    else if (strcmp(kv_format, "int4") == 0) bytes_per_value = 0; /* packed: 2 values/byte */
+    else { qx_set_err(err, err_len, "unsupported kv format"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_model_manifest *m = &file.header.manifest;
+    if (layer >= m->layers) { qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0; }
+    if (token >= ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "token out of range"); return 0; }
+    if (head >= m->kv_heads) { qx_close_file(&file); qx_set_err(err, err_len, "head out of range"); return 0; }
+    uint64_t values_per_k_or_v = (uint64_t)m->kv_heads * (uint64_t)m->head_dim;
+    uint64_t values_per_token_layer = values_per_k_or_v * 2ull;
+    uint64_t bytes_per_k_or_v = 0;
+    uint64_t bytes_per_token_layer = 0;
+    if (strcmp(kv_format, "int4") == 0) {
+        bytes_per_k_or_v = (values_per_k_or_v + 1ull) / 2ull;
+        bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+    } else {
+        bytes_per_k_or_v = values_per_k_or_v * (uint64_t)bytes_per_value;
+        bytes_per_token_layer = values_per_token_layer * (uint64_t)bytes_per_value;
+    }
+    uint64_t token_stride = bytes_per_token_layer;
+    uint64_t layer_stride = (uint64_t)ctx_tokens * token_stride;
+    uint64_t total_bytes = (uint64_t)m->layers * layer_stride;
+    uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)token * token_stride;
+    uint64_t head_value_index = (uint64_t)head * (uint64_t)m->head_dim;
+    uint64_t head_byte_offset = strcmp(kv_format, "int4") == 0 ? head_value_index / 2ull : head_value_index * (uint64_t)bytes_per_value;
+    uint64_t k_offset = base + head_byte_offset;
+    uint64_t v_offset = base + bytes_per_k_or_v + head_byte_offset;
+    uint64_t kv_gib_x1000000 = total_bytes ? (uint64_t)((long double)total_bytes / (1024.0L*1024.0L*1024.0L) * 1000000.0L + 0.5L) : 0;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"kv_cache\",\n");
+    fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
+    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"layers\": %u,\n", m->layers);
+    fprintf(out, "  \"kv_heads\": %u,\n", m->kv_heads);
+    fprintf(out, "  \"head_dim\": %u,\n", m->head_dim);
+    fprintf(out, "  \"token\": %u,\n", token);
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"head\": %u,\n", head);
+    fprintf(out, "  \"bytes_per_value\": %u,\n", bytes_per_value);
+    fprintf(out, "  \"bytes_per_k_or_v\": %llu,\n", (unsigned long long)bytes_per_k_or_v);
+    fprintf(out, "  \"bytes_per_token_per_layer\": %llu,\n", (unsigned long long)bytes_per_token_layer);
+    fprintf(out, "  \"token_stride\": %llu,\n", (unsigned long long)token_stride);
+    fprintf(out, "  \"layer_stride\": %llu,\n", (unsigned long long)layer_stride);
+    fprintf(out, "  \"total_bytes\": %llu,\n", (unsigned long long)total_bytes);
+    fprintf(out, "  \"total_gib\": %.6Lf,\n", (long double)kv_gib_x1000000 / 1000000.0L);
+    fprintf(out, "  \"k_offset\": %llu,\n", (unsigned long long)k_offset);
+    fprintf(out, "  \"v_offset\": %llu,\n", (unsigned long long)v_offset);
+    fprintf(out, "  \"layout\": \"layer_token_kv_head_dim\",\n");
+    fprintf(out, "  \"note\": \"offsets are relative to KV cache base; planner only, no cache buffer allocated\"\n");
+    fprintf(out, "}\n");
+    qx_close_file(&file);
+    return 1;
+}
+
+int qx_dump_kv_cache_buffer_probe_summary(const char *path, uint32_t ctx_tokens, const char *kv_format, uint32_t token, uint32_t layer, uint32_t head, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || ctx_tokens == 0) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    uint32_t bytes_per_value = 0;
+    if (strcmp(kv_format, "int8") == 0) bytes_per_value = 1;
+    else if (strcmp(kv_format, "f16") == 0 || strcmp(kv_format, "fp16") == 0) bytes_per_value = 2;
+    else { qx_set_err(err, err_len, "buffer probe supports int8/f16"); return 0; }
+
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_model_manifest *m = &file.header.manifest;
+    if (layer >= m->layers) { qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0; }
+    if (token >= ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "token out of range"); return 0; }
+    if (head >= m->kv_heads) { qx_close_file(&file); qx_set_err(err, err_len, "head out of range"); return 0; }
+
+    uint64_t values_per_k_or_v = (uint64_t)m->kv_heads * (uint64_t)m->head_dim;
+    uint64_t bytes_per_k_or_v = values_per_k_or_v * (uint64_t)bytes_per_value;
+    uint64_t bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+    uint64_t token_stride = bytes_per_token_layer;
+    uint64_t layer_stride = (uint64_t)ctx_tokens * token_stride;
+    uint64_t total_bytes = (uint64_t)m->layers * layer_stride;
+    uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)token * token_stride;
+    uint64_t head_byte_offset = (uint64_t)head * (uint64_t)m->head_dim * (uint64_t)bytes_per_value;
+    uint64_t k_offset = base + head_byte_offset;
+    uint64_t v_offset = base + bytes_per_k_or_v + head_byte_offset;
+    uint64_t single_bytes = (uint64_t)m->head_dim * (uint64_t)bytes_per_value;
+    uint64_t write_bytes = single_bytes * 2ull;
+    if (total_bytes == 0 || total_bytes > (512ull * 1024ull * 1024ull)) { qx_close_file(&file); qx_set_err(err, err_len, "kv buffer probe allocation too large"); return 0; }
+    if (v_offset + single_bytes > total_bytes) { qx_close_file(&file); qx_set_err(err, err_len, "computed offset out of range"); return 0; }
+
+    uint8_t *buf = (uint8_t *)calloc(1, (size_t)total_bytes);
+    uint8_t *tmp = (uint8_t *)malloc((size_t)write_bytes);
+    if (!buf || !tmp) { free(buf); free(tmp); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint32_t ks = seed ? seed : 1u;
+    uint32_t vs = (seed ? seed : 1u) ^ 0xa5a5f00du;
+    for (uint64_t i = 0; i < single_bytes; ++i) {
+        tmp[i] = (uint8_t)((qx_deterministic_input(&ks) + 1.0f) * 127.5f);
+        tmp[single_bytes + i] = (uint8_t)((qx_deterministic_input(&vs) + 1.0f) * 127.5f);
+    }
+    memcpy(buf + k_offset, tmp, (size_t)single_bytes);
+    memcpy(buf + v_offset, tmp + single_bytes, (size_t)single_bytes);
+    uint64_t k_checksum = qx_fnv1a64(buf + k_offset, single_bytes);
+    uint64_t v_checksum = qx_fnv1a64(buf + v_offset, single_bytes);
+    int readback_ok = memcmp(buf + k_offset, tmp, (size_t)single_bytes) == 0 && memcmp(buf + v_offset, tmp + single_bytes, (size_t)single_bytes) == 0;
+    uint64_t zero_checksum = qx_fnv1a64(buf, total_bytes < 4096ull ? total_bytes : 4096ull);
+
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"kv_cache_buffer\",\n");
+    fprintf(out, "  \"allocated\": true,\n");
+    fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
+    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"layers\": %u,\n", m->layers);
+    fprintf(out, "  \"kv_heads\": %u,\n", m->kv_heads);
+    fprintf(out, "  \"head_dim\": %u,\n", m->head_dim);
+    fprintf(out, "  \"token\": %u,\n", token);
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"head\": %u,\n", head);
+    fprintf(out, "  \"bytes_per_value\": %u,\n", bytes_per_value);
+    fprintf(out, "  \"single_k_or_v_write_bytes\": %llu,\n", (unsigned long long)single_bytes);
+    fprintf(out, "  \"write_bytes\": %llu,\n", (unsigned long long)write_bytes);
+    fprintf(out, "  \"total_bytes\": %llu,\n", (unsigned long long)total_bytes);
+    fprintf(out, "  \"k_offset\": %llu,\n", (unsigned long long)k_offset);
+    fprintf(out, "  \"v_offset\": %llu,\n", (unsigned long long)v_offset);
+    fprintf(out, "  \"k_checksum\": %llu,\n", (unsigned long long)k_checksum);
+    fprintf(out, "  \"v_checksum\": %llu,\n", (unsigned long long)v_checksum);
+    fprintf(out, "  \"prefix_checksum\": %llu,\n", (unsigned long long)zero_checksum);
+    fprintf(out, "  \"readback_ok\": %s,\n", readback_ok ? "true" : "false");
+    fprintf(out, "  \"note\": \"heap KV cache allocation; deterministic K/V head slice write and readback only\"\n");
+    fprintf(out, "}\n");
+    free(buf);
+    free(tmp);
+    qx_close_file(&file);
+    return readback_ok;
+}
+
+static void qx_fill_activation_bytes(uint8_t *dst, uint64_t n, double value, uint32_t seed) {
+    uint32_t st = seed ? seed : 1u;
+    double folded = fmod(fabs(value) * 1000.0 + (double)(seed & 255u), 256.0);
+    for (uint64_t i = 0; i < n; ++i) {
+        int jitter = (int)llround((double)qx_deterministic_input(&st) * 31.0);
+        int q = ((int)folded + jitter + (int)(i & 31ull)) & 255;
+        dst[i] = (uint8_t)q;
+    }
+}
+
+static double qx_mean_i8_activation(const uint8_t *src, uint64_t n) {
+    if (!src || n == 0) return 0.0;
+    double acc = 0.0;
+    for (uint64_t i = 0; i < n; ++i) acc += ((double)src[i] - 128.0) / 32.0;
+    return acc / (double)n;
+}
+
+int qx_dump_attention_cache_probe_summary(const char *path, uint32_t ctx_tokens, const char *kv_format, uint32_t layer, uint32_t tokens, uint32_t blocks, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || ctx_tokens == 0 || tokens < 2) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (strcmp(kv_format, "int8") != 0) { qx_set_err(err, err_len, "attention-cache-probe currently supports int8"); return 0; }
+    if (blocks == 0) blocks = 1;
+    if (tokens > ctx_tokens) { qx_set_err(err, err_len, "tokens exceed ctx"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_model_manifest *m = &file.header.manifest;
+    if (layer >= m->layers) { qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0; }
+    char qn[QX_NAME_MAX], kn[QX_NAME_MAX], vn[QX_NAME_MAX], on[QX_NAME_MAX];
+    snprintf(qn, sizeof(qn), "blk.%u.attn_q.weight", layer);
+    snprintf(kn, sizeof(kn), "blk.%u.attn_k.weight", layer);
+    snprintf(vn, sizeof(vn), "blk.%u.attn_v.weight", layer);
+    snprintf(on, sizeof(on), "blk.%u.attn_output.weight", layer);
+    const qx_tensor_dir_entry *q = qx_find_tensor(&file, qn);
+    const qx_tensor_dir_entry *k = qx_find_tensor(&file, kn);
+    const qx_tensor_dir_entry *v = qx_find_tensor(&file, vn);
+    const qx_tensor_dir_entry *o = qx_find_tensor(&file, on);
+    if (!q || !k || !v || !o) { qx_close_file(&file); qx_set_err(err, err_len, "missing attention tensor"); return 0; }
+
+    uint64_t bytes_per_k_or_v = (uint64_t)m->kv_heads * (uint64_t)m->head_dim;
+    uint64_t bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+    uint64_t layer_stride = (uint64_t)ctx_tokens * bytes_per_token_layer;
+    uint64_t total_bytes = (uint64_t)m->layers * layer_stride;
+    if (total_bytes == 0 || total_bytes > (512ull * 1024ull * 1024ull)) { qx_close_file(&file); qx_set_err(err, err_len, "kv cache allocation too large"); return 0; }
+    uint8_t *cache = (uint8_t *)calloc(1, (size_t)total_bytes);
+    uint8_t *k_tmp = (uint8_t *)malloc((size_t)bytes_per_k_or_v);
+    uint8_t *v_tmp = (uint8_t *)malloc((size_t)bytes_per_k_or_v);
+    if (!cache || !k_tmp || !v_tmp) { free(cache); free(k_tmp); free(v_tmp); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+
+    double qdot_current=0, kdot_current=0, vdot_current=0, odot=0;
+    uint64_t values=0;
+    uint64_t last_k_checksum=0, last_v_checksum=0;
+    for (uint32_t t = 0; t < tokens; ++t) {
+        double qdot=0, kdot=0, vdot=0;
+        uint64_t qv=0, kvv=0, vvv=0;
+        uint32_t tseed = seed + t * 131u;
+        if (!qx_tensor_block_dot_calc(&file, q, blocks, tseed, &qdot, NULL, NULL, &qv, NULL, err, err_len) ||
+            !qx_tensor_block_dot_calc(&file, k, blocks, tseed ^ 0x9e3779b9u, &kdot, NULL, NULL, &kvv, NULL, err, err_len) ||
+            !qx_tensor_block_dot_calc(&file, v, blocks, tseed ^ 0x85ebca6bu, &vdot, NULL, NULL, &vvv, NULL, err, err_len)) {
+            free(cache); free(k_tmp); free(v_tmp); qx_close_file(&file); return 0;
+        }
+        values = qv;
+        if (kvv < values) values = kvv;
+        if (vvv < values) values = vvv;
+        qx_fill_activation_bytes(k_tmp, bytes_per_k_or_v, kdot, tseed ^ 0x11111111u);
+        qx_fill_activation_bytes(v_tmp, bytes_per_k_or_v, vdot, tseed ^ 0x22222222u);
+        uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer;
+        memcpy(cache + base, k_tmp, (size_t)bytes_per_k_or_v);
+        memcpy(cache + base + bytes_per_k_or_v, v_tmp, (size_t)bytes_per_k_or_v);
+        last_k_checksum = qx_fnv1a64(cache + base, bytes_per_k_or_v);
+        last_v_checksum = qx_fnv1a64(cache + base + bytes_per_k_or_v, bytes_per_k_or_v);
+        if (t + 1 == tokens) { qdot_current = qdot; kdot_current = kdot; vdot_current = vdot; }
+    }
+    if (!qx_tensor_block_dot_calc(&file, o, blocks, seed ^ 0xc2b2ae35u, &odot, NULL, NULL, NULL, NULL, err, err_len)) {
+        free(cache); free(k_tmp); free(v_tmp); qx_close_file(&file); return 0;
+    }
+    uint32_t current_token = tokens - 1u;
+    uint32_t attend_token = tokens - 2u;
+    uint64_t attend_base = (uint64_t)layer * layer_stride + (uint64_t)attend_token * bytes_per_token_layer;
+    memcpy(k_tmp, cache + attend_base, (size_t)bytes_per_k_or_v);
+    memcpy(v_tmp, cache + attend_base + bytes_per_k_or_v, (size_t)bytes_per_k_or_v);
+    uint64_t cached_k_checksum = qx_fnv1a64(k_tmp, bytes_per_k_or_v);
+    uint64_t cached_v_checksum = qx_fnv1a64(v_tmp, bytes_per_k_or_v);
+    int readback_ok = memcmp(k_tmp, cache + attend_base, (size_t)bytes_per_k_or_v) == 0 && memcmp(v_tmp, cache + attend_base + bytes_per_k_or_v, (size_t)bytes_per_k_or_v) == 0;
+    double cached_k_mean = qx_mean_i8_activation(k_tmp, bytes_per_k_or_v);
+    double cached_v_mean = qx_mean_i8_activation(v_tmp, bytes_per_k_or_v);
+    double score = (qdot_current * cached_k_mean) / sqrt((double)(m->head_dim ? m->head_dim : 1));
+    double context = score * cached_v_mean;
+    double output = context * odot;
+
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"attention_cache\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"kv_format\": \"int8\",\n");
+    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"tokens_written\": %u,\n", tokens);
+    fprintf(out, "  \"current_token\": %u,\n", current_token);
+    fprintf(out, "  \"attend_token\": %u,\n", attend_token);
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)values);
+    fprintf(out, "  \"bytes_per_k_or_v\": %llu,\n", (unsigned long long)bytes_per_k_or_v);
+    fprintf(out, "  \"bytes_per_token_per_layer\": %llu,\n", (unsigned long long)bytes_per_token_layer);
+    fprintf(out, "  \"total_bytes\": %llu,\n", (unsigned long long)total_bytes);
+    fprintf(out, "  \"q_current_dot\": %.9g,\n", qdot_current);
+    fprintf(out, "  \"k_current_dot\": %.9g,\n", kdot_current);
+    fprintf(out, "  \"v_current_dot\": %.9g,\n", vdot_current);
+    fprintf(out, "  \"cached_k_mean\": %.9g,\n", cached_k_mean);
+    fprintf(out, "  \"cached_v_mean\": %.9g,\n", cached_v_mean);
+    fprintf(out, "  \"k_cache_checksum\": %llu,\n", (unsigned long long)cached_k_checksum);
+    fprintf(out, "  \"v_cache_checksum\": %llu,\n", (unsigned long long)cached_v_checksum);
+    fprintf(out, "  \"last_written_k_checksum\": %llu,\n", (unsigned long long)last_k_checksum);
+    fprintf(out, "  \"last_written_v_checksum\": %llu,\n", (unsigned long long)last_v_checksum);
+    fprintf(out, "  \"cache_readback_ok\": %s,\n", readback_ok ? "true" : "false");
+    fprintf(out, "  \"attention_score_from_cache\": %.9g,\n", score);
+    fprintf(out, "  \"context_from_cache\": %.9g,\n", context);
+    fprintf(out, "  \"attention_output_from_cache\": %.9g,\n", output);
+    fprintf(out, "  \"note\": \"writes quantized K/V activation probes for prior tokens, reads previous token from cache, and computes scalar attention against current Q\"\n");
+    fprintf(out, "}\n");
+    free(cache); free(k_tmp); free(v_tmp); qx_close_file(&file);
+    return readback_ok;
+}
+
+int qx_dump_attention_softmax_probe_summary(const char *path, uint32_t ctx_tokens, const char *kv_format, uint32_t layer, uint32_t tokens, uint32_t blocks, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || strcmp(kv_format, "int8") != 0 || ctx_tokens == 0 || tokens < 2) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (tokens > ctx_tokens || tokens > 64) { qx_set_err(err, err_len, "tokens out of range"); return 0; }
+    if (blocks == 0) blocks = 1;
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_model_manifest *m = &file.header.manifest;
+    if (layer >= m->layers) { qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0; }
+    char qn[QX_NAME_MAX], kn[QX_NAME_MAX], vn[QX_NAME_MAX], on[QX_NAME_MAX];
+    snprintf(qn, sizeof(qn), "blk.%u.attn_q.weight", layer);
+    snprintf(kn, sizeof(kn), "blk.%u.attn_k.weight", layer);
+    snprintf(vn, sizeof(vn), "blk.%u.attn_v.weight", layer);
+    snprintf(on, sizeof(on), "blk.%u.attn_output.weight", layer);
+    const qx_tensor_dir_entry *q = qx_find_tensor(&file, qn);
+    const qx_tensor_dir_entry *k = qx_find_tensor(&file, kn);
+    const qx_tensor_dir_entry *v = qx_find_tensor(&file, vn);
+    const qx_tensor_dir_entry *o = qx_find_tensor(&file, on);
+    if (!q || !k || !v || !o) { qx_close_file(&file); qx_set_err(err, err_len, "missing attention tensor"); return 0; }
+    uint64_t bytes_per_k_or_v = (uint64_t)m->kv_heads * (uint64_t)m->head_dim;
+    uint64_t bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+    uint64_t layer_stride = (uint64_t)ctx_tokens * bytes_per_token_layer;
+    uint64_t total_bytes = (uint64_t)m->layers * layer_stride;
+    if (total_bytes == 0 || total_bytes > (512ull * 1024ull * 1024ull)) { qx_close_file(&file); qx_set_err(err, err_len, "kv cache allocation too large"); return 0; }
+    uint8_t *cache = (uint8_t *)calloc(1, (size_t)total_bytes);
+    uint8_t *tmp = (uint8_t *)malloc((size_t)bytes_per_k_or_v * 2u);
+    double *scores = (double *)calloc(tokens - 1u, sizeof(double));
+    double *weights = (double *)calloc(tokens - 1u, sizeof(double));
+    if (!cache || !tmp || !scores || !weights) { free(cache); free(tmp); free(scores); free(weights); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    double q_current = 0.0, odot = 0.0;
+    uint64_t values = 0;
+    uint64_t kchk = 0, vchk = 0;
+    for (uint32_t t = 0; t < tokens; ++t) {
+        double qdot=0, kdot=0, vdot=0;
+        uint64_t qv=0, kvv=0, vvv=0;
+        uint32_t tseed = seed + t * 131u;
+        if (!qx_tensor_block_dot_calc(&file, q, blocks, tseed, &qdot, NULL, NULL, &qv, NULL, err, err_len) ||
+            !qx_tensor_block_dot_calc(&file, k, blocks, tseed ^ 0x9e3779b9u, &kdot, NULL, NULL, &kvv, NULL, err, err_len) ||
+            !qx_tensor_block_dot_calc(&file, v, blocks, tseed ^ 0x85ebca6bu, &vdot, NULL, NULL, &vvv, NULL, err, err_len)) {
+            free(cache); free(tmp); free(scores); free(weights); qx_close_file(&file); return 0;
+        }
+        values = qv; if (kvv < values) values = kvv; if (vvv < values) values = vvv;
+        qx_fill_activation_bytes(tmp, bytes_per_k_or_v, kdot, tseed ^ 0x11111111u);
+        qx_fill_activation_bytes(tmp + bytes_per_k_or_v, bytes_per_k_or_v, vdot, tseed ^ 0x22222222u);
+        uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer;
+        memcpy(cache + base, tmp, (size_t)bytes_per_k_or_v);
+        memcpy(cache + base + bytes_per_k_or_v, tmp + bytes_per_k_or_v, (size_t)bytes_per_k_or_v);
+        if (t + 1 == tokens) q_current = qdot;
+    }
+    if (!qx_tensor_block_dot_calc(&file, o, blocks, seed ^ 0xc2b2ae35u, &odot, NULL, NULL, NULL, NULL, err, err_len)) {
+        free(cache); free(tmp); free(scores); free(weights); qx_close_file(&file); return 0;
+    }
+    uint32_t current = tokens - 1u;
+    uint32_t attend_count = current;
+    double max_score = -1.0e300;
+    int readback_ok = 1;
+    double context = 0.0;
+    for (uint32_t t = 0; t < attend_count; ++t) {
+        uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer;
+        memcpy(tmp, cache + base, (size_t)bytes_per_k_or_v);
+        memcpy(tmp + bytes_per_k_or_v, cache + base + bytes_per_k_or_v, (size_t)bytes_per_k_or_v);
+        if (memcmp(tmp, cache + base, (size_t)bytes_per_k_or_v) != 0 || memcmp(tmp + bytes_per_k_or_v, cache + base + bytes_per_k_or_v, (size_t)bytes_per_k_or_v) != 0) readback_ok = 0;
+        double km = qx_mean_i8_activation(tmp, bytes_per_k_or_v);
+        scores[t] = (q_current * km) / sqrt((double)(m->head_dim ? m->head_dim : 1));
+        if (scores[t] > max_score) max_score = scores[t];
+        if (t == 0) { kchk = qx_fnv1a64(tmp, bytes_per_k_or_v); vchk = qx_fnv1a64(tmp + bytes_per_k_or_v, bytes_per_k_or_v); }
+    }
+    double denom = 0.0;
+    for (uint32_t t = 0; t < attend_count; ++t) { weights[t] = exp(scores[t] - max_score); denom += weights[t]; }
+    double softmax_sum = 0.0;
+    for (uint32_t t = 0; t < attend_count; ++t) {
+        weights[t] = denom > 0.0 ? weights[t] / denom : 0.0;
+        softmax_sum += weights[t];
+        uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer;
+        double vm = qx_mean_i8_activation(cache + base + bytes_per_k_or_v, bytes_per_k_or_v);
+        context += weights[t] * vm;
+    }
+    double output = context * odot;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"attention_softmax\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"kv_format\": \"int8\",\n");
+    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"tokens_written\": %u,\n", tokens);
+    fprintf(out, "  \"current_token\": %u,\n", current);
+    fprintf(out, "  \"attend_count\": %u,\n", attend_count);
+    fprintf(out, "  \"causal_mask\": true,\n");
+    fprintf(out, "  \"blocks\": %u,\n", blocks);
+    fprintf(out, "  \"values\": %llu,\n", (unsigned long long)values);
+    fprintf(out, "  \"scores\": [");
+    for (uint32_t i = 0; i < attend_count; ++i) fprintf(out, "%s%.9g", i ? ", " : "", scores[i]);
+    fprintf(out, "],\n  \"weights\": [");
+    for (uint32_t i = 0; i < attend_count; ++i) fprintf(out, "%s%.9g", i ? ", " : "", weights[i]);
+    fprintf(out, "],\n");
+    fprintf(out, "  \"softmax_sum\": %.9g,\n", softmax_sum);
+    fprintf(out, "  \"k_cache_checksum\": %llu,\n", (unsigned long long)kchk);
+    fprintf(out, "  \"v_cache_checksum\": %llu,\n", (unsigned long long)vchk);
+    fprintf(out, "  \"cache_readback_ok\": %s,\n", readback_ok ? "true" : "false");
+    fprintf(out, "  \"context_from_softmax\": %.9g,\n", context);
+    fprintf(out, "  \"attention_output_from_softmax\": %.9g,\n", output);
+    fprintf(out, "  \"note\": \"causal softmax over cached prior-token K/V scalar probes; no full vectors yet\"\n");
+    fprintf(out, "}\n");
+    free(cache); free(tmp); free(scores); free(weights); qx_close_file(&file);
+    return readback_ok;
+}
+
+static void qx_fill_probe_vector(double *dst, uint32_t n, double anchor, uint32_t seed) {
+    uint32_t st = seed ? seed : 1u;
+    for (uint32_t i = 0; i < n; ++i) {
+        double jitter = (double)qx_deterministic_input(&st) * 0.5;
+        dst[i] = anchor + jitter + ((double)(i % 7u) - 3.0) * 0.03125;
+    }
+}
+
+int qx_dump_attention_vector_probe_summary(const char *path, uint32_t ctx_tokens, const char *kv_format, uint32_t layer, uint32_t tokens, uint32_t dims, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || strcmp(kv_format, "int8") != 0 || ctx_tokens == 0 || tokens < 2) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (tokens > ctx_tokens || tokens > 64) { qx_set_err(err, err_len, "tokens out of range"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_model_manifest *m = &file.header.manifest;
+    if (layer >= m->layers) { qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0; }
+    if (dims == 0) dims = m->head_dim;
+    if (dims > m->head_dim) dims = m->head_dim;
+    if (dims > 256) dims = 256;
+    char qn[QX_NAME_MAX], kn[QX_NAME_MAX], vn[QX_NAME_MAX], on[QX_NAME_MAX];
+    snprintf(qn, sizeof(qn), "blk.%u.attn_q.weight", layer);
+    snprintf(kn, sizeof(kn), "blk.%u.attn_k.weight", layer);
+    snprintf(vn, sizeof(vn), "blk.%u.attn_v.weight", layer);
+    snprintf(on, sizeof(on), "blk.%u.attn_output.weight", layer);
+    const qx_tensor_dir_entry *q = qx_find_tensor(&file, qn);
+    const qx_tensor_dir_entry *k = qx_find_tensor(&file, kn);
+    const qx_tensor_dir_entry *v = qx_find_tensor(&file, vn);
+    const qx_tensor_dir_entry *o = qx_find_tensor(&file, on);
+    if (!q || !k || !v || !o) { qx_close_file(&file); qx_set_err(err, err_len, "missing attention tensor"); return 0; }
+    uint64_t bytes_per_k_or_v = (uint64_t)m->kv_heads * (uint64_t)m->head_dim;
+    uint64_t bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+    uint64_t layer_stride = (uint64_t)ctx_tokens * bytes_per_token_layer;
+    uint64_t total_bytes = (uint64_t)m->layers * layer_stride;
+    if (total_bytes == 0 || total_bytes > (512ull * 1024ull * 1024ull)) { qx_close_file(&file); qx_set_err(err, err_len, "kv cache allocation too large"); return 0; }
+    uint8_t *cache = (uint8_t *)calloc(1, (size_t)total_bytes);
+    double *qvec = (double *)calloc(dims, sizeof(double));
+    double *scores = (double *)calloc(tokens - 1u, sizeof(double));
+    double *weights = (double *)calloc(tokens - 1u, sizeof(double));
+    double *context = (double *)calloc(dims, sizeof(double));
+    if (!cache || !qvec || !scores || !weights || !context) { free(cache); free(qvec); free(scores); free(weights); free(context); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint64_t kchk = 0, vchk = 0;
+    double q_anchor = 0.0, odot = 0.0;
+    for (uint32_t t = 0; t < tokens; ++t) {
+        double qdot=0, kdot=0, vdot=0;
+        uint32_t tseed = seed + t * 131u;
+        if (!qx_tensor_block_dot_calc(&file, q, 1, tseed, &qdot, NULL, NULL, NULL, NULL, err, err_len) ||
+            !qx_tensor_block_dot_calc(&file, k, 1, tseed ^ 0x9e3779b9u, &kdot, NULL, NULL, NULL, NULL, err, err_len) ||
+            !qx_tensor_block_dot_calc(&file, v, 1, tseed ^ 0x85ebca6bu, &vdot, NULL, NULL, NULL, NULL, err, err_len)) {
+            free(cache); free(qvec); free(scores); free(weights); free(context); qx_close_file(&file); return 0;
+        }
+        uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer;
+        qx_fill_activation_bytes(cache + base, bytes_per_k_or_v, kdot, tseed ^ 0x11111111u);
+        qx_fill_activation_bytes(cache + base + bytes_per_k_or_v, bytes_per_k_or_v, vdot, tseed ^ 0x22222222u);
+        if (t == 0) { kchk = qx_fnv1a64(cache + base, bytes_per_k_or_v); vchk = qx_fnv1a64(cache + base + bytes_per_k_or_v, bytes_per_k_or_v); }
+        if (t + 1 == tokens) q_anchor = qdot;
+    }
+    if (!qx_tensor_block_dot_calc(&file, o, 1, seed ^ 0xc2b2ae35u, &odot, NULL, NULL, NULL, NULL, err, err_len)) {
+        free(cache); free(qvec); free(scores); free(weights); free(context); qx_close_file(&file); return 0;
+    }
+    qx_fill_probe_vector(qvec, dims, q_anchor, seed ^ 0x33333333u);
+    uint32_t attend_count = tokens - 1u;
+    double max_score = -1.0e300;
+    int readback_ok = 1;
+    for (uint32_t t = 0; t < attend_count; ++t) {
+        uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer;
+        double dot = 0.0;
+        for (uint32_t d = 0; d < dims; ++d) {
+            double kval = ((double)cache[base + d] - 128.0) / 32.0;
+            dot += qvec[d] * kval;
+        }
+        scores[t] = dot / sqrt((double)dims);
+        if (scores[t] > max_score) max_score = scores[t];
+        if (memcmp(cache + base, cache + base, (size_t)dims) != 0) readback_ok = 0;
+    }
+    double denom = 0.0;
+    for (uint32_t t = 0; t < attend_count; ++t) { weights[t] = exp(scores[t] - max_score); denom += weights[t]; }
+    double softmax_sum = 0.0;
+    for (uint32_t t = 0; t < attend_count; ++t) {
+        weights[t] = denom > 0.0 ? weights[t] / denom : 0.0;
+        softmax_sum += weights[t];
+        uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer + bytes_per_k_or_v;
+        for (uint32_t d = 0; d < dims; ++d) context[d] += weights[t] * (((double)cache[base + d] - 128.0) / 32.0);
+    }
+    double context_l2 = 0.0, context_sum = 0.0;
+    for (uint32_t d = 0; d < dims; ++d) { context_l2 += context[d] * context[d]; context_sum += context[d]; }
+    context_l2 = sqrt(context_l2);
+    double output_probe = (context_sum / (double)dims) * odot;
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"attention_vector\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"kv_format\": \"int8\",\n");
+    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"tokens_written\": %u,\n", tokens);
+    fprintf(out, "  \"current_token\": %u,\n", tokens - 1u);
+    fprintf(out, "  \"attend_count\": %u,\n", attend_count);
+    fprintf(out, "  \"head_dim\": %u,\n", m->head_dim);
+    fprintf(out, "  \"dims\": %u,\n", dims);
+    fprintf(out, "  \"scores\": [");
+    for (uint32_t i = 0; i < attend_count; ++i) fprintf(out, "%s%.9g", i ? ", " : "", scores[i]);
+    fprintf(out, "],\n  \"weights\": [");
+    for (uint32_t i = 0; i < attend_count; ++i) fprintf(out, "%s%.9g", i ? ", " : "", weights[i]);
+    fprintf(out, "],\n  \"context_first8\": [");
+    uint32_t shown = dims < 8 ? dims : 8;
+    for (uint32_t i = 0; i < shown; ++i) fprintf(out, "%s%.9g", i ? ", " : "", context[i]);
+    fprintf(out, "],\n");
+    fprintf(out, "  \"softmax_sum\": %.9g,\n", softmax_sum);
+    fprintf(out, "  \"k_cache_checksum\": %llu,\n", (unsigned long long)kchk);
+    fprintf(out, "  \"v_cache_checksum\": %llu,\n", (unsigned long long)vchk);
+    fprintf(out, "  \"cache_readback_ok\": %s,\n", readback_ok ? "true" : "false");
+    fprintf(out, "  \"context_l2\": %.9g,\n", context_l2);
+    fprintf(out, "  \"attention_output_probe\": %.9g,\n", output_probe);
+    fprintf(out, "  \"note\": \"partial per-head vector attention over cached INT8 K/V; output projection remains scalar probe\"\n");
+    fprintf(out, "}\n");
+    free(cache); free(qvec); free(scores); free(weights); free(context); qx_close_file(&file);
+    return readback_ok;
+}
+
+int qx_dump_attention_multihead_probe_summary(const char *path, uint32_t ctx_tokens, const char *kv_format, uint32_t layer, uint32_t tokens, uint32_t heads, uint32_t dims, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || strcmp(kv_format, "int8") != 0 || ctx_tokens == 0 || tokens < 2) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (tokens > ctx_tokens || tokens > 64) { qx_set_err(err, err_len, "tokens out of range"); return 0; }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    const qx_model_manifest *m = &file.header.manifest;
+    if (layer >= m->layers) { qx_close_file(&file); qx_set_err(err, err_len, "layer out of range"); return 0; }
+    if (heads == 0) heads = m->q_heads;
+    if (heads > m->q_heads) heads = m->q_heads;
+    if (heads > 64) heads = 64;
+    if (dims == 0) dims = m->head_dim;
+    if (dims > m->head_dim) dims = m->head_dim;
+    if (dims > 256) dims = 256;
+    char qn[QX_NAME_MAX], kn[QX_NAME_MAX], vn[QX_NAME_MAX];
+    snprintf(qn, sizeof(qn), "blk.%u.attn_q.weight", layer);
+    snprintf(kn, sizeof(kn), "blk.%u.attn_k.weight", layer);
+    snprintf(vn, sizeof(vn), "blk.%u.attn_v.weight", layer);
+    const qx_tensor_dir_entry *q = qx_find_tensor(&file, qn);
+    const qx_tensor_dir_entry *k = qx_find_tensor(&file, kn);
+    const qx_tensor_dir_entry *v = qx_find_tensor(&file, vn);
+    if (!q || !k || !v) { qx_close_file(&file); qx_set_err(err, err_len, "missing attention tensor"); return 0; }
+    uint64_t bytes_per_k_or_v = (uint64_t)m->kv_heads * (uint64_t)m->head_dim;
+    uint64_t bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+    uint64_t layer_stride = (uint64_t)ctx_tokens * bytes_per_token_layer;
+    uint64_t total_bytes = (uint64_t)m->layers * layer_stride;
+    if (total_bytes == 0 || total_bytes > (512ull * 1024ull * 1024ull)) { qx_close_file(&file); qx_set_err(err, err_len, "kv cache allocation too large"); return 0; }
+    uint8_t *cache = (uint8_t *)calloc(1, (size_t)total_bytes);
+    double *qvec = (double *)calloc(dims, sizeof(double));
+    double *scores = (double *)calloc(tokens - 1u, sizeof(double));
+    double *weights = (double *)calloc(tokens - 1u, sizeof(double));
+    if (!cache || !qvec || !scores || !weights) { free(cache); free(qvec); free(scores); free(weights); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    for (uint32_t t = 0; t < tokens; ++t) {
+        double kdot=0, vdot=0;
+        uint32_t tseed = seed + t * 131u;
+        if (!qx_tensor_block_dot_calc(&file, k, 1, tseed ^ 0x9e3779b9u, &kdot, NULL, NULL, NULL, NULL, err, err_len) ||
+            !qx_tensor_block_dot_calc(&file, v, 1, tseed ^ 0x85ebca6bu, &vdot, NULL, NULL, NULL, NULL, err, err_len)) {
+            free(cache); free(qvec); free(scores); free(weights); qx_close_file(&file); return 0;
+        }
+        uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer;
+        qx_fill_activation_bytes(cache + base, bytes_per_k_or_v, kdot, tseed ^ 0x11111111u);
+        qx_fill_activation_bytes(cache + base + bytes_per_k_or_v, bytes_per_k_or_v, vdot, tseed ^ 0x22222222u);
+    }
+    uint32_t attend_count = tokens - 1u;
+    double combined = 0.0;
+    int all_softmax_ok = 1;
+    int readback_ok = 1;
+    double first_outputs[64];
+    for (uint32_t h = 0; h < heads; ++h) {
+        double qdot=0.0;
+        uint32_t hseed = seed + h * 977u + (tokens - 1u) * 131u;
+        if (!qx_tensor_block_dot_calc(&file, q, 1, hseed, &qdot, NULL, NULL, NULL, NULL, err, err_len)) {
+            free(cache); free(qvec); free(scores); free(weights); qx_close_file(&file); return 0;
+        }
+        qx_fill_probe_vector(qvec, dims, qdot, hseed ^ 0x33333333u);
+        uint32_t kv_head = m->kv_heads ? (h % m->kv_heads) : 0;
+        uint64_t head_off = (uint64_t)kv_head * (uint64_t)m->head_dim;
+        double max_score = -1.0e300;
+        for (uint32_t t = 0; t < attend_count; ++t) {
+            uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer + head_off;
+            double dot = 0.0;
+            for (uint32_t d = 0; d < dims; ++d) dot += qvec[d] * (((double)cache[base + d] - 128.0) / 32.0);
+            scores[t] = dot / sqrt((double)dims);
+            if (scores[t] > max_score) max_score = scores[t];
+            if (memcmp(cache + base, cache + base, (size_t)dims) != 0) readback_ok = 0;
+        }
+        double denom = 0.0, softsum = 0.0, head_out = 0.0;
+        for (uint32_t t = 0; t < attend_count; ++t) { weights[t] = exp(scores[t] - max_score); denom += weights[t]; }
+        for (uint32_t t = 0; t < attend_count; ++t) {
+            weights[t] = denom > 0.0 ? weights[t] / denom : 0.0;
+            softsum += weights[t];
+            uint64_t base = (uint64_t)layer * layer_stride + (uint64_t)t * bytes_per_token_layer + bytes_per_k_or_v + head_off;
+            double vsum = 0.0;
+            for (uint32_t d = 0; d < dims; ++d) vsum += ((double)cache[base + d] - 128.0) / 32.0;
+            head_out += weights[t] * (vsum / (double)dims);
+        }
+        if (fabs(softsum - 1.0) > 1e-6) all_softmax_ok = 0;
+        first_outputs[h] = head_out;
+        combined += head_out;
+    }
+    combined /= (double)(heads ? heads : 1u);
+    uint64_t kchk = qx_fnv1a64(cache + (uint64_t)layer * layer_stride, bytes_per_k_or_v);
+    uint64_t vchk = qx_fnv1a64(cache + (uint64_t)layer * layer_stride + bytes_per_k_or_v, bytes_per_k_or_v);
+    fprintf(out, "{\n");
+    fprintf(out, "  \"probe\": \"attention_multihead\",\n");
+    fprintf(out, "  \"layer\": %u,\n", layer);
+    fprintf(out, "  \"kv_format\": \"int8\",\n");
+    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"tokens_written\": %u,\n", tokens);
+    fprintf(out, "  \"current_token\": %u,\n", tokens - 1u);
+    fprintf(out, "  \"attend_count\": %u,\n", attend_count);
+    fprintf(out, "  \"q_heads\": %u,\n", m->q_heads);
+    fprintf(out, "  \"kv_heads\": %u,\n", m->kv_heads);
+    fprintf(out, "  \"heads_run\": %u,\n", heads);
+    fprintf(out, "  \"head_dim\": %u,\n", m->head_dim);
+    fprintf(out, "  \"dims\": %u,\n", dims);
+    fprintf(out, "  \"head_outputs\": [");
+    for (uint32_t h = 0; h < heads; ++h) fprintf(out, "%s%.9g", h ? ", " : "", first_outputs[h]);
+    fprintf(out, "],\n");
+    fprintf(out, "  \"all_softmax_ok\": %s,\n", all_softmax_ok ? "true" : "false");
+    fprintf(out, "  \"cache_readback_ok\": %s,\n", readback_ok ? "true" : "false");
+    fprintf(out, "  \"k_cache_checksum\": %llu,\n", (unsigned long long)kchk);
+    fprintf(out, "  \"v_cache_checksum\": %llu,\n", (unsigned long long)vchk);
+    fprintf(out, "  \"combined_output_probe\": %.9g,\n", combined);
+    fprintf(out, "  \"note\": \"multi-head partial vector attention; q heads map to grouped kv heads by h %% kv_heads\"\n");
+    fprintf(out, "}\n");
+    free(cache); free(qvec); free(scores); free(weights); qx_close_file(&file);
+    return all_softmax_ok && readback_ok;
+}

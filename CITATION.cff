@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+title: QX-mini-MoE
+message: If you use this experimental runtime, please cite this repository.
+type: software
+authors:
+  - family-names: Martinez
+    given-names: Fernando
+repository-code: https://github.com/Nando2392/qx-mini-c
+license: MIT
+date-released: 2026-08-17
+version: 0.1.0-research

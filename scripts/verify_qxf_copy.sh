@@ -1,0 +1,1 @@
+./build/qxqxf validate-copy --in tests/fixtures/qwen3-30b-a3b-mini.gguf --out models/qwen3-30b-a3b-copy.qxf

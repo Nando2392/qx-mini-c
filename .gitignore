@@ -1,0 +1,43 @@
+# Model weights and generated containers
+models/*
+!models/.gitkeep
+*.gguf
+*.qxf
+*.safetensors
+
+# Build outputs
+build/
+*.obj
+*.exe
+*.pdb
+*.ilk
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local credentials/config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Obsidian local workspace state
+wiki/.obsidian/workspace*.json
+wiki/.obsidian/cache/
+wiki/.trash/
+
+# Accidental shell artifacts
+/NUL
+/--out
+/modelsroute_trace_*.json
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
