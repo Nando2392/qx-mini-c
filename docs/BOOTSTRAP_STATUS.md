@@ -3057,3 +3057,20 @@ warm measured probe: ~8.35 s
 The independent gate recomputes final RMSNorm in Python and all vocabulary logits with llama.cpp's official `dequantize_row_q6_K`. It compares the FNV checksum of all 151936 F32 logits, top-5 and argmax. It initially failed with QX argmax `112567` versus reference `1124`, exposing a real Q6_K layout bug. The QX decoder was corrected to the official two-128-value/four-32-value layout; the complete checksum, top-5 and argmax then matched.
 
 Honesty boundary: this validates the complete output head for QX's residual. It does not yet prove that every intermediate layer residual matches an external end-to-end Qwen3 implementation, and it does not implement tokenizer parity or valid multi-token autoregression.
+
+## 2026-08-17: correct greedy multi-token state loop
+
+`state-loop-probe --full-moe --final-head --steps 2` now feeds each selected token through its own `token_embd.weight` row at the next position while preserving per-layer dynamic INT8 KV. Every position executes all 48 transformer layers, final RMSNorm and all 151936 Q6_K output rows.
+
+```text
+input tokens: [42, 1124]
+selected tokens: [1124, 29626]
+positions: [0, 1]
+layers_run: 96
+kv_appends: 96
+logits checksums: [17094101101096419516, 9438484627875866845]
+```
+
+The regression gate proves re-embedding by comparing the position-1 input checksum against an independent one-step run starting from token `1124`; it differs from the prior position's final residual. The second full-vocabulary checksum and argmax are independently recomputed with llama.cpp's official Q6_K decoder.
+
+Honesty boundary: tokenizer/BPE is not implemented and QX's intermediate residuals are not yet matched end to end against another Qwen3 runtime. This is a correctness gate, not sustained decode throughput.

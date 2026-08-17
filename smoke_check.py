@@ -69,7 +69,7 @@ def main() -> int:
     real_state = None
     if real_model.exists():
         real_golden = json.loads(run(EXE, "real-qkv-golden-probe", "--in", real_model, "--layer", 0, "--token-a", 42, "--token-b", 43, "--q-heads-run", 32, "--seed", 7, "--full-moe"))
-        real_state = json.loads(run(EXE, "state-loop-probe", "--in", real_model, "--prompt-token", 42, "--steps", 1, "--layers", 48, "--ctx", 4, "--kv", "int8", "--temperature", 0, "--seed", 7, "--full-moe", "--final-head", "--top-n", 5))
+        real_state = json.loads(run(EXE, "state-loop-probe", "--in", real_model, "--prompt-token", 42, "--steps", 2, "--layers", 48, "--ctx", 4, "--kv", "int8", "--temperature", 0, "--seed", 7, "--full-moe", "--final-head", "--top-n", 5))
 
     layer0 = result["tokens"][0]["layers"][0]
     assert result["delta_source"] == "rope_gqa_attention"
@@ -111,14 +111,21 @@ def main() -> int:
         assert len(real_golden["layer_output_raw"]) == 2048
     if real_state is not None:
         real_layers = real_state["tokens"][0]["layers"]
+        second_layers = real_state["tokens"][1]["layers"]
         assert real_state["residual_source"] == "real_attention_moe_carry"
-        assert real_state["layers_run"] == 48
-        assert real_state["kv_appends"] == 48
+        assert real_state["layers_run"] == 96
+        assert real_state["kv_appends"] == 96
+        assert [token["input_token"] for token in real_state["tokens"]] == [42, 1124]
+        assert [token["selected_token"] for token in real_state["tokens"]] == [1124, 29626]
+        assert [token["position"] for token in real_state["tokens"]] == [0, 1]
         assert len(real_layers) == 48
+        assert len(second_layers) == 48
         assert all(layer["full_moe"] is True for layer in real_layers)
         assert all(layer["qk_head_norm"] is True for layer in real_layers)
         assert all(layer["experts_run"] == 8 for layer in real_layers)
         assert all(real_layers[index - 1]["residual_output_checksum"] == real_layers[index]["residual_input_checksum"] for index in range(1, 48))
+        assert all(layer["attention_context_tokens"] == 2 for layer in second_layers)
+        assert real_state["tokens"][1]["residual_checksum"] != real_state["tokens"][0]["final_head"]["final_residual_checksum"]
         real_head = real_state["tokens"][0]["final_head"]
         assert real_head["norm_tensor"] == "output_norm.weight"
         assert real_head["lm_head_tensor"] == "output.weight"
@@ -143,6 +150,7 @@ def main() -> int:
                 "real_carry_links": 47 if real_state is not None else 0,
                 "real_final_head": real_state is not None,
                 "real_argmax_token": real_state["tokens"][0]["final_head"]["argmax_token"] if real_state is not None else None,
+                "real_autoregressive_sequence": [token["selected_token"] for token in real_state["tokens"]] if real_state is not None else [],
             }
         )
     )

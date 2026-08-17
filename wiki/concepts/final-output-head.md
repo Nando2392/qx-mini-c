@@ -20,7 +20,7 @@ residual real después de layer 47, 2048 F32
 → argmax y top-N
 ```
 
-`state-loop-probe --full-moe --final-head` falla cerrado salvo que se ejecute exactamente un paso, el manifest sea Qwen3 MoE `[48 layers, hidden 2048, vocab 151936]`, se usen todas las layers, el contexto esté entre 1 y 4096, la temperatura sea cero y no se active el benchmark histórico que reporta tok/s.
+`state-loop-probe --full-moe --final-head` falla cerrado salvo que se ejecuten entre 1 y 64 pasos, el manifest sea Qwen3 MoE `[48 layers, hidden 2048, vocab 151936]`, se usen todas las layers, el contexto esté entre 1 y 4096, la temperatura sea cero y no se active el benchmark histórico que reporta tok/s. Para varios pasos, cada argmax inicia el siguiente forward desde su propio embedding; ver [[autoregressive-loop]].
 
 ## Evidencia medida
 
@@ -44,6 +44,6 @@ Este gate descubrió y corrigió un decoder Q6_K propio con disposición de nibb
 
 ## Límite de honestidad
 
-Validado: head completo para el residual producido por QX. No validado todavía: paridad end-to-end del residual de todas las capas contra otra implementación, tokenizer completo ni autoregresión multi-token correcta. Por eso el tiempo anterior no se presenta como tok/s de conversación.
+Validado: head completo para cada residual producido por QX. No validado todavía: paridad end-to-end del residual de todas las capas contra otra implementación ni tokenizer completo. Por eso el tiempo anterior no se presenta como tok/s de conversación.
 
 Forward previo: [[moe-forward]]. Gates: [[numerical-correctness]]. Roadmap: [[current-status-and-roadmap]].

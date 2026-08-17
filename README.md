@@ -2,7 +2,7 @@
 
 Experimental C runtime and mmap-oriented model format for correctness-first local inference of **Qwen3-30B-A3B MoE**.
 
-> Status: research runtime. One token now traverses all 48 layers, final RMSNorm and the complete 151936-row Q6_K output head. Tokenizer parity and valid multi-token autoregression are not finished. Probe timing is not conversational decode throughput.
+> Status: research runtime. A greedy multi-token loop now re-embeds every selected token, advances position and persistent per-layer INT8 KV, traverses all 48 layers, and evaluates the complete 151936-row Q6_K output head again. Tokenizer parity and external end-to-end residual parity are not finished. Probe timing is not conversational decode throughput.
 
 ## Goals
 
@@ -33,9 +33,11 @@ GGUF tensor bytes
 → final RMSNorm F32
 → output.weight Q6_K, 2048→151936
 → complete logits + argmax/top-N
+→ selected token embedding at the next position
+→ persistent KV update and repeated 48-layer forward
 ```
 
-The one-token forward-to-logits gate is GREEN. The next correctness gate is tokenizer parity and then a valid multi-token loop where every selected token starts from its own embedding.
+The fixed-token greedy gate is GREEN for `42 → 1124 → 29626`. The next correctness gates are tokenizer/BPE parity and end-to-end sequence comparison against an external Qwen3 runtime.
 
 ## Honest performance state
 
@@ -47,7 +49,7 @@ real one-token 48-layer state probe: ~8.50 s
 real one-token 48-layer + complete output head probe: ~8.35 s warm run
 ```
 
-The complete-head measurement includes final RMSNorm and all 151936 logits but excludes tokenizer parity and multi-token execution. It must not be reported as sustained conversational tok/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
+The complete-head measurement includes final RMSNorm and all 151936 logits for one position. Multi-token execution is now correctness-gated but not benchmarked as sustained decode. It must not be reported as conversational tok/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
 
 CUDA is planned but **not implemented**.
 

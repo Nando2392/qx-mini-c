@@ -3956,9 +3956,9 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
         qx_set_err(err, err_len, "invalid attention dimensions");
         return 0;
     }
-    if (final_head && (!full_moe || requested_steps != 1u || requested_layers != manifest_layers || temperature != 0.0 || bench)) {
+    if (final_head && (!full_moe || requested_steps == 0u || requested_steps > 64u || requested_layers != manifest_layers || temperature != 0.0 || bench)) {
         qx_close_file(&file);
-        qx_set_err(err, err_len, "--final-head requires --full-moe, one step, all manifest layers, temperature 0, and no --bench");
+        qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, temperature 0, and no --bench");
         return 0;
     }
     if (final_head && (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE || manifest_layers != 48u || file.header.manifest.hidden != 2048u || file.header.manifest.vocab != 151936u || q_heads != 32u || kv_heads != 4u || head_dim != 128u)) {
@@ -4026,7 +4026,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     fprintf(out, "  \"tokens\": [");
     clock_t bench_start = clock();
     for (uint32_t step = 0; step < steps; ++step) {
-        fprintf(out, "%s{\"step\": %u, \"input_token\": %u, \"layers\": [", step ? ", " : "", step, current);
+        fprintf(out, "%s{\"step\": %u, \"position\": %u, \"input_token\": %u, \"layers\": [", step ? ", " : "", step, step, current);
         double residual_probe = 0.125 + ((double)(current % 997u) / 9970.0) + (double)step * 0.001;
         uint32_t residual_values = 0;
         double residual_rms = 0.0;
@@ -4327,7 +4327,9 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
         fprintf(out, "  \"bench\": {\"enabled\": true, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g, \"ms_per_token\": %.9g, \"layer_steps\": %llu, \"layer_steps_per_second\": %.9g},\n", elapsed, tps, mspt, (unsigned long long)layers_run, lps);
     }
     const char *note = final_head
-        ? "one-token Qwen3 forward through 48 layers, final RMSNorm, and complete Q6_K vocabulary head; tokenizer parity and valid multi-token autoregression remain pending"
+        ? (steps > 1u
+            ? "greedy multi-token Qwen3 forward: every selected token is re-embedded, position and per-layer INT8 KV advance, then all 48 layers, final RMSNorm, and the complete Q6_K vocabulary head run again; tokenizer parity remains pending"
+            : "one-token Qwen3 forward through 48 layers, final RMSNorm, and complete Q6_K vocabulary head; tokenizer parity and multi-token execution are separate gates")
         : (full_moe
             ? "one-token Qwen3 transformer forward with real attention, dynamic INT8 KV, and top-8 MoE; final head disabled"
             : (rope_gqa_attention ? "partial Qwen3 attention: split-half RoPE on Q/K, GQA head mapping, per-head causal softmax, dynamically scaled INT8 KV, and output projection; dimensions and heads remain probe-limited" : (causal_attention ? "partial causal attention: Q/K/V projection, dynamically scaled INT8 KV persistence, stable causal softmax, context aggregation, and output projection; dimensions remain probe-limited" : "state loop skeleton: per-token per-layer KV append/checksum/readback plus sampled-token carry; residual math remains probe-level")));

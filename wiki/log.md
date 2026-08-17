@@ -46,3 +46,10 @@
 - El golden detectó un layout incorrecto en el decoder Q6_K propio; corregido contra la fuente oficial.
 - Checksum logits F32: `17094101101096419516`; tiempo caliente observado: ~8.35 s.
 - Límite: no demuestra todavía paridad end-to-end de todas las capas ni autoregresión multi-token.
+
+## [2026-08-17] update | Autoregresión greedy multi-token
+
+- `state-loop-probe --full-moe --final-head --steps 2` re-embebe cada token seleccionado y avanza posición/KV en las 48 capas.
+- Secuencia fija medida: `42 → 1124 → 29626`; `layers_run=96`, `kv_appends=96`.
+- El segundo checksum de 151936 logits F32 es `9438484627875866845` y coincide con el helper Q6_K oficial de llama.cpp.
+- Límite: tokenizer/BPE y paridad externa end-to-end de residuales/secuencia siguen pendientes; no es benchmark de tok/s.

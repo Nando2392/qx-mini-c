@@ -392,7 +392,7 @@ def test_state_loop_applies_real_final_norm_and_complete_lm_head(tmp_path):
         base + ["--layers", "47"],
         base + ["--layers", "49"],
         base + ["--steps", "0"],
-        base + ["--steps", "2"],
+        base + ["--steps", "65"],
         base + ["--temperature", "0.1"],
         base + ["--bench"],
         [arg for arg in base if arg != "--full-moe"],
@@ -404,13 +404,16 @@ def test_state_loop_applies_real_final_norm_and_complete_lm_head(tmp_path):
             capture_output=True,
         )
         assert invalid.returncode != 0
-        assert "--final-head requires --full-moe, one step, all manifest layers, temperature 0, and no --bench" in invalid.stderr
+        assert "--final-head requires --full-moe, 1..64 steps, all manifest layers, temperature 0, and no --bench" in invalid.stderr
     oversized_ctx = subprocess.run(base + ["--ctx", "4097"], text=True, capture_output=True)
     assert oversized_ctx.returncode != 0
     assert "state loop context must be between 1 and 4096" in oversized_ctx.stderr
     zero_ctx = subprocess.run(base + ["--ctx", "0"], text=True, capture_output=True)
     assert zero_ctx.returncode != 0
     assert "state loop context must be between 1 and 4096" in zero_ctx.stderr
+    beyond_ctx = subprocess.run(base + ["--steps", "5"], text=True, capture_output=True)
+    assert beyond_ctx.returncode != 0
+    assert "steps exceed ctx" in beyond_ctx.stderr
     zero_kv_heads = tmp_path / "zero-kv-heads.qxf"
     qxf_with_manifest_u32(MODEL, zero_kv_heads, 24, 0)
     malformed_command = [str(zero_kv_heads) if arg == str(MODEL) else arg for arg in base]
@@ -446,3 +449,36 @@ def test_final_norm_and_argmax_match_independent_llama_cpp_reference(tmp_path):
         assert math.isclose(item["logit"], reference_logits[item["token"]], rel_tol=4e-6, abs_tol=4e-6)
     for token in (0, 75968, 151935):
         assert math.isfinite(reference_logits[token])
+
+
+def test_state_loop_runs_two_real_greedy_tokens_from_selected_embedding(tmp_path):
+    if not EXE.exists() or not MODEL.exists() or not GGML_REFERENCE.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    common = [str(EXE), "state-loop-probe", "--in", str(MODEL), "--layers", "48", "--ctx", "4", "--kv", "int8", "--temperature", "0", "--seed", "7", "--full-moe", "--final-head", "--top-n", "5"]
+    payload = json.loads(subprocess.check_output(common + ["--prompt-token", "42", "--steps", "2"], text=True))
+    assert payload["steps"] == 2
+    assert payload["layers_run"] == 96
+    assert payload["kv_appends"] == 96
+    assert payload["cache_readback_ok"] is True
+    assert len(payload["tokens"]) == 2
+    first, second = payload["tokens"]
+    assert first["input_token"] == 42
+    assert first["selected_token"] == 1124
+    assert second["input_token"] == first["selected_token"]
+    assert second["selected_token"] == 29626
+    assert second["position"] == 1
+    assert all(layer["attention_context_tokens"] == 1 for layer in first["layers"])
+    assert all(layer["attention_context_tokens"] == 2 for layer in second["layers"])
+    assert all(layer["kv_token"] == 0 for layer in first["layers"])
+    assert all(layer["kv_token"] == 1 for layer in second["layers"])
+    assert first["final_head"]["logits_computed"] == 151936
+    assert second["final_head"]["logits_computed"] == 151936
+    assert first["final_head"]["logits_checksum"] == 17094101101096419516
+    assert second["final_head"]["logits_checksum"] == 9438484627875866845
+    assert second["residual_checksum"] != first["final_head"]["final_residual_checksum"]
+    output_tensor = metadata("output.weight")
+    second_reference_logits = ggml_reference_full_q6_logits(output_tensor, second["final_head"]["final_norm_raw"], tmp_path / "second-final-norm.f32")
+    assert second["final_head"]["logits_checksum"] == fnv1a64(struct.pack(f"<{len(second_reference_logits)}f", *second_reference_logits))
+    assert second["selected_token"] == max(range(len(second_reference_logits)), key=second_reference_logits.__getitem__)
+    standalone = json.loads(subprocess.check_output(common + ["--prompt-token", str(first["selected_token"]), "--steps", "1"], text=True))
+    assert second["residual_checksum"] == standalone["tokens"][0]["residual_checksum"]
