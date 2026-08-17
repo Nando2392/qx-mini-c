@@ -104,3 +104,11 @@
 - Oracle ampliado con captura directa `l_out-47`; QX usa `step-0-layer-47-output.f32`.
 - F32/F16: max-abs `1099.6502`, RMSE `32.9520`, cosine `0.439279`.
 - INT8/Q8_0: max-abs `1100.9628`, RMSE `33.0204`, cosine `0.440512`.
+
+## [2026-08-17] update | Cierre reproducible del issue #7
+
+- Corregida la documentación stale de [[moe-forward]]: Qwen3MoE renormaliza los pesos top-8 seleccionados a suma `1.0`.
+- Añadido gate automatizado real para layers `0,1,24,47`, residual final `l_out-47`, logits completos y secuencias `[42]`/`Hello!`.
+- Suite local final: `83 passed`; smoke y wiki lint: PASS; revisión independiente focal: `11 passed`, sin blockers.
+- Publicado commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`; CI `32064105028`: PASS.
+- Issue GitHub #7 cerrado como validación completada: paridad residual, de logits y de secuencia refutada de forma reproducible.

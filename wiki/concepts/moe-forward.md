@@ -17,7 +17,8 @@ post-attention residual
 → RMSNorm con blk.N.ffn_norm.weight
 → router blk.N.ffn_gate_inp.weight
 → softmax de 128 logits
-→ top-8 sin renormalización adicional
+→ selección top-8
+→ renormalización de los ocho pesos seleccionados a suma 1.0
 → gate/up projections
 → SiLU(gate) × up
 → down projection
@@ -25,7 +26,7 @@ post-attention residual
 → residual final de layer N
 ```
 
-Qwen3 usa `norm_topk_prob=false`; por ello los ocho pesos seleccionados no tienen que sumar uno.
+La comparación independiente con Qwen3MoE en llama.cpp demostró que los ocho pesos seleccionados deben renormalizarse por su suma. QX omitía ese paso; el defecto fue corregido en las dos rutas reales y está cubierto por tests que exigen ocho expertos únicos y suma top-8 igual a `1.0`. Véase [[llama-cpp-parity]].
 
 ## Shapes de referencia
 
@@ -41,6 +42,7 @@ down: [768, 2048, 128] IQ3_XXS
 - Tipos observados `(gate, up, down)`: `(17,17,18)`, `(17,17,21)`, `(17,17,23)`, `(22,22,21)` y `(22,22,23)`.
 - Medición del probe de 48 capas, un token: ~8.50 s en la máquina de desarrollo; no es tok/s de inferencia completa.
 - Los 47 enlaces adyacentes cumplieron `residual_output_checksum[N] == residual_input_checksum[N+1]`.
+- Validado externamente: el fix de routing redujo el error de entrada de layer 1 desde max-abs aproximado `1.08` hasta `0.00589` en F32/F16; la paridad exacta restante está refutada por diferencias de contrato numérico posteriores.
 - Pendiente: golden end-to-end de todos los tipos quant multi-layer.
 
 Gates: [[numerical-correctness]]. Rendimiento: [[performance-model]].
