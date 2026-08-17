@@ -2,7 +2,7 @@
 
 Experimental C runtime and mmap-oriented model format for correctness-first local inference of **Qwen3-30B-A3B MoE**.
 
-> Status: research runtime. A greedy multi-token loop now re-embeds every selected token, advances position and persistent per-layer INT8 KV, traverses all 48 layers, and evaluates the complete 151936-row Q6_K output head again. Tokenizer parity and external end-to-end residual parity are not finished. Probe timing is not conversational decode throughput.
+> Status: research runtime. Qwen3 GPT-2/Qwen2 BPE parity is GREEN for fixed ASCII, Unicode, whitespace and ChatML prompts. The C loop prefills those IDs, then re-embeds greedy outputs with persistent per-layer INT8 KV across all 48 layers and the complete 151936-row Q6_K head. Exhaustive Unicode/chat-template coverage and external end-to-end residual parity are not finished. Probe timing is not conversational decode throughput.
 
 ## Goals
 
@@ -15,7 +15,10 @@ Experimental C runtime and mmap-oriented model format for correctness-first loca
 ## Implemented path
 
 ```text
-GGUF tensor bytes
+text prompt
+→ QXT2 tokenizer sidecar: Qwen2 pre-tokenizer + GPT-2 byte BPE
+→ exact token IDs
+→ GGUF tensor bytes copied into QXF1
 → QXF1 loader/checksum
 → embedding Q4_K
 → attention RMSNorm
@@ -37,7 +40,7 @@ GGUF tensor bytes
 → persistent KV update and repeated 48-layer forward
 ```
 
-The fixed-token greedy gate is GREEN for `42 → 1124 → 29626`. The next correctness gates are tokenizer/BPE parity and end-to-end sequence comparison against an external Qwen3 runtime.
+The fixed-token greedy gate is GREEN for `42 → 1124 → 29626`. Fixed-prompt tokenizer parity against `llama-tokenize` is also GREEN. `Hello!` maps to `[9707, 0]`, prefills both positions, then produces two QX greedy tokens through the verified loop. External end-to-end residual/sequence comparison remains pending.
 
 ## Honest performance state
 
@@ -103,6 +106,8 @@ Model weights are intentionally excluded from Git. Do not commit GGUF, QXF or pr
 ```bash
 bash scripts/download_qwen30b_iq2m.sh
 build/qxqxf.exe create-from-gguf-copy   --in models/Qwen3-30B-A3B-UD-IQ2_M.gguf   --model qwen3-30b-a3b   --quant q2   --out models/Qwen3-30B-A3B-UD-IQ2_M.qxf
+python scripts/export_qwen3_tokenizer.py --gguf models/Qwen3-30B-A3B-UD-IQ2_M.gguf --out models/Qwen3-30B-A3B.qxt
+build/qxqxf.exe tokenizer-encode --tokenizer models/Qwen3-30B-A3B.qxt --text-file prompt.txt
 ```
 
 Verify licenses and the source model card before redistributing model artifacts. This repository distributes code and documentation, not weights.
@@ -120,13 +125,13 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. Extend the verified two-layer attention+MoE state loop to all 48 layers.
-2. Add final norm and full lm_head.
-3. Tokenizer parity and identical greedy-token gate.
-4. QXF mmap and persistent scratch buffers.
-5. Fused quant-dot, thread pool and AVX2 CPU kernels.
-6. Hybrid CUDA backend with dense residency and expert cache.
-7. Context 4K, RSS, quality and sustained thermal gates.
+1. Compare residuals and greedy sequence end-to-end against an external Qwen3 runtime.
+2. Harden QXF dimensions, byte sizes, offsets and overflow checks globally.
+3. Expand tokenizer parity beyond the fixed prompt matrix and add chat-template application.
+4. Add QXF mmap and persistent scratch buffers.
+5. Add fused quant-dot, thread pool and AVX2 CPU kernels.
+6. Add a hybrid CUDA backend with dense residency and expert cache.
+7. Run context 4K, RSS, quality and sustained thermal gates.
 
 ## License
 

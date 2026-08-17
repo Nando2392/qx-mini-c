@@ -3925,12 +3925,14 @@ static int qx_apply_real_moe_layer(
     return 1;
 }
 
-int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
-    if (!path || !kv_format) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (!path || !kv_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
-    uint32_t requested_steps = steps;
-    if (steps == 0) steps = 1;
-    if (steps > 64) steps = 64;
+    if (generation_steps == 0u || generation_steps > 64u || prompt_count > 64u || prompt_count > UINT32_MAX - generation_steps + 1u) {
+        qx_set_err(err, err_len, "prompt state loop requires 1..64 prompt tokens and 1..64 generation steps"); return 0;
+    }
+    uint32_t steps = prompt_count + generation_steps - 1u;
+    if (steps > 64u) { qx_set_err(err, err_len, "prompt plus generation exceeds 64 forward steps"); return 0; }
     if (layers == 0) layers = 1;
     if (top_k == 0) top_k = 1;
     if (top_k > 32) top_k = 32;
@@ -3956,7 +3958,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
         qx_set_err(err, err_len, "invalid attention dimensions");
         return 0;
     }
-    if (final_head && (!full_moe || requested_steps == 0u || requested_steps > 64u || requested_layers != manifest_layers || temperature != 0.0 || bench)) {
+    if (final_head && (!full_moe || requested_layers != manifest_layers || temperature != 0.0 || bench)) {
         qx_close_file(&file);
         qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, temperature 0, and no --bench");
         return 0;
@@ -3974,7 +3976,9 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     if (logits_top_n == 0u) logits_top_n = 1u;
     if (logits_top_n > 32u) logits_top_n = 32u;
     uint32_t vocab = file.header.manifest.vocab ? file.header.manifest.vocab : 151936u;
-    if (prompt_token >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "prompt token out of range"); return 0; }
+    for (uint32_t i = 0; i < prompt_count; ++i) {
+        if (prompt_tokens[i] >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "prompt token out of range"); return 0; }
+    }
     if (steps > ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "steps exceed ctx"); return 0; }
     if (kv_heads != 0u && (uint64_t)head_dim > UINT64_MAX / (uint64_t)kv_heads) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); return 0; }
     uint64_t values_per_k_or_v = (uint64_t)kv_heads * (uint64_t)head_dim;
@@ -4000,7 +4004,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     float *vscales = causal_attention ? (float *)calloc((size_t)cache_slots, sizeof(float)) : NULL;
     float *residual_vec = residual_vector ? (float *)malloc((size_t)residual_dims * (full_moe ? 2u : 1u) * sizeof(float)) : NULL;
     if (!kbuf || !vbuf || (causal_attention && (!kcache || !vcache || !kfloat || !vfloat || !kscales || !vscales)) || (residual_vector && !residual_vec)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
-    uint32_t current = prompt_token;
+    uint32_t current = prompt_tokens[0];
     uint64_t kv_appends = 0;
     uint64_t layers_run = 0;
     int readback_ok = 1;
@@ -4011,7 +4015,12 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     size_t generated_len = 0;
     fprintf(out, "{\n");
     fprintf(out, "  \"probe\": \"state_loop\",\n");
-    fprintf(out, "  \"prompt_token\": %u,\n", prompt_token);
+    fprintf(out, "  \"prompt_token\": %u,\n", prompt_tokens[0]);
+    fprintf(out, "  \"prompt_token_count\": %u,\n", prompt_count);
+    fprintf(out, "  \"prompt_token_ids\": [");
+    for (uint32_t i = 0; i < prompt_count; ++i) fprintf(out, "%s%u", i ? ", " : "", prompt_tokens[i]);
+    fprintf(out, "],\n");
+    fprintf(out, "  \"generation_steps\": %u,\n", generation_steps);
     fprintf(out, "  \"steps\": %u,\n", steps);
     fprintf(out, "  \"layers\": %u,\n", layers);
     fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
@@ -4026,7 +4035,9 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     fprintf(out, "  \"tokens\": [");
     clock_t bench_start = clock();
     for (uint32_t step = 0; step < steps; ++step) {
-        fprintf(out, "%s{\"step\": %u, \"position\": %u, \"input_token\": %u, \"layers\": [", step ? ", " : "", step, step, current);
+        if (step < prompt_count) current = prompt_tokens[step];
+        int sampling_step = step + 1u >= prompt_count;
+        fprintf(out, "%s{\"step\": %u, \"position\": %u, \"phase\": \"%s\", \"input_token\": %u, \"layers\": [", step ? ", " : "", step, step, sampling_step ? "generate" : "prefill", current);
         double residual_probe = 0.125 + ((double)(current % 997u) / 9970.0) + (double)step * 0.001;
         uint32_t residual_values = 0;
         double residual_rms = 0.0;
@@ -4250,6 +4261,17 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
             ++kv_appends;
             ++layers_run;
         }
+        if (!sampling_step) {
+            fprintf(out, "], \"residual_probe\": %.9g", residual_probe);
+            if (residual_vector) fprintf(out, ", \"residual_values\": %u, \"residual_rms\": %.9g, \"residual_checksum\": %llu", residual_values, residual_rms, (unsigned long long)residual_checksum);
+            if (residual_carry && residual_vec && residual_values) {
+                uint64_t after = qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float));
+                fprintf(out, ", \"residual_checksum_after\": %llu", (unsigned long long)after);
+            }
+            fprintf(out, ", \"selected_token\": null, \"source\": \"fixed_prompt\"}");
+            current = prompt_tokens[step + 1u];
+            continue;
+        }
         qx_top_token top[32];
         qx_real_head_result head_result;
         int head_ready = 0;
@@ -4328,7 +4350,9 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     }
     const char *note = final_head
         ? (steps > 1u
-            ? "greedy multi-token Qwen3 forward: every selected token is re-embedded, position and per-layer INT8 KV advance, then all 48 layers, final RMSNorm, and the complete Q6_K vocabulary head run again; tokenizer parity remains pending"
+            ? (prompt_count > 1u
+                ? "tokenized Qwen3 prompt prefill followed by greedy generation: fixed prompt IDs and selected tokens are embedded at their positions with persistent per-layer INT8 KV; the complete Q6_K head runs only for generation outputs"
+                : "greedy multi-token Qwen3 forward: every selected token is re-embedded, position and per-layer INT8 KV advance, then all 48 layers, final RMSNorm, and the complete Q6_K vocabulary head run again")
             : "one-token Qwen3 forward through 48 layers, final RMSNorm, and complete Q6_K vocabulary head; tokenizer parity and multi-token execution are separate gates")
         : (full_moe
             ? "one-token Qwen3 transformer forward with real attention, dynamic INT8 KV, and top-8 MoE; final head disabled"
@@ -4345,6 +4369,19 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     free(residual_vec);
     qx_close_file(&file);
     return 1;
+}
+
+int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+    if (final_head && (steps == 0u || steps > 64u)) {
+        qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, temperature 0, and no --bench");
+        return 0;
+    }
+    if (steps == 0u) steps = 1u;
+    if (steps > 64u) steps = 64u;
+    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format,
+        real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector,
+        causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm_name, top_k, scan,
+        logits_top_n, temperature, seed, out, err, err_len);
 }
 
 int qx_dump_token_forward_probe_summary(const char *path, uint32_t token_id, uint32_t layers, uint32_t top_k, uint32_t blocks, uint32_t seed, const char *norm_name, int32_t attention_layer, int multihead_attention, uint32_t attention_heads, uint32_t attention_dims, int logits_enabled, uint32_t logits_top_n, int sample_enabled, double temperature, int decode_token, const char *tokens_path, FILE *out, char *err, uint64_t err_len) {

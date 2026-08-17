@@ -4,7 +4,7 @@ LDFLAGS ?=
 
 BUILD := build
 FIT_SRC := src/qxfit.c src/qx_main.c
-QXF_SRC := src/qx_format.c src/qx_gguf.c src/qx_qxf_main.c
+QXF_SRC := src/qx_format.c src/qx_gguf.c src/qx_tokenizer.c src/qx_qxf_main.c
 FIT_BIN := $(BUILD)/qxfit
 QXF_BIN := $(BUILD)/qxqxf
 
@@ -18,7 +18,7 @@ $(BUILD):
 $(FIT_BIN): $(FIT_SRC) include/qxfit.h | $(BUILD)
 	$(CC) $(CFLAGS) $(FIT_SRC) -o $(FIT_BIN) $(LDFLAGS)
 
-$(QXF_BIN): $(QXF_SRC) include/qx_format.h include/qx_gguf.h | $(BUILD)
+$(QXF_BIN): $(QXF_SRC) include/qx_format.h include/qx_gguf.h include/qx_tokenizer.h | $(BUILD)
 	$(CC) $(CFLAGS) $(QXF_SRC) -o $(QXF_BIN) $(LDFLAGS)
 
 smoke: $(FIT_BIN) $(QXF_BIN)

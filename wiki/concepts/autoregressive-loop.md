@@ -59,6 +59,6 @@ El modo real exige:
 
 ## Límite de honestidad
 
-Validado: plumbing autoregresivo QX, re-embedding, posición, KV persistente, dos forwards completos y ambos heads. Pendiente: tokenizer/BPE y paridad externa end-to-end de todos los residuales y de la secuencia contra otro runtime Qwen3. Esta ejecución no es una medición de tok/s sostenido.
+Validado: plumbing autoregresivo QX, re-embedding, posición, KV persistente, dos forwards completos, ambos heads y alimentación desde IDs producidos por [[qwen3-tokenizer]]. Pendiente: cobertura Unicode/chat-template exhaustiva y paridad externa end-to-end de todos los residuales y de la secuencia contra otro runtime Qwen3. Esta ejecución no es una medición de tok/s sostenido.
 
 Forward: [[moe-forward]]. Head: [[final-output-head]]. Estado: [[current-status-and-roadmap]].

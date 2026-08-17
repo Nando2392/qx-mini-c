@@ -32,7 +32,7 @@ confidence: high | medium | low
 ## Tag taxonomy
 
 - Proyecto: `runtime`, `qwen3-moe`, `qxf`, `roadmap`
-- Correctitud: `validation`, `golden`, `quantization`, `testing`
+- Correctitud: `validation`, `golden`, `quantization`, `testing`, `tokenizer`
 - Rendimiento: `performance`, `cpu`, `cuda`, `memory`, `kv-cache`
 - Operación: `auto-research`, `benchmark`, `risk`, `open-source`
 

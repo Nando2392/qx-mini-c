@@ -25,10 +25,17 @@ def main() -> int:
         gguf = temp_path / "synthetic.gguf"
         qxf = temp_path / "synthetic.qxf"
         tokens = temp_path / "tokens.tsv"
+        tokenizer = temp_path / "tokenizer.qxt"
+        prompt = temp_path / "prompt.txt"
 
         run(sys.executable, ROOT / "scripts" / "make_synthetic_gguf.py", "--out", gguf)
         run(EXE, "create-from-gguf-copy", "--in", gguf, "--model", "qwen3-30b-a3b", "--quant", "q2", "--out", qxf)
         run(EXE, "tokenizer-export", "--gguf", gguf, "--out", tokens)
+        run(sys.executable, ROOT / "scripts" / "export_qwen3_tokenizer.py", "--gguf", gguf, "--out", tokenizer)
+        prompt.write_text("Hello", encoding="utf-8")
+        tokenizer_summary = json.loads(run(EXE, "tokenizer-inspect", "--tokenizer", tokenizer))
+        encoded = json.loads(run(EXE, "tokenizer-encode", "--tokenizer", tokenizer, "--text-file", prompt))
+        decoded = json.loads(run(EXE, "tokenizer-decode", "--tokenizer", tokenizer, "--ids", "7"))
         result = json.loads(
             run(
                 EXE,
@@ -95,6 +102,9 @@ def main() -> int:
     assert golden["kv_heads_touched"] == 2
     assert abs(golden["softmax_sum_min"] - 1.0) < 1e-9
     assert abs(golden["softmax_sum_max"] - 1.0) < 1e-9
+    assert tokenizer_summary["checksum_verified"] is True
+    assert encoded["token_ids"] == [7]
+    assert decoded["text"] == "Hello"
     if real_golden is not None:
         assert real_golden["probe"] == "real_qkv_golden"
         assert real_golden["projection_layout"] == "contiguous_tensor_rows"
@@ -144,6 +154,8 @@ def main() -> int:
                 "cache_readback_ok": result["cache_readback_ok"],
                 "softmax_sum": layer0["softmax_sum"],
                 "golden_probe": golden["probe"],
+                "tokenizer_qxt2": tokenizer_summary["checksum_verified"],
+                "tokenizer_ids": encoded["token_ids"],
                 "real_qkv_golden": real_golden is not None,
                 "real_48_layer_state": real_state is not None,
                 "real_layers_run": real_state["layers_run"] if real_state is not None else 0,

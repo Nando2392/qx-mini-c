@@ -1,0 +1,34 @@
+{
+  "oracle": "llama-tokenize",
+  "llama_cpp_commit": "768d2a481a99cb75ec9a03b95dadbd35e7acf496",
+  "source_model": "Qwen3-30B-A3B-UD-IQ2_M.gguf",
+  "source_model_size": 10865578560,
+  "source_model_sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+  "oracle_args": ["--ids", "--no-bos", "--no-escape"],
+  "cases": [
+    {
+      "name": "ascii",
+      "text": "Hello, Qwen3!",
+      "parse_special": false,
+      "token_ids": [9707, 11, 1207, 16948, 18, 0]
+    },
+    {
+      "name": "unicode",
+      "text": "¡Hola, 世界! café 🚀",
+      "parse_special": false,
+      "token_ids": [39832, 68012, 11, 220, 99489, 0, 51950, 11162, 248, 222]
+    },
+    {
+      "name": "whitespace",
+      "text": "  alpha\tbeta\n\ngamma  ",
+      "parse_special": false,
+      "token_ids": [220, 8287, 2233, 1915, 271, 32214, 256]
+    },
+    {
+      "name": "chatml-specials",
+      "text": "<|im_start|>user\nHello<|im_end|>",
+      "parse_special": true,
+      "token_ids": [151644, 872, 198, 9707, 151645]
+    }
+  ]
+}

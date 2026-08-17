@@ -4,6 +4,8 @@ import struct
 from pathlib import Path
 
 GGUF_UINT32 = 4
+GGUF_INT32 = 5
+GGUF_BOOL = 7
 GGUF_STRING = 8
 GGUF_ARRAY = 9
 GGML_TYPE_Q2_K = 10
@@ -42,6 +44,19 @@ def meta_str_array(f, key, values):
         wstr(f, value)
 
 
+def meta_i32_array(f, key, values):
+    wstr(f, key)
+    f.write(struct.pack("<I", GGUF_ARRAY))
+    f.write(struct.pack("<IQ", GGUF_INT32, len(values)))
+    for value in values:
+        f.write(struct.pack("<i", value))
+
+
+def meta_bool(f, key, value):
+    wstr(f, key)
+    f.write(struct.pack("<IB", GGUF_BOOL, int(value)))
+
+
 def tensor(f, name, dims, typ, offset):
     wstr(f, name)
     f.write(struct.pack("<I", len(dims)))
@@ -58,6 +73,10 @@ def main():
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    tokenizer_tokens = [f"tok{i}" for i in range(64)]
+    tokenizer_tokens[:11] = ["H", "e", "l", "o", "He", "ll", "Hell", "Hello", "Ġ", "world", "<|im_start|>"]
+    tokenizer_types = [1] * 64
+    tokenizer_types[10] = 3
     kvs = [
         ("str", "general.architecture", "qwen3moe"),
         ("str", "general.name", "synthetic-qwen3-30b-a3b-mini"),
@@ -69,7 +88,15 @@ def main():
         ("u32", "qwen3moe.attention.head_count_kv", 4),
         ("u32", "qwen3moe.expert_count", 128),
         ("u32", "qwen3moe.expert_used_count", 8),
-        ("str_array", "tokenizer.ggml.tokens", [f"tok{i}" for i in range(64)]),
+        ("str", "tokenizer.ggml.model", "gpt2"),
+        ("str", "tokenizer.ggml.pre", "qwen2"),
+        ("str_array", "tokenizer.ggml.tokens", tokenizer_tokens),
+        ("i32_array", "tokenizer.ggml.token_type", tokenizer_types),
+        ("str_array", "tokenizer.ggml.merges", ["H e", "l l", "He ll", "Hell o"]),
+        ("u32", "tokenizer.ggml.bos_token_id", 10),
+        ("u32", "tokenizer.ggml.eos_token_id", 10),
+        ("bool", "tokenizer.ggml.add_bos_token", False),
+        ("bool", "tokenizer.ggml.add_eos_token", False),
     ]
     tensors = [
         ("token_embd.weight", [2048, 151936], GGML_TYPE_Q4_K, 0),
@@ -96,6 +123,10 @@ def main():
                 meta_str(f, key, val)
             elif typ == "str_array":
                 meta_str_array(f, key, val)
+            elif typ == "i32_array":
+                meta_i32_array(f, key, val)
+            elif typ == "bool":
+                meta_bool(f, key, val)
             else:
                 meta_u32(f, key, val)
         for item in tensors:

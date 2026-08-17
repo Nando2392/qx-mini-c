@@ -17,7 +17,7 @@ def test_synthetic_gguf_inspect_if_built(tmp_path):
     assert data["magic"] == "GGUF"
     assert data["version"] == 3
     assert data["tensor_count"] == 14
-    assert data["metadata_kv_count"] == 11
+    assert data["metadata_kv_count"] >= 11
     assert data["alignment"] == 32
     assert data["architecture"] == "qwen3moe"
     assert data["qwen3_block_count"] == 48

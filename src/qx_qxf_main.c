@@ -1,6 +1,8 @@
 #include "qx_format.h"
 #include "qx_gguf.h"
+#include "qx_tokenizer.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +37,10 @@ static void usage(const char *argv0) {
         "  %s logits-probe --in model.qxf --activation 0.125 --top-n 5 --scan 64 --seed 7\n"
         "  %s sampler-probe --in model.qxf --activation 0.125 --top-k 5 --scan 64 --temperature 0.7 --seed 7\n"
         "  %s tokenizer-export --gguf model.gguf --out model.tokens.tsv\n"
+        "  qxqxf tokenizer-inspect --tokenizer model.qxt\n"
+        "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
+        "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
+        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --temperature 0 --seed 7 --full-moe --final-head [--parse-special] [--top-n 5]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
         "  %s generate-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --top-k 5 --scan 64 --temperature 0 --seed 7\n"
         "  %s residual-vector-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --dims 64 --seed 7\n"
@@ -152,8 +158,207 @@ static int validate_gguf_against_manifest(const qx_gguf_summary *g, const qx_mod
     return 1;
 }
 
+static int qx_cli_read_prompt(const char *path, unsigned char **data, uint32_t *length, char *err, size_t err_len) {
+    FILE *file = fopen(path, "rb");
+    if (!file) { snprintf(err, err_len, "cannot open text file"); return 0; }
+    unsigned char *buffer = (unsigned char *)malloc(QX_TOKENIZER_MAX_INPUT + 1u);
+    if (!buffer) { fclose(file); snprintf(err, err_len, "out of memory"); return 0; }
+    size_t count = fread(buffer, 1, QX_TOKENIZER_MAX_INPUT + 1u, file);
+    if (ferror(file)) { free(buffer); fclose(file); snprintf(err, err_len, "text file read failed"); return 0; }
+    int trailing = fgetc(file);
+    fclose(file);
+    if (count > QX_TOKENIZER_MAX_INPUT || trailing != EOF) {
+        free(buffer); snprintf(err, err_len, "input exceeds 4096-byte limit"); return 0;
+    }
+    *data = buffer;
+    *length = (uint32_t)count;
+    return 1;
+}
+
+static int qx_cli_parse_ids(const char *text, uint32_t *ids, uint32_t capacity, uint32_t *count, char *err, size_t err_len) {
+    if (!text || !*text) { snprintf(err, err_len, "empty token id list"); return 0; }
+    const char *cursor = text;
+    *count = 0u;
+    while (*cursor) {
+        if (*count >= capacity) { snprintf(err, err_len, "too many token ids"); return 0; }
+        errno = 0;
+        char *end = NULL;
+        unsigned long value = strtoul(cursor, &end, 10);
+        if (errno != 0 || end == cursor || value > UINT32_MAX || (*end != '\0' && *end != ',')) {
+            snprintf(err, err_len, "invalid token id list"); return 0;
+        }
+        ids[(*count)++] = (uint32_t)value;
+        if (*end == '\0') break;
+        cursor = end + 1;
+        if (*cursor == '\0') { snprintf(err, err_len, "invalid token id list"); return 0; }
+    }
+    return 1;
+}
+
+static void qx_cli_json_string(const unsigned char *text, uint32_t length) {
+    putchar('"');
+    for (uint32_t i = 0; i < length; ++i) {
+        unsigned char c = text[i];
+        if (c == '"' || c == '\\') { putchar('\\'); putchar(c); }
+        else if (c == 8u) fputs("\\b", stdout);
+        else if (c == 12u) fputs("\\f", stdout);
+        else if (c == 10u) fputs("\\n", stdout);
+        else if (c == 13u) { putchar(92); putchar('r'); }
+        else if (c == 9u) fputs("\\t", stdout);
+        else if (c < 0x20u) printf("\\u%04x", (unsigned)c);
+        else putchar(c);
+    }
+    putchar('"');
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) { usage(argv[0]); return 2; }
+
+    if (strcmp(argv[1], "tokenizer-inspect") == 0) {
+        const char *tokenizer_path = NULL;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--tokenizer") == 0 && i + 1 < argc) tokenizer_path = argv[++i];
+            else { usage(argv[0]); return 2; }
+        }
+        if (!tokenizer_path) { usage(argv[0]); return 2; }
+        char err[256];
+        if (!qx_tokenizer_dump_summary(tokenizer_path, stdout, err, sizeof(err))) {
+            fprintf(stderr, "tokenizer-inspect failed: %s\n", err);
+            return 1;
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[1], "tokenizer-encode") == 0) {
+        const char *tokenizer_path = NULL;
+        const char *text_path = NULL;
+        int parse_special = 0;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--tokenizer") == 0 && i + 1 < argc) tokenizer_path = argv[++i];
+            else if (strcmp(argv[i], "--text-file") == 0 && i + 1 < argc) text_path = argv[++i];
+            else if (strcmp(argv[i], "--parse-special") == 0) parse_special = 1;
+            else { usage(argv[0]); return 2; }
+        }
+        if (!tokenizer_path || !text_path) { usage(argv[0]); return 2; }
+        char err[256];
+        unsigned char *input = NULL;
+        uint32_t input_length = 0u;
+        if (!qx_cli_read_prompt(text_path, &input, &input_length, err, sizeof(err))) {
+            fprintf(stderr, "tokenizer-encode failed: %s\n", err); return 1;
+        }
+        qx_tokenizer tokenizer;
+        if (!qx_tokenizer_load(tokenizer_path, &tokenizer, err, sizeof(err))) {
+            free(input); fprintf(stderr, "tokenizer-encode failed: %s\n", err); return 1;
+        }
+        uint32_t ids[QX_TOKENIZER_MAX_INPUT + 2u];
+        uint32_t count = 0u;
+        if (!qx_tokenizer_encode(&tokenizer, input, input_length, parse_special, ids, QX_TOKENIZER_MAX_INPUT + 2u, &count, err, sizeof(err))) {
+            qx_tokenizer_free(&tokenizer); free(input); fprintf(stderr, "tokenizer-encode failed: %s\n", err); return 1;
+        }
+        printf("{\n  \"input_bytes\": %u,\n  \"parse_special\": %s,\n  \"token_count\": %u,\n  \"token_ids\": [", input_length, parse_special ? "true" : "false", count);
+        for (uint32_t i = 0; i < count; ++i) printf("%s%u", i ? ", " : "", ids[i]);
+        printf("]\n}\n");
+        qx_tokenizer_free(&tokenizer);
+        free(input);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "tokenizer-decode") == 0) {
+        const char *tokenizer_path = NULL;
+        const char *ids_text = NULL;
+        int special = 0;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--tokenizer") == 0 && i + 1 < argc) tokenizer_path = argv[++i];
+            else if (strcmp(argv[i], "--ids") == 0 && i + 1 < argc) ids_text = argv[++i];
+            else if (strcmp(argv[i], "--special") == 0) special = 1;
+            else { usage(argv[0]); return 2; }
+        }
+        if (!tokenizer_path || !ids_text) { usage(argv[0]); return 2; }
+        char err[256];
+        uint32_t ids[QX_TOKENIZER_MAX_INPUT + 2u];
+        uint32_t count = 0u;
+        if (!qx_cli_parse_ids(ids_text, ids, QX_TOKENIZER_MAX_INPUT + 2u, &count, err, sizeof(err))) {
+            fprintf(stderr, "tokenizer-decode failed: %s\n", err); return 1;
+        }
+        qx_tokenizer tokenizer;
+        if (!qx_tokenizer_load(tokenizer_path, &tokenizer, err, sizeof(err))) {
+            fprintf(stderr, "tokenizer-decode failed: %s\n", err); return 1;
+        }
+        unsigned char *output = (unsigned char *)malloc(1u << 20);
+        uint32_t output_length = 0u;
+        if (!output || !qx_tokenizer_decode(&tokenizer, ids, count, special, output, 1u << 20, &output_length, err, sizeof(err))) {
+            free(output); qx_tokenizer_free(&tokenizer); fprintf(stderr, "tokenizer-decode failed: %s\n", output ? err : "out of memory"); return 1;
+        }
+        printf("{\n  \"token_count\": %u,\n  \"utf8_bytes\": %u,\n  \"text\": ", count, output_length);
+        qx_cli_json_string(output, output_length);
+        printf("\n}\n");
+        free(output);
+        qx_tokenizer_free(&tokenizer);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "prompt-state-loop-probe") == 0) {
+        const char *in_path = NULL;
+        const char *tokenizer_path = NULL;
+        const char *text_path = NULL;
+        const char *kv_format = "int8";
+        uint32_t generation_steps = 0u;
+        uint32_t layers = 48u;
+        uint32_t ctx = 16u;
+        uint32_t top_n = 5u;
+        uint32_t seed = 7u;
+        double temperature = 0.0;
+        int parse_special = 0;
+        int full_moe = 0;
+        int final_head = 0;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
+            else if (strcmp(argv[i], "--tokenizer") == 0 && i + 1 < argc) tokenizer_path = argv[++i];
+            else if (strcmp(argv[i], "--text-file") == 0 && i + 1 < argc) text_path = argv[++i];
+            else if (strcmp(argv[i], "--generate") == 0 && i + 1 < argc) generation_steps = (uint32_t)strtoul(argv[++i], NULL, 10);
+            else if (strcmp(argv[i], "--layers") == 0 && i + 1 < argc) layers = (uint32_t)strtoul(argv[++i], NULL, 10);
+            else if (strcmp(argv[i], "--ctx") == 0 && i + 1 < argc) ctx = (uint32_t)strtoul(argv[++i], NULL, 10);
+            else if (strcmp(argv[i], "--kv") == 0 && i + 1 < argc) kv_format = argv[++i];
+            else if (strcmp(argv[i], "--temperature") == 0 && i + 1 < argc) temperature = strtod(argv[++i], NULL);
+            else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = (uint32_t)strtoul(argv[++i], NULL, 10);
+            else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) top_n = (uint32_t)strtoul(argv[++i], NULL, 10);
+            else if (strcmp(argv[i], "--parse-special") == 0) parse_special = 1;
+            else if (strcmp(argv[i], "--full-moe") == 0) full_moe = 1;
+            else if (strcmp(argv[i], "--final-head") == 0) final_head = 1;
+            else { usage(argv[0]); return 2; }
+        }
+        if (!in_path || !tokenizer_path || !text_path || !full_moe || !final_head) { usage(argv[0]); return 2; }
+        char err[256];
+        unsigned char *input = NULL;
+        uint32_t input_length = 0u;
+        if (!qx_cli_read_prompt(text_path, &input, &input_length, err, sizeof(err))) {
+            fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;
+        }
+        qx_tokenizer tokenizer;
+        if (!qx_tokenizer_load(tokenizer_path, &tokenizer, err, sizeof(err))) {
+            free(input); fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;
+        }
+        if (tokenizer.vocab_count != 151936u) {
+            qx_tokenizer_free(&tokenizer); free(input); fprintf(stderr, "prompt-state-loop-probe failed: tokenizer vocabulary does not match Qwen3-30B-A3B\n"); return 1;
+        }
+        if (tokenizer.payload_checksum != 6140965799433681264ull) {
+            qx_tokenizer_free(&tokenizer); free(input); fprintf(stderr, "prompt-state-loop-probe failed: tokenizer fingerprint does not match Qwen3-30B-A3B\n"); return 1;
+        }
+        uint32_t ids[QX_TOKENIZER_MAX_INPUT + 2u];
+        uint32_t count = 0u;
+        if (!qx_tokenizer_encode(&tokenizer, input, input_length, parse_special, ids, QX_TOKENIZER_MAX_INPUT + 2u, &count, err, sizeof(err)) || count == 0u) {
+            qx_tokenizer_free(&tokenizer); free(input);
+            fprintf(stderr, "prompt-state-loop-probe failed: %s\n", count == 0u ? "prompt produced no tokens" : err); return 1;
+        }
+        qx_tokenizer_free(&tokenizer);
+        free(input);
+        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, full_moe, final_head, 0, 2048u, NULL, 8u, 151936u,
+                top_n, temperature, seed, stdout, err, sizeof(err))) {
+            fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;
+        }
+        return 0;
+    }
 
     if (strcmp(argv[1], "create") == 0) {
         const char *model = "qwen3-8b";

@@ -53,3 +53,11 @@
 - Secuencia fija medida: `42 → 1124 → 29626`; `layers_run=96`, `kv_appends=96`.
 - El segundo checksum de 151936 logits F32 es `9438484627875866845` y coincide con el helper Q6_K oficial de llama.cpp.
 - Límite: tokenizer/BPE y paridad externa end-to-end de residuales/secuencia siguen pendientes; no es benchmark de tok/s.
+
+## [2026-08-17] update | Tokenizer Qwen3 y prefill desde texto
+
+- Añadido sidecar binario QXT2 con metadata GPT-2/qwen2, vocabulario tipado, merges, flags y checksum fail-closed.
+- Goldens `llama-tokenize` exactos para ASCII, Unicode, whitespace y ChatML; encode/decode C y adversariales cubiertos.
+- `Hello!` produce IDs `[9707, 0]`; el loop hace prefill y dos generaciones con inputs `[9707, 0, 117268]`.
+- Evidencia integrada: `layers_run=144`, `kv_appends=144`, tokens seleccionados `[117268, 69336]`.
+- Límite: cobertura exhaustiva de Unicode/chat template y paridad residual externa siguen pendientes.

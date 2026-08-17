@@ -1,7 +1,7 @@
 # QX-mini-MoE Wiki
 
 > Bóveda Obsidian y wiki compilada al estilo Karpathy. Leer primero esta página y [[current-status-and-roadmap]].
-> Última actualización: 2026-08-17 | Páginas de conocimiento: 11
+> Última actualización: 2026-08-17 | Páginas de conocimiento: 12
 
 ## Proyecto
 
@@ -15,6 +15,7 @@
 - [[final-output-head]] — final RMSNorm, head Q6_K completo y golden externo.
 - [[autoregressive-loop]] — re-embedding greedy, posiciones y KV persistente multi-token.
 - [[numerical-correctness]] — golden tests, referencias y gates.
+- [[qwen3-tokenizer]] — QXT2, BPE Qwen2/GPT-2, goldens externos y prefill desde texto.
 - [[auto-research-loop]] — ciclo hipótesis → experimento → evidencia → decisión.
 
 ## Rendimiento

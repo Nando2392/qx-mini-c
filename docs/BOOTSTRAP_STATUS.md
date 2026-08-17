@@ -3073,4 +3073,33 @@ logits checksums: [17094101101096419516, 9438484627875866845]
 
 The regression gate proves re-embedding by comparing the position-1 input checksum against an independent one-step run starting from token `1124`; it differs from the prior position's final residual. The second full-vocabulary checksum and argmax are independently recomputed with llama.cpp's official Q6_K decoder.
 
-Honesty boundary: tokenizer/BPE is not implemented and QX's intermediate residuals are not yet matched end to end against another Qwen3 runtime. This is a correctness gate, not sustained decode throughput.
+Honesty boundary at that gate: tokenizer/BPE was not implemented and QX's intermediate residuals were not matched end to end against another Qwen3 runtime. This is a correctness gate, not sustained decode throughput.
+
+## 2026-08-17: Qwen3 tokenizer parity and text prefill
+
+The runtime now uses a checksummed QXT2 tokenizer sidecar exported from the real GGUF metadata. C implements fixed-scope Qwen2 pre-tokenization, GPT-2 byte encoding, rank-ordered BPE, typed special-token matching and reversible decode.
+
+External `llama-tokenize` goldens, with no BOS:
+
+```text
+Hello, Qwen3!          -> [9707, 11, 1207, 16948, 18, 0]
+¡Hola, 世界! café 🚀    -> [39832, 68012, 11, 220, 99489, 0, 51950, 11162, 248, 222]
+whitespace adversarial -> [220, 8287, 2233, 1915, 271, 32214, 256]
+ChatML specials        -> [151644, 872, 198, 9707, 151645]
+```
+
+`prompt-state-loop-probe` tokenized `Hello!` as `[9707, 0]`, prefills both fixed IDs, then runs two greedy outputs:
+
+```text
+forward inputs: [9707, 0, 117268]
+selected outputs: [117268, 69336]
+layers_run: 144
+kv_appends: 144
+logits checksums: [18359823378288781632, 7341130597423700663]
+```
+
+Intermediate prefill positions skip the complete output head. The last prompt position produces the first generated token; later outputs are re-embedded with persistent per-layer INT8 KV.
+
+Honesty boundary: parity is proven for the fixed prompt matrix, not every Unicode codepoint or automatic chat-template expansion. External end-to-end residual and greedy-sequence parity remains pending.
+
+Oracle provenance: llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`; source GGUF SHA-256 `c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652`. The integrated command additionally requires QXT2 payload fingerprint `6140965799433681264`; this FNV-1a64 value is a non-cryptographic compatibility guard, not an authenticity claim.
