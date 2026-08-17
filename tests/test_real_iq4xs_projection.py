@@ -419,7 +419,7 @@ def test_state_loop_applies_real_final_norm_and_complete_lm_head(tmp_path):
     malformed_command = [str(zero_kv_heads) if arg == str(MODEL) else arg for arg in base]
     malformed = subprocess.run(malformed_command, text=True, capture_output=True)
     assert malformed.returncode != 0
-    assert "invalid attention dimensions" in malformed.stderr
+    assert "invalid QXF manifest" in malformed.stderr
 
 
 def test_final_norm_and_argmax_match_independent_llama_cpp_reference(tmp_path):

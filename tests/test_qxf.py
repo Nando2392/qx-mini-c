@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_qxf_header_written_by_python_layout_contract(tmp_path):
     # Mirrors include/qx_format.h. This catches accidental layout changes in the
     # binary contract even when the C compiler is unavailable.
-    header_size = 4 + 4*4 + 4*8 + 13*4 + 160
-    dir_entry_size = 96 + 4*4 + 4*8 + 8*3 + 4*2 + 8 + 32
-    assert header_size == 264
-    assert dir_entry_size == 216
+    header_size = 4 + 4*4 + 4 + 4*8 + 13*4 + 160 + 4
+    dir_entry_size = 96 + 3*4 + 4 + 4*8 + 2*8 + 2*4 + 8 + 32
+    assert header_size == 272
+    assert dir_entry_size == 208
 
 
 def test_qxf_tool_create_inspect_if_built(tmp_path):
@@ -74,7 +74,7 @@ def test_qxf_rejects_tensor_directory_count_outside_file(tmp_path):
     out.write_bytes(raw)
     result = subprocess.run([str(exe), "inspect-tensor", "--in", str(out), "--name", "token_embd.weight"], text=True, capture_output=True)
     assert result.returncode != 0
-    assert "tensor directory outside file" in result.stderr
+    assert "invalid QXF layout" in result.stderr
 
 
 def test_qxf_rejects_tensor_span_integer_overflow(tmp_path):
@@ -90,4 +90,4 @@ def test_qxf_rejects_tensor_span_integer_overflow(tmp_path):
     out.write_bytes(raw)
     result = subprocess.run([str(exe), "inspect-tensor", "--in", str(out), "--name", "token_embd.weight"], text=True, capture_output=True)
     assert result.returncode != 0
-    assert "tensor range outside file" in result.stderr
+    assert "invalid tensor placement" in result.stderr

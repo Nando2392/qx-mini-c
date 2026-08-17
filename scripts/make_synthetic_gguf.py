@@ -66,6 +66,25 @@ def tensor(f, name, dims, typ, offset):
     f.write(struct.pack("<Q", offset))
 
 
+GGML_LAYOUTS = {
+    GGML_TYPE_F32: (1, 4),
+    GGML_TYPE_Q4_K: (256, 144),
+    GGML_TYPE_IQ2_XS: (256, 74),
+    GGML_TYPE_IQ3_XXS: (256, 98),
+    GGML_TYPE_IQ2_S: (256, 82),
+    GGML_TYPE_IQ4_XS: (256, 136),
+}
+
+
+def tensor_nbytes(dims, typ):
+    elements = 1
+    for dim in dims:
+        elements *= dim
+    block_elements, block_bytes = GGML_LAYOUTS[typ]
+    assert dims[0] % block_elements == 0
+    return elements // block_elements * block_bytes
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="tests/fixtures/qwen3-30b-a3b-mini.gguf")
@@ -98,22 +117,28 @@ def main():
         ("bool", "tokenizer.ggml.add_bos_token", False),
         ("bool", "tokenizer.ggml.add_eos_token", False),
     ]
-    tensors = [
-        ("token_embd.weight", [2048, 151936], GGML_TYPE_Q4_K, 0),
-        ("blk.0.attn_q.weight", [256, 256], GGML_TYPE_Q4_K, 2320384),
-        ("blk.0.attn_k.weight", [256, 256], GGML_TYPE_Q4_K, 2357248),
-        ("blk.0.attn_v.weight", [256, 256], GGML_TYPE_Q4_K, 2394112),
-        ("blk.0.attn_output.weight", [256, 256], GGML_TYPE_Q4_K, 2430976),
-        ("blk.0.ffn_gate_inp.weight", [2048, 128], GGML_TYPE_F32, 2048),
-        ("blk.0.ffn_gate_exps.weight", [2048, 768, 128], GGML_TYPE_IQ2_XS, 1050624),
-        ("blk.0.ffn_up_exps.weight", [2048, 768, 128], GGML_TYPE_IQ2_XS, 1083392),
-        ("blk.0.ffn_down_exps.weight", [768, 2048, 128], GGML_TYPE_IQ3_XXS, 1116160),
-        ("blk.1.ffn_gate_inp.weight", [2048, 128], GGML_TYPE_F32, 1157120),
-        ("blk.1.ffn_gate_exps.weight", [2048, 768, 128], GGML_TYPE_IQ2_S, 2205696),
-        ("blk.1.ffn_up_exps.weight", [2048, 768, 128], GGML_TYPE_IQ2_S, 2238464),
-        ("blk.1.ffn_down_exps.weight", [768, 2048, 128], GGML_TYPE_IQ4_XS, 2271232),
-        ("blk.0.attn_norm.weight", [2048], GGML_TYPE_F32, 2312192),
+    tensor_specs = [
+        ("token_embd.weight", [256, 8], GGML_TYPE_Q4_K),
+        ("blk.0.attn_q.weight", [256, 256], GGML_TYPE_Q4_K),
+        ("blk.0.attn_k.weight", [256, 256], GGML_TYPE_Q4_K),
+        ("blk.0.attn_v.weight", [256, 256], GGML_TYPE_Q4_K),
+        ("blk.0.attn_output.weight", [256, 256], GGML_TYPE_Q4_K),
+        ("blk.0.ffn_gate_inp.weight", [256, 128], GGML_TYPE_F32),
+        ("blk.0.ffn_gate_exps.weight", [256, 256, 128], GGML_TYPE_IQ2_XS),
+        ("blk.0.ffn_up_exps.weight", [256, 256, 128], GGML_TYPE_IQ2_XS),
+        ("blk.0.ffn_down_exps.weight", [256, 256, 128], GGML_TYPE_IQ3_XXS),
+        ("blk.1.ffn_gate_inp.weight", [256, 128], GGML_TYPE_F32),
+        ("blk.1.ffn_gate_exps.weight", [256, 256, 128], GGML_TYPE_IQ2_S),
+        ("blk.1.ffn_up_exps.weight", [256, 256, 128], GGML_TYPE_IQ2_S),
+        ("blk.1.ffn_down_exps.weight", [256, 256, 128], GGML_TYPE_IQ4_XS),
+        ("blk.0.attn_norm.weight", [256], GGML_TYPE_F32),
     ]
+    tensors = []
+    data_len = 0
+    for name, dims, typ in tensor_specs:
+        data_len = (data_len + 31) & ~31
+        tensors.append((name, dims, typ, data_len))
+        data_len += tensor_nbytes(dims, typ)
 
     with out.open("wb") as f:
         f.write(b"GGUF")
@@ -134,17 +159,38 @@ def main():
         pos = f.tell()
         pad = (-pos) % 32
         f.write(b"\0" * pad)
-        data_len = 2468352
-        data = bytearray((i % 251 for i in range(data_len)))
+        legacy_phases = {
+            "token_embd.weight": 0,
+            "blk.0.attn_q.weight": 2320384,
+            "blk.0.attn_k.weight": 2357248,
+            "blk.0.attn_v.weight": 2394112,
+            "blk.0.attn_output.weight": 2430976,
+            "blk.0.ffn_gate_inp.weight": 2048,
+            "blk.0.ffn_gate_exps.weight": 1050624,
+            "blk.0.ffn_up_exps.weight": 1083392,
+            "blk.0.ffn_down_exps.weight": 1116160,
+            "blk.1.ffn_gate_inp.weight": 1157120,
+            "blk.1.ffn_gate_exps.weight": 2205696,
+            "blk.1.ffn_up_exps.weight": 2238464,
+            "blk.1.ffn_down_exps.weight": 2271232,
+            "blk.0.attn_norm.weight": 2312192,
+        }
+        data = bytearray(data_len)
+        for name, dims, typ, tensor_offset in tensors:
+            size = tensor_nbytes(dims, typ)
+            phase = legacy_phases[name]
+            data[tensor_offset:tensor_offset + size] = bytes((phase + i) % 251 for i in range(size))
         # Keep Q4_K attention fixture scales finite. Arbitrary byte patterns can
         # encode FP16 NaNs in d/dmin and are not valid quantized tensor data.
-        for tensor_offset in (2320384, 2357248, 2394112, 2430976):
-            for block in range(256):
+        for name, dims, typ, tensor_offset in tensors:
+            if typ != GGML_TYPE_Q4_K:
+                continue
+            for block in range(tensor_nbytes(dims, typ) // 144):
                 base = tensor_offset + block * 144
                 data[base:base + 4] = b"\x00\x3c\x00\x00"  # d=1.0, dmin=0.0
         # RMSNorm weights are real F32 values, not arbitrary fixture bytes.
-        norm_offset = 2312192
-        for index in range(2048):
+        norm_offset = next(item[3] for item in tensors if item[0] == "blk.0.attn_norm.weight")
+        for index in range(256):
             struct.pack_into("<f", data, norm_offset + index * 4, 1.0)
         f.write(data)
     print(out)

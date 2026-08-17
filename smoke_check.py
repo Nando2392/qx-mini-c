@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,46 @@ EXE = ROOT / "build" / "qxqxf.exe"
 
 def run(*args: object) -> str:
     return subprocess.check_output([str(arg) for arg in args], cwd=ROOT, text=True)
+
+
+def fnv1a64(data: bytes | bytearray) -> int:
+    value = 1469598103934665603
+    for byte in data:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return value
+
+
+def make_compact_valid_embedding(qxf: Path) -> None:
+    raw = bytearray(qxf.read_bytes())
+    dir_offset = struct.unpack_from("<Q", raw, 24)[0]
+    tensor_count = struct.unpack_from("<I", raw, 16)[0]
+    entry_size = 208
+    source_row = None
+    for index in range(tensor_count):
+        entry = dir_offset + index * entry_size
+        if bytes(raw[entry:entry + 96]).split(b"\0", 1)[0] == b"blk.0.attn_q.weight":
+            source_offset = struct.unpack_from("<Q", raw, entry + 144)[0]
+            source_row = bytes(raw[source_offset:source_offset + 8 * 144])
+            break
+    assert source_row is not None and len(source_row) == 8 * 144
+    first = bytearray(raw[dir_offset:dir_offset + entry_size])
+    entries_end = dir_offset + tensor_count * entry_size
+    raw[dir_offset:entries_end - entry_size] = raw[dir_offset + entry_size:entries_end]
+    token_offset = (len(raw) + 4095) & ~4095
+    raw.extend(b"\0" * (token_offset - len(raw)))
+    token_data = source_row * 8
+    raw.extend(token_data)
+    struct.pack_into("<I", first, 104, 2)
+    struct.pack_into("<4Q", first, 112, 2048, 8, 0, 0)
+    struct.pack_into("<Q", first, 144, token_offset)
+    struct.pack_into("<Q", first, 152, len(token_data))
+    struct.pack_into("<Q", first, 168, fnv1a64(token_data))
+    raw[entries_end - entry_size:entries_end] = first
+    struct.pack_into("<I", raw, 88, 8)
+    struct.pack_into("<Q", raw, 48, fnv1a64(raw[56:108]))
+    struct.pack_into("<Q", raw, 40, len(raw))
+    qxf.write_bytes(raw)
 
 
 def main() -> int:
@@ -30,6 +71,15 @@ def main() -> int:
 
         run(sys.executable, ROOT / "scripts" / "make_synthetic_gguf.py", "--out", gguf)
         run(EXE, "create-from-gguf-copy", "--in", gguf, "--model", "qwen3-30b-a3b", "--quant", "q2", "--out", qxf)
+        malformed = subprocess.run(
+            [str(EXE), "token-embedding", "--in", str(qxf), "--token-id", "2"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        assert malformed.returncode != 0
+        assert "tensor byte size is not divisible by row count" in malformed.stderr
+        make_compact_valid_embedding(qxf)
         run(EXE, "tokenizer-export", "--gguf", gguf, "--out", tokens)
         run(sys.executable, ROOT / "scripts" / "export_qwen3_tokenizer.py", "--gguf", gguf, "--out", tokenizer)
         prompt.write_text("Hello", encoding="utf-8")
@@ -45,7 +95,7 @@ def main() -> int:
                 "--tokens",
                 tokens,
                 "--prompt-token",
-                42,
+                2,
                 "--steps",
                 2,
                 "--layers",

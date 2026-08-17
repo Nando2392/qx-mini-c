@@ -20,6 +20,7 @@ confidence: high
 - [[final-output-head]] completo: final RMSNorm, 151936 logits Q6_K, top-N y argmax.
 - [[autoregressive-loop]] greedy multi-token: re-embedding, posición y KV persistente por layer.
 - [[qwen3-tokenizer]] QXT2: paridad exacta para prompts fijos y prefill desde texto.
+- Hardening QXF fail-closed: manifest, ABI, directorio, dims, nombres, placement, overflow y filas exactas.
 - Golden independientes para embedding, IQ4_XS e IQ2_XS/IQ3_XXS representativos.
 - Smoke check y suite pytest.
 
@@ -30,6 +31,7 @@ state loop real layers 0–47: GREEN
 final norm + lm_head completo: GREEN
 autoregresión multi-token correcta: GREEN
 tokenizer parity para prompts fijos: GREEN
+QXF corruption/legacy-clamp gate: GREEN
 → tokens greedy end-to-end idénticos
 ```
 
@@ -38,12 +40,11 @@ tokenizer parity para prompts fijos: GREEN
 ## Después
 
 1. Comparar tokens y residuales end-to-end contra referencia externa.
-2. Completar hardening global QXF de tamaños, offsets y overflow.
-3. Ampliar tokenizer a cobertura Unicode/chat-template exhaustiva.
-4. Aplicar [[optimization-priorities]] CPU.
-5. Medir baseline de inferencia real.
-6. Diseñar backend CUDA híbrido.
-7. Gates 4K, RSS, calidad KV y 8 h.
+2. Ampliar tokenizer a cobertura Unicode/chat-template exhaustiva.
+3. Aplicar [[optimization-priorities]] CPU.
+4. Medir baseline de inferencia real.
+5. Diseñar backend CUDA híbrido.
+6. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 

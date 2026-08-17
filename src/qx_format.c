@@ -33,6 +33,15 @@ uint64_t qx_align_u64(uint64_t value, uint64_t alignment) {
     return rem == 0 ? value : value + (alignment - rem);
 }
 
+static int qx_align_u64_checked(uint64_t value, uint64_t alignment, uint64_t *out) {
+    if (!out || alignment == 0) return 0;
+    uint64_t rem = value % alignment;
+    uint64_t add = rem == 0 ? 0 : alignment - rem;
+    if (value > UINT64_MAX - add) return 0;
+    *out = value + add;
+    return 1;
+}
+
 uint64_t qx_fnv1a64(const void *data, uint64_t len) {
     const unsigned char *p = (const unsigned char *)data;
     uint64_t h = 1469598103934665603ull;
@@ -261,6 +270,17 @@ int qx_read_header(FILE *f, qx_header *out, char *err, uint64_t err_len) {
     }
     uint64_t got = qx_fnv1a64(&out->manifest, (uint64_t)sizeof(out->manifest));
     if (got != out->manifest_checksum) { qx_set_err(err, err_len, "manifest checksum mismatch"); return 0; }
+    const qx_model_manifest *m = &out->manifest;
+    if ((m->model_type != QX_MODEL_QWEN3_DENSE && m->model_type != QX_MODEL_QWEN3_MOE) ||
+        m->quant_type < QX_QUANT_F16 || m->quant_type > QX_QUANT_Q2_BLOCK ||
+        m->layers == 0 || m->hidden == 0 || m->intermediate == 0 ||
+        m->q_heads == 0 || m->kv_heads == 0 || m->kv_heads > m->q_heads ||
+        m->head_dim == 0 || m->vocab == 0 || m->max_ctx == 0 ||
+        (m->model_type == QX_MODEL_QWEN3_MOE &&
+         (m->experts == 0 || m->experts_per_token == 0 ||
+          m->experts_per_token > m->experts || m->moe_intermediate == 0))) {
+        qx_set_err(err, err_len, "invalid QXF manifest"); return 0;
+    }
     return 1;
 }
 
@@ -339,14 +359,22 @@ int qx_write_tensor_copy_from_gguf(const char *out_path, const char *gguf_path, 
     if (!out_path || !gguf_path || !manifest || !table || !table->tensors) {
         qx_set_err(err, err_len, "invalid argument"); return 0;
     }
+    if (table->tensor_count == 0) { qx_set_err(err, err_len, "empty tensor directory"); return 0; }
     if (table->tensor_count > UINT32_MAX) { qx_set_err(err, err_len, "too many tensors for QXF v1"); return 0; }
 
     qx_tensor_dir_entry *entries = (qx_tensor_dir_entry *)calloc((size_t)table->tensor_count, sizeof(qx_tensor_dir_entry));
     if (!entries) { qx_set_err(err, err_len, "out of memory"); return 0; }
 
-    uint64_t cursor = qx_align_u64(sizeof(qx_header), QX_ALIGN_BYTES);
+    uint64_t cursor = 0;
+    if (!qx_align_u64_checked(sizeof(qx_header), QX_ALIGN_BYTES, &cursor)) {
+        free(entries); qx_set_err(err, err_len, "QXF layout overflow"); return 0;
+    }
     uint64_t dir_offset = cursor;
-    cursor = qx_align_u64(dir_offset + table->tensor_count * sizeof(qx_tensor_dir_entry), QX_ALIGN_BYTES);
+    uint64_t directory_bytes = table->tensor_count * sizeof(qx_tensor_dir_entry);
+    if (dir_offset > UINT64_MAX - directory_bytes ||
+        !qx_align_u64_checked(dir_offset + directory_bytes, QX_ALIGN_BYTES, &cursor)) {
+        free(entries); qx_set_err(err, err_len, "QXF layout overflow"); return 0;
+    }
     uint64_t data_offset = cursor;
 
     for (uint64_t i = 0; i < table->tensor_count; i++) {
@@ -365,7 +393,10 @@ int qx_write_tensor_copy_from_gguf(const char *out_path, const char *gguf_path, 
         e->byte_size = gt->byte_size;
         e->group_size = (e->dtype == QX_DTYPE_F32 || e->dtype == QX_DTYPE_F16 || e->dtype == QX_DTYPE_U8) ? 0u : 64u;
         e->flags = gt->ggml_type;
-        cursor = qx_align_u64(cursor + e->byte_size, QX_ALIGN_BYTES);
+        if (cursor > UINT64_MAX - e->byte_size ||
+            !qx_align_u64_checked(cursor + e->byte_size, QX_ALIGN_BYTES, &cursor)) {
+            free(entries); qx_set_err(err, err_len, "QXF tensor layout overflow"); return 0;
+        }
     }
 
     qx_header h;
@@ -401,15 +432,19 @@ int qx_write_tensor_copy_from_gguf(const char *out_path, const char *gguf_path, 
         if (fseeko(dst, (off_t)e->offset, SEEK_SET) != 0) { ok = 0; break; }
 #endif
         uint64_t checksum = 0;
-        if (!copy_tensor_bytes(src, dst, table->data_offset + table->tensors[i].offset, e->byte_size, &checksum)) { ok = 0; break; }
+        if (table->data_offset > UINT64_MAX - table->tensors[i].offset ||
+            !copy_tensor_bytes(src, dst, table->data_offset + table->tensors[i].offset, e->byte_size, &checksum)) { ok = 0; break; }
         e->checksum = checksum;
     }
 
     if (ok) {
+        uint64_t written_end = entries[table->tensor_count - 1u].offset + entries[table->tensor_count - 1u].byte_size;
 #if defined(_WIN32)
-        if (_fseeki64(dst, (int64_t)dir_offset, SEEK_SET) != 0) ok = 0;
+        if (h.file_size > written_end && (_fseeki64(dst, (int64_t)(h.file_size - 1u), SEEK_SET) != 0 || fputc(0, dst) == EOF)) ok = 0;
+        if (ok && _fseeki64(dst, (int64_t)dir_offset, SEEK_SET) != 0) ok = 0;
 #else
-        if (fseeko(dst, (off_t)dir_offset, SEEK_SET) != 0) ok = 0;
+        if (h.file_size > written_end && (fseeko(dst, (off_t)(h.file_size - 1u), SEEK_SET) != 0 || fputc(0, dst) == EOF)) ok = 0;
+        if (ok && fseeko(dst, (off_t)dir_offset, SEEK_SET) != 0) ok = 0;
 #endif
         if (ok && fwrite(entries, sizeof(qx_tensor_dir_entry), (size_t)table->tensor_count, dst) != table->tensor_count) ok = 0;
     }
@@ -418,6 +453,84 @@ int qx_write_tensor_copy_from_gguf(const char *out_path, const char *gguf_path, 
     free(entries);
     if (!ok) { qx_set_err(err, err_len, "tensor-copy write failed"); return 0; }
     return 1;
+}
+
+static int qx_compare_tensor_names(const void *left, const void *right) {
+    const char *const *a = (const char *const *)left;
+    const char *const *b = (const char *const *)right;
+    return strcmp(*a, *b);
+}
+
+typedef struct qx_tensor_span {
+    uint64_t offset;
+    uint64_t end;
+} qx_tensor_span;
+
+static int qx_compare_tensor_spans(const void *left, const void *right) {
+    const qx_tensor_span *a = (const qx_tensor_span *)left;
+    const qx_tensor_span *b = (const qx_tensor_span *)right;
+    if (a->offset < b->offset) return -1;
+    if (a->offset > b->offset) return 1;
+    return 0;
+}
+
+static int qx_validate_tensor_dimensions(const qx_tensor_dir_entry *tensor, uint64_t *elements_out) {
+    if (!tensor || !elements_out || tensor->rank == 0 || tensor->rank > QX_MAX_DIMS) return 0;
+    uint64_t elements = 1u;
+    for (uint32_t d = 0; d < QX_MAX_DIMS; ++d) {
+        if (d < tensor->rank) {
+            if (tensor->dims[d] == 0 || elements > UINT64_MAX / tensor->dims[d]) return 0;
+            elements *= tensor->dims[d];
+        } else if (tensor->dims[d] != 0) {
+            return 0;
+        }
+    }
+    *elements_out = elements;
+    return elements > 0;
+}
+
+static int qx_expected_tensor_byte_size(const qx_tensor_dir_entry *tensor, uint64_t elements, uint64_t *expected_out) {
+    uint64_t block_elements = 0;
+    uint64_t block_bytes = 0;
+    switch (tensor->flags) {
+        case 0u: block_elements = 1u; block_bytes = 4u; break;   /* F32 */
+        case 1u: block_elements = 1u; block_bytes = 2u; break;   /* F16 */
+        case 8u: block_elements = 32u; block_bytes = 34u; break; /* Q8_0 */
+        case 10u: block_elements = 256u; block_bytes = 84u; break;  /* Q2_K */
+        case 11u: block_elements = 256u; block_bytes = 110u; break; /* Q3_K */
+        case 12u: block_elements = 256u; block_bytes = 144u; break; /* Q4_K */
+        case 13u: block_elements = 256u; block_bytes = 176u; break; /* Q5_K */
+        case 14u: block_elements = 256u; block_bytes = 210u; break; /* Q6_K */
+        case 17u: block_elements = 256u; block_bytes = 74u; break;  /* IQ2_XS */
+        case 18u: block_elements = 256u; block_bytes = 98u; break;  /* IQ3_XXS */
+        case 21u: block_elements = 256u; block_bytes = 110u; break; /* IQ3_S */
+        case 22u: block_elements = 256u; block_bytes = 82u; break;  /* IQ2_S */
+        case 23u: block_elements = 256u; block_bytes = 136u; break; /* IQ4_XS */
+        default: return 0;
+    }
+    if (tensor->dims[0] % block_elements != 0 || elements % block_elements != 0) return 0;
+    uint64_t blocks = elements / block_elements;
+    if (blocks > UINT64_MAX / block_bytes) return 0;
+    *expected_out = blocks * block_bytes;
+    return *expected_out > 0;
+}
+
+static int qx_validate_tensor_traits(const qx_tensor_dir_entry *tensor) {
+    uint32_t expected_dtype = 0;
+    uint32_t expected_group = 0;
+    switch (tensor->flags) {
+        case 0u: expected_dtype = QX_DTYPE_F32; break;
+        case 1u: expected_dtype = QX_DTYPE_F16; break;
+        case 8u: expected_dtype = QX_DTYPE_U8; break;
+        case 10u: case 17u: case 22u: expected_dtype = QX_DTYPE_Q2; expected_group = 64u; break;
+        case 11u: case 18u: case 21u: expected_dtype = QX_DTYPE_Q3; expected_group = 64u; break;
+        case 12u: case 13u: case 14u: expected_dtype = QX_DTYPE_Q4; expected_group = 64u; break;
+        case 23u:
+            return (tensor->dtype == QX_DTYPE_Q4 && tensor->group_size == 64u) ||
+                   (tensor->dtype == QX_DTYPE_U8 && tensor->group_size == 0u);
+        default: return 0;
+    }
+    return tensor->dtype == expected_dtype && tensor->group_size == expected_group;
 }
 
 
@@ -438,12 +551,15 @@ int qx_open_file(const char *path, qx_file *out, char *err, uint64_t err_len) {
     if (fseeko(out->fp, 0, SEEK_END) != 0) { qx_set_err(err, err_len, "seek file end failed"); qx_close_file(out); return 0; }
     off_t actual_size_signed = ftello(out->fp);
 #endif
-    if (actual_size_signed < 0 || (uint64_t)actual_size_signed < out->header.file_size || out->header.file_size < sizeof(qx_header)) {
-        qx_set_err(err, err_len, "declared QXF file size outside file"); qx_close_file(out); return 0;
+    if (actual_size_signed < 0 || (uint64_t)actual_size_signed != out->header.file_size || out->header.file_size < sizeof(qx_header)) {
+        qx_set_err(err, err_len, "declared QXF file size does not match file"); qx_close_file(out); return 0;
     }
     uint64_t directory_bytes = (uint64_t)out->header.tensor_count * (uint64_t)sizeof(qx_tensor_dir_entry);
-    if (out->header.dir_offset > out->header.file_size || directory_bytes > out->header.file_size - out->header.dir_offset) {
-        qx_set_err(err, err_len, "tensor directory outside file"); qx_close_file(out); return 0;
+    if (out->header.dir_offset < out->header.header_size || out->header.dir_offset % QX_ALIGN_BYTES != 0 ||
+        out->header.data_offset % QX_ALIGN_BYTES != 0 || out->header.dir_offset > out->header.file_size ||
+        directory_bytes > out->header.file_size - out->header.dir_offset ||
+        out->header.data_offset < out->header.dir_offset + directory_bytes || out->header.data_offset > out->header.file_size) {
+        qx_set_err(err, err_len, "invalid QXF layout"); qx_close_file(out); return 0;
     }
     out->directory = (qx_tensor_dir_entry *)calloc(out->header.tensor_count, sizeof(qx_tensor_dir_entry));
     if (!out->directory) { qx_set_err(err, err_len, "out of memory"); qx_close_file(out); return 0; }
@@ -457,17 +573,65 @@ int qx_open_file(const char *path, qx_file *out, char *err, uint64_t err_len) {
     if (fread(out->directory, sizeof(qx_tensor_dir_entry), out->header.tensor_count, out->fp) != out->header.tensor_count) {
         qx_set_err(err, err_len, "short tensor directory read"); qx_close_file(out); return 0;
     }
+    const int metadata_only = out->header.file_size == out->header.data_offset;
+    if ((uint64_t)out->header.tensor_count > (uint64_t)SIZE_MAX / sizeof(const char *) ||
+        (uint64_t)out->header.tensor_count > (uint64_t)SIZE_MAX / sizeof(qx_tensor_span)) {
+        qx_set_err(err, err_len, "tensor index too large"); qx_close_file(out); return 0;
+    }
+    const char **names = (const char **)malloc((size_t)out->header.tensor_count * sizeof(*names));
+    qx_tensor_span *spans = metadata_only ? NULL : (qx_tensor_span *)malloc((size_t)out->header.tensor_count * sizeof(*spans));
+    if (!names || (!metadata_only && !spans)) {
+        free(names); free(spans); qx_set_err(err, err_len, "out of memory"); qx_close_file(out); return 0;
+    }
     for (uint32_t i = 0; i < out->header.tensor_count; ++i) {
         const qx_tensor_dir_entry *tensor = &out->directory[i];
-        if (!memchr(tensor->name, '\0', QX_NAME_MAX)) {
-            qx_set_err(err, err_len, "unterminated tensor name"); qx_close_file(out); return 0;
+        if (!memchr(tensor->name, '\0', QX_NAME_MAX) || tensor->name[0] == '\0') {
+            free(names); free(spans); qx_set_err(err, err_len, "unterminated or empty tensor name"); qx_close_file(out); return 0;
         }
-        if (tensor->rank > QX_MAX_DIMS) {
-            qx_set_err(err, err_len, "tensor rank outside format limit"); qx_close_file(out); return 0;
+        names[i] = tensor->name;
+        if (tensor->dtype < QX_DTYPE_F16 || tensor->dtype > QX_DTYPE_U8 ||
+            tensor->quant < QX_QUANT_F16 || tensor->quant > QX_QUANT_Q2_BLOCK ||
+            (!metadata_only && !qx_validate_tensor_traits(tensor))) {
+            free(names); free(spans); qx_set_err(err, err_len, "invalid tensor metadata"); qx_close_file(out); return 0;
         }
-        if (tensor->offset > out->header.file_size || tensor->byte_size > out->header.file_size - tensor->offset) {
-            qx_set_err(err, err_len, "tensor range outside file"); qx_close_file(out); return 0;
+        uint64_t elements = 0;
+        if (!qx_validate_tensor_dimensions(tensor, &elements)) {
+            free(names); free(spans); qx_set_err(err, err_len, "invalid tensor dimensions"); qx_close_file(out); return 0;
         }
+        if (metadata_only) {
+            if (tensor->offset != 0 || tensor->byte_size != 0) {
+                free(names); free(spans); qx_set_err(err, err_len, "invalid tensor placement"); qx_close_file(out); return 0;
+            }
+        } else {
+            if (tensor->offset < out->header.data_offset || tensor->offset % QX_ALIGN_BYTES != 0 || tensor->byte_size == 0 ||
+                tensor->offset > out->header.file_size || tensor->byte_size > out->header.file_size - tensor->offset) {
+                free(names); free(spans); qx_set_err(err, err_len, "invalid tensor placement"); qx_close_file(out); return 0;
+            }
+            uint64_t expected_size = 0;
+            if (!qx_expected_tensor_byte_size(tensor, elements, &expected_size) || tensor->byte_size != expected_size) {
+                free(names); free(spans); qx_set_err(err, err_len, "tensor byte size inconsistent with dimensions"); qx_close_file(out); return 0;
+            }
+            spans[i].offset = tensor->offset;
+            spans[i].end = tensor->offset + tensor->byte_size;
+        }
+    }
+    qsort(names, out->header.tensor_count, sizeof(*names), qx_compare_tensor_names);
+    for (uint32_t i = 1; i < out->header.tensor_count; ++i) {
+        if (strcmp(names[i - 1], names[i]) == 0) {
+            free(names); free(spans); qx_set_err(err, err_len, "duplicate tensor name"); qx_close_file(out); return 0;
+        }
+    }
+    free(names);
+    if (spans) {
+        qsort(spans, out->header.tensor_count, sizeof(*spans), qx_compare_tensor_spans);
+        uint64_t previous_end = out->header.data_offset;
+        for (uint32_t i = 0; i < out->header.tensor_count; ++i) {
+            if (spans[i].offset < previous_end) {
+                free(spans); qx_set_err(err, err_len, "overlapping tensor ranges"); qx_close_file(out); return 0;
+            }
+            previous_end = spans[i].end;
+        }
+        free(spans);
     }
     return 1;
 }
@@ -489,7 +653,7 @@ const qx_tensor_dir_entry *qx_find_tensor(const qx_file *file, const char *name)
 
 int qx_verify_tensor_checksum(qx_file *file, const qx_tensor_dir_entry *tensor, char *err, uint64_t err_len) {
     if (!file || !file->fp || !tensor) { qx_set_err(err, err_len, "invalid argument"); return 0; }
-    if (tensor->offset + tensor->byte_size > file->header.file_size) {
+    if (tensor->offset > file->header.file_size || tensor->byte_size > file->header.file_size - tensor->offset) {
         qx_set_err(err, err_len, "tensor range outside file"); return 0;
     }
     unsigned char *buf = (unsigned char *)malloc(64 * 1024);
@@ -1234,10 +1398,16 @@ int qx_dump_runtime_plan(const char *path, uint32_t ctx_tokens, const char *kv_f
 }
 
 
-static uint64_t qx_embedding_row_size(const qx_tensor_dir_entry *t, uint32_t vocab) {
-    if (!t || vocab == 0) return 0;
-    uint64_t row = t->byte_size / vocab;
-    return row ? row : 1;
+static int qx_embedding_row_size(const qx_tensor_dir_entry *t, uint32_t rows, uint64_t *row_out, char *err, uint64_t err_len) {
+    if (!t || !row_out || rows == 0 || t->byte_size == 0) {
+        qx_set_err(err, err_len, "invalid tensor row layout"); return 0;
+    }
+    if (t->byte_size % rows != 0) {
+        qx_set_err(err, err_len, "tensor byte size is not divisible by row count"); return 0;
+    }
+    *row_out = t->byte_size / rows;
+    if (*row_out == 0) { qx_set_err(err, err_len, "invalid tensor row layout"); return 0; }
+    return 1;
 }
 
 int qx_dump_token_embedding_summary(const char *path, uint32_t token_id, FILE *out, char *err, uint64_t err_len) {
@@ -1247,9 +1417,11 @@ int qx_dump_token_embedding_summary(const char *path, uint32_t token_id, FILE *o
     if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "token_embd.weight not found"); return 0; }
     uint32_t vocab = file.header.manifest.vocab;
     if (vocab && token_id >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "token id out of range"); return 0; }
-    uint64_t row = qx_embedding_row_size(t, vocab ? vocab : (uint32_t)(t->dims[1] ? t->dims[1] : 1));
+    uint64_t row = 0;
+    if (!qx_embedding_row_size(t, vocab ? vocab : (uint32_t)t->dims[1], &row, err, err_len)) {
+        qx_close_file(&file); return 0;
+    }
     uint64_t offset = t->offset + row * token_id;
-    if (offset >= t->offset + t->byte_size) offset = t->offset + t->byte_size - (row ? row : 1);
     fprintf(out, "{\n");
     fprintf(out, "  \"token_id\": %u,\n", token_id);
     fprintf(out, "  \"tensor\": \"token_embd.weight\",\n");
@@ -1280,9 +1452,12 @@ int qx_dump_forward_schedule(const char *path, uint32_t token_id, uint32_t top_k
     if (top_k == 0) top_k = m->experts_per_token ? m->experts_per_token : 1;
     const qx_tensor_dir_entry *emb = qx_find_tensor(&file, "token_embd.weight");
     if (!emb) { qx_close_file(&file); qx_set_err(err, err_len, "token_embd.weight not found"); return 0; }
-    uint64_t row = qx_embedding_row_size(emb, m->vocab ? m->vocab : 1);
+    if (m->vocab && token_id >= m->vocab) { qx_close_file(&file); qx_set_err(err, err_len, "token id out of range"); return 0; }
+    uint64_t row = 0;
+    if (!qx_embedding_row_size(emb, m->vocab ? m->vocab : (uint32_t)emb->dims[1], &row, err, err_len)) {
+        qx_close_file(&file); return 0;
+    }
     uint64_t emb_offset = emb->offset + row * token_id;
-    if (emb_offset >= emb->offset + emb->byte_size) emb_offset = emb->offset;
     char router_name[QX_NAME_MAX];
     snprintf(router_name, sizeof(router_name), "blk.0.ffn_gate_inp.weight");
     const char *attn_names[] = {"blk.0.attn_q.weight", "blk.0.attn_qkv.weight", "blk.0.attn_output.weight"};
@@ -1359,10 +1534,13 @@ int qx_dump_quant_block_summary(const char *path, const char *name, uint64_t blo
     const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
     if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "tensor not found"); return 0; }
     uint64_t block_size = qx_quant_probe_block_size(t);
-    uint64_t block_count = block_size ? (t->byte_size + block_size - 1) / block_size : 0;
+    uint64_t block_count = block_size ? t->byte_size / block_size + (t->byte_size % block_size != 0) : 0;
     if (block_index >= block_count) { qx_close_file(&file); qx_set_err(err, err_len, "block out of range"); return 0; }
-    uint64_t block_offset = t->offset + block_index * block_size;
-    uint64_t remaining = (t->offset + t->byte_size) - block_offset;
+    if (block_size == 0 || block_index > UINT64_MAX / block_size) { qx_close_file(&file); qx_set_err(err, err_len, "block offset overflow"); return 0; }
+    uint64_t relative_offset = block_index * block_size;
+    if (relative_offset > t->byte_size) { qx_close_file(&file); qx_set_err(err, err_len, "block out of range"); return 0; }
+    uint64_t block_offset = t->offset + relative_offset;
+    uint64_t remaining = t->byte_size - relative_offset;
     uint64_t read_size = remaining < block_size ? remaining : block_size;
     unsigned char *buf = NULL;
     if (!qx_read_raw_span(&file, block_offset, read_size, &buf, err, err_len)) { qx_close_file(&file); return 0; }
@@ -1393,8 +1571,13 @@ int qx_dump_matvec_stub_summary(const char *path, const char *name, uint32_t row
     const qx_tensor_dir_entry *t = qx_find_tensor(&file, name);
     if (!t) { qx_close_file(&file); qx_set_err(err, err_len, "tensor not found"); return 0; }
     uint64_t block_size = qx_quant_probe_block_size(t);
+    if (block_size == 0 || (uint64_t)rows > UINT64_MAX / block_size) {
+        qx_close_file(&file); qx_set_err(err, err_len, "invalid requested matvec span"); return 0;
+    }
     uint64_t span = block_size * rows;
-    if (span > t->byte_size) span = t->byte_size;
+    if (span > t->byte_size) {
+        qx_close_file(&file); qx_set_err(err, err_len, "requested matvec span outside tensor"); return 0;
+    }
     unsigned char *buf = NULL;
     if (!qx_read_raw_span(&file, t->offset, span, &buf, err, err_len)) { qx_close_file(&file); return 0; }
     uint64_t mix = qx_fnv1a64(buf, span);
@@ -2441,14 +2624,14 @@ static const qx_tensor_dir_entry *qx_select_lm_head_tensor(qx_file *file, const 
     return NULL;
 }
 
-static double qx_logit_row_score(qx_file *file, const qx_tensor_dir_entry *lm, uint32_t vocab, uint32_t token, double activation, uint32_t seed, uint64_t *checksum_out, char *err, uint64_t err_len) {
-    uint64_t row = qx_embedding_row_size(lm, vocab ? vocab : (uint32_t)(lm->dims[1] ? lm->dims[1] : 1));
+static int qx_logit_row_score(qx_file *file, const qx_tensor_dir_entry *lm, uint32_t vocab, uint32_t token, double activation, uint32_t seed, double *score_out, uint64_t *checksum_out, char *err, uint64_t err_len) {
+    if (!score_out || token >= vocab) { qx_set_err(err, err_len, "token id out of range"); return 0; }
+    uint64_t row = 0;
+    if (!qx_embedding_row_size(lm, vocab ? vocab : (uint32_t)lm->dims[1], &row, err, err_len)) return 0;
     uint64_t off = lm->offset + (uint64_t)token * row;
-    if (off >= lm->offset + lm->byte_size) off = lm->offset + lm->byte_size - (row ? row : 1u);
     uint64_t span = row;
-    if (off + span > lm->offset + lm->byte_size) span = (lm->offset + lm->byte_size) - off;
     unsigned char *buf = NULL;
-    if (span == 0 || !qx_read_raw_span(file, off, span, &buf, err, err_len)) return -1.0e300;
+    if (!qx_read_raw_span(file, off, span, &buf, err, err_len)) return 0;
     uint64_t chk = qx_fnv1a64(buf, span);
     if (checksum_out) *checksum_out = chk;
     double score = 0.0;
@@ -2468,7 +2651,8 @@ static double qx_logit_row_score(qx_file *file, const qx_tensor_dir_entry *lm, u
         for (uint64_t i = 0; i < n; ++i) score += (((double)buf[i] - 127.5) / 127.5) * (double)((chk >> ((i & 7u) * 8u)) & 255u) / 255.0;
     }
     free(buf);
-    return score * activation;
+    *score_out = score * activation;
+    return 1;
 }
 
 static int qx_collect_top_logits(qx_file *file, double activation, uint32_t top_n, uint32_t scan, uint32_t seed, const char **lm_name, int *tied, uint32_t *scanned_out, qx_top_token *top, char *err, uint64_t err_len) {
@@ -2479,10 +2663,13 @@ static int qx_collect_top_logits(qx_file *file, double activation, uint32_t top_
     if (!lm) { qx_set_err(err, err_len, "lm head/output/token embedding tensor not found"); return 0; }
     uint32_t vocab = file->header.manifest.vocab ? file->header.manifest.vocab : (uint32_t)(lm->dims[1] ? lm->dims[1] : scan);
     if (scan > vocab) scan = vocab;
+    if (top_n > scan) top_n = scan;
+    if (top_n == 0) { qx_set_err(err, err_len, "empty logits scan"); return 0; }
     for (uint32_t i = 0; i < top_n; ++i) { top[i].token = 0; top[i].logit = -1.0e300; top[i].checksum = 0; }
     for (uint32_t token = 0; token < scan; ++token) {
         uint64_t chk = 0;
-        double logit = qx_logit_row_score(file, lm, vocab, token, activation, seed, &chk, err, err_len);
+        double logit = 0.0;
+        if (!qx_logit_row_score(file, lm, vocab, token, activation, seed, &logit, &chk, err, err_len)) return 0;
         for (uint32_t i = 0; i < top_n; ++i) {
             if (logit > top[i].logit) {
                 for (uint32_t j = top_n - 1; j > i; --j) top[j] = top[j - 1];
@@ -2506,8 +2693,10 @@ int qx_dump_logits_probe_summary(const char *path, double activation, uint32_t t
     int tied = 0;
     uint32_t scanned = 0;
     if (!qx_collect_top_logits(&file, activation, top_n, scan, seed, &lm_name, &tied, &scanned, top, err, err_len)) { qx_close_file(&file); return 0; }
+    if (top_n > scanned) top_n = scanned;
     fprintf(out, "{\n");
     fprintf(out, "  \"probe\": \"logits\",\n");
+    fprintf(out, "  \"synthetic\": true,\n");
     fprintf(out, "  \"lm_head_tensor\": \"%s\",\n", lm_name ? lm_name : "null");
     fprintf(out, "  \"tied_embedding_fallback\": %s,\n", tied ? "true" : "false");
     fprintf(out, "  \"activation\": %.9g,\n", activation);
@@ -2592,6 +2781,7 @@ int qx_dump_sampler_probe_summary(const char *path, double activation, uint32_t 
     int tied = 0;
     uint32_t scanned = 0;
     if (!qx_collect_top_logits(&file, activation, top_k, scan, seed, &lm_name, &tied, &scanned, top, err, err_len)) { qx_close_file(&file); return 0; }
+    if (top_k > scanned) top_k = scanned;
     qx_sample_result sr = qx_sample_from_top(top, top_k, temperature, seed);
     fprintf(out, "{\n");
     fprintf(out, "  \"probe\": \"sampler\",\n");
@@ -2764,7 +2954,8 @@ int qx_dump_generate_probe_summary(const char *path, const char *tokens_path, ui
         uint32_t scanned = 0;
         double activation = 0.125 + ((double)(current % 997u) / 9970.0) + (double)step * 0.001;
         if (!qx_collect_top_logits(&file, activation, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) { qx_close_file(&file); return 0; }
-        qx_sample_result sr = qx_sample_from_top(top, top_k, temperature, seed + step * 101u + current);
+        uint32_t effective_top_k = top_k > scanned ? scanned : top_k;
+        qx_sample_result sr = qx_sample_from_top(top, effective_top_k, temperature, seed + step * 101u + current);
         char piece[8192];
         char fallback[64];
         const char *source = "fallback_token_id";
@@ -2995,22 +3186,24 @@ static int qx_fill_residual_vector_from_embedding(qx_file *file, uint32_t token_
     if (token_id >= vocab) { qx_set_err(err, err_len, "token id out of range"); return 0; }
     const char *decoder = NULL;
     uint64_t block_size = 0;
-    uint64_t row = qx_embedding_row_size(emb, vocab);
+    uint64_t row = 0;
+    if (!qx_embedding_row_size(emb, vocab, &row, err, err_len)) return 0;
     uint64_t off = emb->offset + (uint64_t)token_id * row;
-    if (off >= emb->offset + emb->byte_size) off = emb->offset;
     uint64_t read = row;
-    if (qx_decoder_info(emb->flags, &decoder, &block_size) && block_size > 0 && read < block_size && emb->byte_size >= block_size) { off = emb->offset; read = block_size; }
-    if (off + read > emb->offset + emb->byte_size) read = (emb->offset + emb->byte_size) - off;
+    qx_decoder_info(emb->flags, &decoder, &block_size);
+    if (block_size > 0 && read < block_size) { qx_set_err(err, err_len, "embedding row smaller than quant block"); return 0; }
     unsigned char *raw = NULL;
     if (!qx_read_raw_span(file, off, read, &raw, err, err_len)) return 0;
     uint32_t produced = 0;
     if (decoder && block_size > 0 && read >= block_size) {
         uint64_t available_blocks = read / block_size;
         uint32_t needed_blocks = (dims + 255u) / 256u;
+        if ((uint64_t)needed_blocks > available_blocks) {
+            free(raw); qx_set_err(err, err_len, "embedding row too small for requested residual dimensions"); return 0;
+        }
         for (uint32_t block = 0; block < needed_blocks; ++block) {
             float vals[256];
-            uint64_t source_block = block < available_blocks ? block : (block % available_blocks);
-            if (!qx_decode_supported_block(emb->flags, raw + source_block * block_size, vals)) { free(raw); qx_set_err(err, err_len, "embedding block decode failed"); return 0; }
+            if (!qx_decode_supported_block(emb->flags, raw + (uint64_t)block * block_size, vals)) { free(raw); qx_set_err(err, err_len, "embedding block decode failed"); return 0; }
             uint32_t take = dims - produced;
             if (take > 256u) take = 256u;
             memcpy(dst + produced, vals, (size_t)take * sizeof(float));
@@ -3062,7 +3255,10 @@ int qx_dump_residual_vector_probe_summary(const char *path, uint32_t token_id, c
     const qx_tensor_dir_entry *emb = qx_find_tensor(&file, "token_embd.weight");
     const char *embedding_decoder = NULL;
     uint64_t embedding_block_size = 0;
-    uint64_t embedding_row_bytes = emb ? qx_embedding_row_size(emb, file.header.manifest.vocab ? file.header.manifest.vocab : (uint32_t)emb->dims[1]) : 0;
+    uint64_t embedding_row_bytes = 0;
+    if (emb && !qx_embedding_row_size(emb, file.header.manifest.vocab ? file.header.manifest.vocab : (uint32_t)emb->dims[1], &embedding_row_bytes, err, err_len)) {
+        free(vec); qx_close_file(&file); return 0;
+    }
     qx_decoder_info(emb ? emb->flags : 0u, &embedding_decoder, &embedding_block_size);
     uint32_t embedding_blocks_decoded = embedding_block_size ? (uint32_t)((dims + 255u) / 256u) : 0u;
     uint64_t available_embedding_blocks = embedding_block_size ? embedding_row_bytes / embedding_block_size : 0u;
@@ -4290,6 +4486,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         } else if (!qx_collect_top_logits(&file, residual_probe, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) {
             free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
         }
+        if (!head_ready && sample_top_n > scanned) sample_top_n = scanned;
         qx_sample_result sr = qx_sample_from_top(top, sample_top_n, temperature, seed + step * 101u + current);
         char piece[8192];
         char fallback[64];
@@ -4395,11 +4592,10 @@ int qx_dump_token_forward_probe_summary(const char *path, uint32_t token_id, uin
     if (!emb) { qx_close_file(&file); qx_set_err(err, err_len, "token_embd.weight not found"); return 0; }
     uint32_t vocab = file.header.manifest.vocab ? file.header.manifest.vocab : (uint32_t)(emb->dims[1] ? emb->dims[1] : 1);
     if (token_id >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "token id out of range"); return 0; }
-    uint64_t row = qx_embedding_row_size(emb, vocab);
+    uint64_t row = 0;
+    if (!qx_embedding_row_size(emb, vocab, &row, err, err_len)) { qx_close_file(&file); return 0; }
     uint64_t emb_offset = emb->offset + row * token_id;
-    if (emb_offset >= emb->offset + emb->byte_size) emb_offset = emb->offset + emb->byte_size - (row ? row : 1);
     uint64_t emb_read = row;
-    if (emb_offset + emb_read > emb->offset + emb->byte_size) emb_read = (emb->offset + emb->byte_size) - emb_offset;
     unsigned char *emb_buf = NULL;
     if (!qx_read_raw_span(&file, emb_offset, emb_read, &emb_buf, err, err_len)) { qx_close_file(&file); return 0; }
     uint64_t emb_checksum = qx_fnv1a64(emb_buf, emb_read);
@@ -4429,19 +4625,8 @@ int qx_dump_token_forward_probe_summary(const char *path, uint32_t token_id, uin
         }
         emb_values = emb_read;
     }
-    if (norm_name && *norm_name && emb_decoder && emb_block_size > 0 && emb_read < emb_block_size && emb->byte_size >= emb_block_size) {
-        free(emb_buf);
-        emb_offset = emb->offset;
-        emb_read = emb_block_size;
-        if (!qx_read_raw_span(&file, emb_offset, emb_read, &emb_buf, err, err_len)) { qx_close_file(&file); return 0; }
-        emb_checksum = qx_fnv1a64(emb_buf, emb_read);
-        embedding_probe = 0.0;
-        uint32_t rstate = seed ? seed : 1u;
-        float block[256];
-        qx_decode_supported_block(emb->flags, emb_buf, block);
-        for (int i = 0; i < 256; ++i) embedding_probe += (double)block[i] * (double)qx_deterministic_input(&rstate);
-        emb_values = 256;
-        embedding_numeric = 1;
+    if (norm_name && *norm_name && emb_decoder && emb_block_size > 0 && emb_read < emb_block_size) {
+        free(emb_buf); qx_close_file(&file); qx_set_err(err, err_len, "embedding row smaller than quant block"); return 0;
     }
     if (norm_name && *norm_name && embedding_numeric) {
         const qx_tensor_dir_entry *norm = qx_find_tensor(&file, norm_name);
@@ -4596,6 +4781,7 @@ int qx_dump_token_forward_probe_summary(const char *path, uint32_t token_id, uin
     if (logits_top_n > 32) logits_top_n = 32;
     int logits_ok = 0;
     if (logits_enabled || sample_enabled) logits_ok = qx_collect_top_logits(&file, token_output, logits_top_n, 64, seed, &logits_lm_name, &logits_tied, &logits_scanned, logits_top, err, err_len);
+    if (logits_ok && logits_top_n > logits_scanned) logits_top_n = logits_scanned;
     qx_sample_result sample_result;
     memset(&sample_result, 0, sizeof(sample_result));
     sample_result.strategy = "disabled";
@@ -4633,12 +4819,11 @@ int qx_dump_rmsnorm_probe_summary(const char *path, uint32_t token_id, const cha
     const char *emb_decoder = NULL;
     uint64_t emb_block_size = 0;
     if (!qx_decoder_info(emb->flags, &emb_decoder, &emb_block_size) || emb_block_size == 0) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported embedding quant for rmsnorm"); return 0; }
-    uint64_t row = qx_embedding_row_size(emb, vocab);
-    if (row < emb_block_size) row = emb_block_size;
+    uint64_t row = 0;
+    if (!qx_embedding_row_size(emb, vocab, &row, err, err_len)) { qx_close_file(&file); return 0; }
+    if (row < emb_block_size) { qx_close_file(&file); qx_set_err(err, err_len, "embedding row smaller than quant block"); return 0; }
     uint64_t emb_offset = emb->offset + row * token_id;
-    if (emb_offset >= emb->offset + emb->byte_size || emb_offset + emb_block_size > emb->offset + emb->byte_size) emb_offset = emb->offset;
     uint64_t emb_read = row;
-    if (emb_offset + emb_read > emb->offset + emb->byte_size) emb_read = (emb->offset + emb->byte_size) - emb_offset;
     uint64_t emb_blocks = emb_read / emb_block_size;
     uint64_t values = emb_blocks * 256ull;
     uint64_t norm_values = norm->byte_size / 4ull;

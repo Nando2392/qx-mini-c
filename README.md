@@ -2,7 +2,7 @@
 
 Experimental C runtime and mmap-oriented model format for correctness-first local inference of **Qwen3-30B-A3B MoE**.
 
-> Status: research runtime. Qwen3 GPT-2/Qwen2 BPE parity is GREEN for fixed ASCII, Unicode, whitespace and ChatML prompts. The C loop prefills those IDs, then re-embeds greedy outputs with persistent per-layer INT8 KV across all 48 layers and the complete 151936-row Q6_K head. Exhaustive Unicode/chat-template coverage and external end-to-end residual parity are not finished. Probe timing is not conversational decode throughput.
+> Status: research runtime. Qwen3 GPT-2/Qwen2 BPE parity is GREEN for fixed ASCII, Unicode, whitespace and ChatML prompts. QXF1 now rejects malformed manifests, directories, dimensions, placements, overlaps and legacy truncated rows fail-closed. The C loop prefills IDs, then re-embeds greedy outputs with persistent per-layer INT8 KV across all 48 layers and the complete 151936-row Q6_K head. Exhaustive Unicode/chat-template coverage and external end-to-end residual parity are not finished. Probe timing is not conversational decode throughput.
 
 ## Goals
 
@@ -126,12 +126,11 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 ## Roadmap
 
 1. Compare residuals and greedy sequence end-to-end against an external Qwen3 runtime.
-2. Harden QXF dimensions, byte sizes, offsets and overflow checks globally.
-3. Expand tokenizer parity beyond the fixed prompt matrix and add chat-template application.
-4. Add QXF mmap and persistent scratch buffers.
-5. Add fused quant-dot, thread pool and AVX2 CPU kernels.
-6. Add a hybrid CUDA backend with dense residency and expert cache.
-7. Run context 4K, RSS, quality and sustained thermal gates.
+2. Expand tokenizer parity beyond the fixed prompt matrix and add chat-template application.
+3. Add QXF mmap and persistent scratch buffers.
+4. Add fused quant-dot, thread pool and AVX2 CPU kernels.
+5. Add a hybrid CUDA backend with dense residency and expert cache.
+6. Run context 4K, RSS, quality and sustained thermal gates.
 
 ## License
 

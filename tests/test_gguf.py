@@ -1,9 +1,55 @@
 import json
+import struct
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _fnv1a64(data):
+    value = 1469598103934665603
+    for byte in data:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return value
+
+
+def _make_compact_valid_embedding(qxf):
+    """Replace the intentionally partial embedding with eight complete Q4_K rows."""
+    raw = bytearray(qxf.read_bytes())
+    dir_offset = struct.unpack_from("<Q", raw, 24)[0]
+    tensor_count = struct.unpack_from("<I", raw, 16)[0]
+    entry_size = 208
+    source_row = None
+    for index in range(tensor_count):
+        entry = dir_offset + index * entry_size
+        name = bytes(raw[entry:entry + 96]).split(b"\0", 1)[0]
+        if name == b"blk.0.attn_q.weight":
+            source_offset = struct.unpack_from("<Q", raw, entry + 144)[0]
+            source_row = bytes(raw[source_offset:source_offset + 8 * 144])
+            break
+    assert source_row is not None and len(source_row) == 8 * 144
+    first = bytearray(raw[dir_offset:dir_offset + entry_size])
+    entries_end = dir_offset + tensor_count * entry_size
+    raw[dir_offset:entries_end - entry_size] = raw[dir_offset + entry_size:entries_end]
+
+    token_offset = (len(raw) + 4095) & ~4095
+    raw.extend(b"\0" * (token_offset - len(raw)))
+    token_data = bytearray(source_row * 8)
+    raw.extend(token_data)
+
+    struct.pack_into("<I", first, 104, 2)
+    struct.pack_into("<4Q", first, 112, 2048, 8, 0, 0)
+    struct.pack_into("<Q", first, 144, token_offset)
+    struct.pack_into("<Q", first, 152, len(token_data))
+    struct.pack_into("<Q", first, 168, _fnv1a64(token_data))
+    raw[entries_end - entry_size:entries_end] = first
+
+    struct.pack_into("<I", raw, 88, 8)
+    struct.pack_into("<Q", raw, 48, _fnv1a64(raw[56:108]))
+    struct.pack_into("<Q", raw, 40, len(raw))
+    qxf.write_bytes(raw)
 
 
 def test_synthetic_gguf_inspect_if_built(tmp_path):
@@ -69,12 +115,12 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     tensor = subprocess.check_output([str(exe), "inspect-tensor", "--in", str(qxf), "--name", "token_embd.weight"], text=True)
     tdata = json.loads(tensor)
     assert tdata["name"] == "token_embd.weight"
-    assert tdata["byte_size"] == 2048
+    assert tdata["byte_size"] == 1152
     assert tdata["ggml_type"] == 12
-    verify = subprocess.check_output([str(exe), "verify-qxf", "--in", str(qxf), "--max", "6"], text=True)
+    verify = subprocess.check_output([str(exe), "verify-qxf", "--in", str(qxf), "--max", "14"], text=True)
     vdata = json.loads(verify)
     assert vdata["verified"] is True
-    assert vdata["checked"] == 6
+    assert vdata["checked"] == 14
     expert = subprocess.check_output([str(exe), "expert-index", "--in", str(qxf)], text=True)
     edata = json.loads(expert)
     assert edata["model_type"] == "qwen3_moe"
@@ -174,15 +220,19 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert rp["total_model_gib"] > 0
     assert rp["kv_gib"] > 0
     assert rp["feasible"] in (True, False)
-    emb = subprocess.check_output([str(exe), "token-embedding", "--in", str(qxf), "--token-id", "42"], text=True)
+    malformed_embedding = subprocess.run([str(exe), "token-embedding", "--in", str(qxf), "--token-id", "2"], text=True, capture_output=True)
+    assert malformed_embedding.returncode != 0
+    assert "tensor byte size is not divisible by row count" in malformed_embedding.stderr
+    _make_compact_valid_embedding(qxf)
+    emb = subprocess.check_output([str(exe), "token-embedding", "--in", str(qxf), "--token-id", "2"], text=True)
     ep = json.loads(emb)
-    assert ep["token_id"] == 42
+    assert ep["token_id"] == 2
     assert ep["tensor"] == "token_embd.weight"
     assert ep["row_byte_size"] > 0
     assert ep["offset"] >= data["data_offset"]
-    schedule = subprocess.check_output([str(exe), "forward-schedule", "--in", str(qxf), "--token-id", "42", "--top-k", "2"], text=True)
+    schedule = subprocess.check_output([str(exe), "forward-schedule", "--in", str(qxf), "--token-id", "2", "--top-k", "2"], text=True)
     fs = json.loads(schedule)
-    assert fs["token_id"] == 42
+    assert fs["token_id"] == 2
     assert fs["layers"] == 48
     assert fs["top_k"] == 2
     assert fs["embedding"]["tensor"] == "token_embd.weight"
@@ -221,10 +271,10 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert dq4["values"] == 256
     assert dq4["block_byte_size"] == 144
     assert "sum" in dq4
-    rms = subprocess.check_output([str(exe), "rmsnorm-probe", "--in", str(qxf), "--token-id", "42", "--norm", "blk.0.attn_norm.weight", "--seed", "7"], text=True)
+    rms = subprocess.check_output([str(exe), "rmsnorm-probe", "--in", str(qxf), "--token-id", "2", "--norm", "blk.0.attn_norm.weight", "--seed", "7"], text=True)
     rn = json.loads(rms)
     assert rn["probe"] == "rmsnorm"
-    assert rn["token_id"] == 42
+    assert rn["token_id"] == 2
     assert rn["embedding_decoder"] == "Q4_K"
     assert rn["norm_tensor"] == "blk.0.attn_norm.weight"
     assert rn["norm_ggml_type"] == 0
@@ -249,7 +299,7 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert ap["kv_buffer"]["enabled"] is True
     assert ap["kv_buffer"]["allocated"] is True
     assert ap["kv_buffer"]["readback_ok"] is True
-    kv = subprocess.check_output([str(exe), "kv-cache-probe", "--in", str(qxf), "--ctx", "4096", "--kv", "int8", "--token", "42", "--layer", "0", "--head", "0"], text=True)
+    kv = subprocess.check_output([str(exe), "kv-cache-probe", "--in", str(qxf), "--ctx", "4096", "--kv", "int8", "--token", "2", "--layer", "0", "--head", "0"], text=True)
     kp = json.loads(kv)
     assert kp["probe"] == "kv_cache"
     assert kp["kv_format"] == "int8"
@@ -435,10 +485,10 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert mf["layers"][0]["layer"] == 0
     assert mf["layers"][0]["selected_experts"][0]["logit"] >= mf["layers"][0]["selected_experts"][1]["logit"]
     assert mf["moe_output_probe"] != 0
-    token_fwd = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "42", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--attention-layer", "0"], text=True)
+    token_fwd = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "2", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--attention-layer", "0"], text=True)
     tf = json.loads(token_fwd)
     assert tf["probe"] == "token_forward"
-    assert tf["token_id"] == 42
+    assert tf["token_id"] == 2
     assert tf["embedding"]["tensor"] == "token_embd.weight"
     assert tf["embedding"]["decoder"] == "Q4_K"
     assert tf["rmsnorm"]["enabled"] is True
@@ -447,7 +497,7 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert tf["attention"]["enabled"] is True
     assert tf["attention"]["layer"] == 0
     assert tf["attention"]["output_probe"] != 0
-    token_mh = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "42", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--multihead-attention", "--attention-layer", "0", "--attention-heads", "4", "--attention-dims", "16"], text=True)
+    token_mh = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "2", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--multihead-attention", "--attention-layer", "0", "--attention-heads", "4", "--attention-dims", "16"], text=True)
     tmh = json.loads(token_mh)
     assert tmh["attention"]["enabled"] is True
     assert tmh["attention"]["mode"] == "multihead"
@@ -459,10 +509,14 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     lp = json.loads(logits)
     assert lp["probe"] == "logits"
     assert lp["top_n"] == 3
-    assert lp["scanned"] == 32
+    assert lp["scanned"] == 8
     assert lp["lm_head_tensor"] in ("output.weight", "lm_head.weight", "token_embd.weight")
     assert len(lp["top_tokens"]) == 3
     assert lp["top_tokens"][0]["logit"] >= lp["top_tokens"][1]["logit"]
+    bounded = json.loads(subprocess.check_output([str(exe), "logits-probe", "--in", str(qxf), "--activation", "0.125", "--top-n", "32", "--scan", "32", "--seed", "7"], text=True))
+    assert bounded["scanned"] == 8
+    assert bounded["top_n"] == 8
+    assert len(bounded["top_tokens"]) == 8
     sampler = subprocess.check_output([str(exe), "sampler-probe", "--in", str(qxf), "--activation", "0.125", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7"], text=True)
     spm = json.loads(sampler)
     assert spm["probe"] == "sampler"
@@ -481,39 +535,45 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert tpd["token_id"] == spm["selected_token"]
     assert isinstance(tpd["piece"], str)
     assert tpd["source"] == "sidecar"
-    assert tpd["piece"] == f"tok{spm['selected_token']}"
+    compact_pieces = ["H", "e", "l", "o", "He", "ll", "Hell", "Hello"]
+    assert tpd["piece"] == compact_pieces[spm["selected_token"]]
     sampler_t = subprocess.check_output([str(exe), "sampler-probe", "--in", str(qxf), "--activation", "0.125", "--top-k", "3", "--scan", "32", "--temperature", "0.7", "--seed", "7"], text=True)
     spt = json.loads(sampler_t)
     assert spt["strategy"] == "temperature_top_k"
     assert 0 <= spt["selected_rank"] < 3
     assert abs(spt["prob_sum"] - 1.0) < 1e-6
-    token_logits = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "42", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--multihead-attention", "--attention-layer", "0", "--attention-heads", "4", "--attention-dims", "16", "--logits", "--top-n", "3"], text=True)
+    token_logits = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "2", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--multihead-attention", "--attention-layer", "0", "--attention-heads", "4", "--attention-dims", "16", "--logits", "--top-n", "3"], text=True)
     tlog = json.loads(token_logits)
     assert tlog["logits"]["enabled"] is True
     assert len(tlog["logits"]["top_tokens"]) == 3
-    token_sample = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "42", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--multihead-attention", "--attention-layer", "0", "--attention-heads", "4", "--attention-dims", "16", "--logits", "--top-n", "3", "--sample", "--temperature", "0"], text=True)
+    bounded_token_logits = json.loads(subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "2", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--logits", "--top-n", "32", "--sample", "--temperature", "0"], text=True))
+    assert bounded_token_logits["logits"]["scanned"] == 8
+    assert bounded_token_logits["logits"]["top_n"] == 8
+    assert len(bounded_token_logits["logits"]["top_tokens"]) == 8
+    assert bounded_token_logits["sampler"]["top_k"] == 8
+    token_sample = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "2", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--multihead-attention", "--attention-layer", "0", "--attention-heads", "4", "--attention-dims", "16", "--logits", "--top-n", "3", "--sample", "--temperature", "0"], text=True)
     ts = json.loads(token_sample)
     assert ts["sampler"]["enabled"] is True
     assert ts["sampler"]["strategy"] == "argmax"
     assert ts["sampler"]["selected_token"] == ts["logits"]["top_tokens"][0]["token"]
-    token_decoded = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "42", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--multihead-attention", "--attention-layer", "0", "--attention-heads", "4", "--attention-dims", "16", "--logits", "--top-n", "3", "--sample", "--temperature", "0", "--decode-token", "--tokens", str(tok_sidecar)], text=True)
+    token_decoded = subprocess.check_output([str(exe), "token-forward-probe", "--in", str(qxf), "--token-id", "2", "--layers", "2", "--top-k", "2", "--blocks", "2", "--seed", "7", "--norm", "blk.0.attn_norm.weight", "--multihead-attention", "--attention-layer", "0", "--attention-heads", "4", "--attention-dims", "16", "--logits", "--top-n", "3", "--sample", "--temperature", "0", "--decode-token", "--tokens", str(tok_sidecar)], text=True)
     td = json.loads(token_decoded)
     assert td["decoded_token"]["enabled"] is True
     assert td["decoded_token"]["token_id"] == td["sampler"]["selected_token"]
     assert td["decoded_token"]["source"] == "sidecar"
-    assert td["decoded_token"]["piece"] == f"tok{td['sampler']['selected_token']}"
-    gen = subprocess.check_output([str(exe), "generate-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "3", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7"], text=True)
+    assert td["decoded_token"]["piece"] == compact_pieces[td["sampler"]["selected_token"]]
+    gen = subprocess.check_output([str(exe), "generate-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "3", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7"], text=True)
     gd = json.loads(gen)
     assert gd["probe"] == "generate"
-    assert gd["prompt_token"] == 42
+    assert gd["prompt_token"] == 2
     assert gd["steps"] == 3
     assert len(gd["tokens"]) == 3
-    assert gd["tokens"][0]["piece"] == f"tok{gd['tokens'][0]['token']}"
+    assert gd["tokens"][0]["piece"] == compact_pieces[gd["tokens"][0]["token"]]
     assert gd["generated_text"] == "".join(t["piece"] for t in gd["tokens"])
-    state = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "3", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7"], text=True)
+    state = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "3", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7"], text=True)
     sd = json.loads(state)
     assert sd["probe"] == "state_loop"
-    assert sd["prompt_token"] == 42
+    assert sd["prompt_token"] == 2
     assert sd["steps"] == 3
     assert sd["layers_run"] == 6
     assert sd["kv_appends"] == 6
@@ -522,7 +582,7 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert len(sd["tokens"]) == 3
     assert sd["tokens"][0]["layers"][0]["layer"] == 0
     assert sd["generated_text"] == "".join(t["piece"] for t in sd["tokens"])
-    rstate = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv"], text=True)
+    rstate = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv"], text=True)
     rsd = json.loads(rstate)
     assert rsd["kv_source"] == "projection_decode"
     assert rsd["kv_appends"] == 4
@@ -531,7 +591,7 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert rsd["tokens"][0]["layers"][0]["v_tensor"].endswith("attn_v.weight")
     assert rsd["tokens"][0]["layers"][0]["k_real_values"] > 0
     assert rsd["tokens"][0]["layers"][0]["v_real_values"] > 0
-    pmv = subprocess.check_output([str(exe), "projection-matvec-probe", "--in", str(qxf), "--layer", "0", "--token-id", "42", "--rows", "4", "--dims", "64", "--kv", "int8", "--seed", "7"], text=True)
+    pmv = subprocess.check_output([str(exe), "projection-matvec-probe", "--in", str(qxf), "--layer", "0", "--token-id", "2", "--rows", "4", "--dims", "64", "--kv", "int8", "--seed", "7"], text=True)
     pd = json.loads(pmv)
     assert pd["probe"] == "projection_matvec"
     assert pd["layer"] == 0
@@ -544,10 +604,10 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert pd["v_values"] == 4
     assert pd["k_checksum"] > 0
     assert pd["projection_kernel"] in ("iq4_xs_window_dot", "quant_window_decode_dot")
-    rv = subprocess.check_output([str(exe), "residual-vector-probe", "--in", str(qxf), "--token-id", "42", "--norm", "blk.0.attn_norm.weight", "--dims", "64", "--seed", "7"], text=True)
+    rv = subprocess.check_output([str(exe), "residual-vector-probe", "--in", str(qxf), "--token-id", "2", "--norm", "blk.0.attn_norm.weight", "--dims", "64", "--seed", "7"], text=True)
     rd = json.loads(rv)
     assert rd["probe"] == "residual_vector"
-    assert rd["token_id"] == 42
+    assert rd["token_id"] == 2
     assert rd["dims"] == 64
     assert rd["source"] == "embedding_rmsnorm"
     assert rd["embedding_tensor"] == "token_embd.weight"
@@ -555,19 +615,19 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert rd["values"] == 64
     assert rd["rms"] > 0
     assert rd["checksum"] > 0
-    pmvr = subprocess.check_output([str(exe), "projection-matvec-probe", "--in", str(qxf), "--layer", "0", "--token-id", "42", "--rows", "4", "--dims", "64", "--kv", "int8", "--seed", "7", "--residual-vector", "--norm", "blk.0.attn_norm.weight"], text=True)
+    pmvr = subprocess.check_output([str(exe), "projection-matvec-probe", "--in", str(qxf), "--layer", "0", "--token-id", "2", "--rows", "4", "--dims", "64", "--kv", "int8", "--seed", "7", "--residual-vector", "--norm", "blk.0.attn_norm.weight"], text=True)
     pdr = json.loads(pmvr)
     assert pdr["residual_source"] == "embedding_rmsnorm"
     assert pdr["residual_values"] == 64
-    smv = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec"], text=True)
+    smv = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec"], text=True)
     smd = json.loads(smv)
     assert smd["kv_source"] == "projection_matvec"
     assert smd["tokens"][0]["layers"][0]["k_matvec_values"] > 0
-    smvr = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--norm", "blk.0.attn_norm.weight"], text=True)
+    smvr = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--norm", "blk.0.attn_norm.weight"], text=True)
     smrd = json.loads(smvr)
     assert smrd["residual_source"] == "embedding_rmsnorm"
     assert smrd["tokens"][0]["residual_values"] == 64
-    smc = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
+    smc = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
     scd = json.loads(smc)
     assert scd["residual_source"] == "embedding_rmsnorm_carry"
     assert scd["residual_dims"] == 96
@@ -575,14 +635,14 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert scd["tokens"][0]["layers"][0]["attention_delta"] != 0
     assert scd["tokens"][0]["layers"][0]["moe_delta"] != 0
     assert scd["tokens"][0]["residual_checksum_after"] > 0
-    sn = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
+    sn = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
     snd = json.loads(sn)
     assert snd["delta_source"] == "numeric_probe"
     assert snd["tokens"][0]["layers"][0]["attention_delta_source"] == "numeric_attention"
     assert snd["tokens"][0]["layers"][0]["moe_delta_source"] == "numeric_moe"
     assert snd["tokens"][0]["layers"][0]["attention_delta"] != scd["tokens"][0]["layers"][0]["attention_delta"]
     assert snd["tokens"][0]["layers"][0]["moe_delta"] != scd["tokens"][0]["layers"][0]["moe_delta"]
-    sv = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
+    sv = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
     svd = json.loads(sv)
     assert svd["delta_source"] == "numeric_vectors"
     l0 = svd["tokens"][0]["layers"][0]
@@ -592,7 +652,7 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert l0["moe_delta_vector_l2"] > 0
     assert l0["attention_delta_vector_checksum"] > 0
     assert l0["moe_delta_vector_checksum"] > 0
-    sa = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--attention-output-vector", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
+    sa = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--attention-output-vector", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
     sad = json.loads(sa)
     assert sad["delta_source"] == "attention_output_vector"
     al0 = sad["tokens"][0]["layers"][0]
@@ -601,7 +661,7 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert al0["attention_output_vector_checksum"] > 0
     assert al0["attention_context_tokens"] == 1
     assert al0["attention_output_source"] == "kv_cache_partial"
-    sca = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--attention-output-vector", "--causal-attention", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
+    sca = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--attention-output-vector", "--causal-attention", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
     scad = json.loads(sca)
     assert scad["delta_source"] == "causal_attention"
     cal0 = scad["tokens"][0]["layers"][0]
@@ -615,7 +675,7 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert abs(cal0["softmax_sum"] - 1.0) < 1e-6
     assert cal0["attention_output_vector_l2"] > 0
     assert cal0["attention_output_vector_checksum"] > 0
-    rg = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--rope-gqa-attention", "--residual-dims", "1152", "--norm", "blk.0.attn_norm.weight"], text=True)
+    rg = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--rope-gqa-attention", "--residual-dims", "1152", "--norm", "blk.0.attn_norm.weight"], text=True)
     rgd = json.loads(rg)
     rgl0 = rgd["tokens"][1]["layers"][0]
     assert rgd["delta_source"] == "rope_gqa_attention"
@@ -632,7 +692,7 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert rgl0["output_projection_output_dims"] == 256
     assert abs(rgl0["softmax_sum_min"] - 1.0) < 1e-6
     assert abs(rgl0["softmax_sum_max"] - 1.0) < 1e-6
-    sb = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "42", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--attention-output-vector", "--bench", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
+    sb = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--attention-output-vector", "--bench", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
     sbd = json.loads(sb)
     assert sbd["bench"]["enabled"] is True
     assert sbd["bench"]["tokens_per_second"] > 0

@@ -61,3 +61,10 @@
 - `Hello!` produce IDs `[9707, 0]`; el loop hace prefill y dos generaciones con inputs `[9707, 0, 117268]`.
 - Evidencia integrada: `layers_run=144`, `kv_appends=144`, tokens seleccionados `[117268, 69336]`.
 - Límite: cobertura exhaustiva de Unicode/chat template y paridad residual externa siguen pendientes.
+
+## [2026-08-17] update | Hardening global QXF fail-closed
+
+- El loader valida manifest, ABI 272/208, offsets alineados, dimensiones/tamaños/traits canónicos, nombres únicos, tamaño físico exacto y rangos no solapados con aritmética checked.
+- Metadata-only queda permitido sólo con spans de tensor cero; los QXF con datos exigen offsets alineados y tamaños no cero.
+- Embedding, forward, logits, residual, token-forward, RMSNorm y matvec-stub ya no truncan spans ni rebobinan silenciosamente a la fila 0.
+- Gate focal: 29 mutaciones/paths adversariales; suite local completa: 70 passed; smoke real: 96 layers y secuencia greedy `1124 → 29626`.
