@@ -219,7 +219,7 @@ def test_real_router_logits_softmax_and_top8_match_python():
         pytest.skip("real Qwen QXF is not available")
     payload = json.loads(subprocess.check_output([str(EXE), "real-qkv-golden-probe", "--in", str(MODEL), "--layer", "0", "--token-a", "42", "--token-b", "43", "--q-heads-run", "32", "--seed", "7"], text=True))
     assert payload["router_tensor"] == "blk.0.ffn_gate_inp.weight"
-    assert payload["router_norm_topk_prob"] is False
+    assert payload["router_norm_topk_prob"] is True
     router = metadata("blk.0.ffn_gate_inp.weight")
     raw = read_at(router["offset"], router["byte_size"])
     hidden = payload["ffn_norm_raw"]
@@ -236,9 +236,10 @@ def test_real_router_logits_softmax_and_top8_match_python():
     for expert in (0, 63, 127):
         assert math.isclose(payload["router_logits"][expert], logits[expert], rel_tol=3e-6, abs_tol=3e-6)
         assert math.isclose(payload["router_probs"][expert], probabilities[expert], rel_tol=3e-6, abs_tol=3e-6)
+    selected_sum = sum(probabilities[expert] for expert in selected)
     for got, expert in zip(payload["routing_weights"], selected):
-        assert math.isclose(got, probabilities[expert], rel_tol=3e-6, abs_tol=3e-6)
-    assert sum(payload["routing_weights"]) < 1.0
+        assert math.isclose(got, probabilities[expert] / selected_sum, rel_tol=3e-6, abs_tol=3e-6)
+    assert math.isclose(sum(payload["routing_weights"]), 1.0, rel_tol=1e-12, abs_tol=1e-12)
 
 
 def test_real_top8_swiglu_moe_produces_full_layer_residual():
@@ -299,6 +300,8 @@ def test_state_loop_propagates_real_attention_and_moe_across_two_layers():
     assert layer1["experts_run"] == 8
     assert len(layer0["selected_experts"]) == 8
     assert len(layer1["selected_experts"]) == 8
+    assert math.isclose(sum(layer0["routing_weights"]), 1.0, rel_tol=1e-12, abs_tol=1e-12)
+    assert math.isclose(sum(layer1["routing_weights"]), 1.0, rel_tol=1e-12, abs_tol=1e-12)
     assert layer0["residual_output_checksum"] == layer1["residual_input_checksum"]
     assert layer0["residual_output_checksum"] != layer0["residual_input_checksum"]
     assert layer1["residual_output_checksum"] != layer1["residual_input_checksum"]
@@ -334,13 +337,47 @@ def test_state_loop_can_dump_lossless_layer_residuals(tmp_path):
         )
     )
     assert payload["residual_dump"] is True
-    assert payload["residual_dump_count"] == 4
+    assert payload["residual_dump_count"] == 12
+    phase_counts = {
+        "input": 2048,
+        "v-cur": 512,
+        "kqv-out": 4096,
+        "ffn-inp": 2048,
+        "ffn-moe-out": 2048,
+        "output": 2048,
+    }
     for layer in range(2):
-        for phase in ("input", "output"):
+        for phase, count in phase_counts.items():
             path = dump_dir / f"step-0-layer-{layer}-{phase}.f32"
-            assert path.stat().st_size == 2048 * 4
-            values = struct.unpack("<2048f", path.read_bytes())
+            assert path.stat().st_size == count * 4
+            values = struct.unpack(f"<{count}f", path.read_bytes())
             assert all(math.isfinite(value) for value in values)
+
+
+def test_state_loop_supports_diagnostic_f32_kv(tmp_path):
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    dump_dir = tmp_path / "f32-residuals"
+    dump_dir.mkdir()
+    payload = json.loads(
+        subprocess.check_output(
+            [
+                str(EXE), "state-loop-probe", "--in", str(MODEL),
+                "--prompt-token", "42", "--steps", "1", "--layers", "1",
+                "--ctx", "4", "--kv", "f32", "--temperature", "0",
+                "--seed", "7", "--full-moe", "--dump-residuals", str(dump_dir),
+            ],
+            text=True,
+        )
+    )
+    assert payload["kv_format"] == "f32"
+    assert "diagnostic F32 KV" in payload["note"]
+    assert payload["bytes_per_k_or_v"] == 512 * 4
+    assert payload["tokens"][0]["layers"][0]["kv_scale_source"] == "lossless_f32"
+    assert payload["residual_dump_count"] == 6
+    assert (dump_dir / "step-0-layer-0-v-cur.f32").stat().st_size == 512 * 4
+    assert (dump_dir / "step-0-layer-0-kqv-out.f32").stat().st_size == 4096 * 4
+    assert (dump_dir / "step-0-layer-0-ffn-inp.f32").stat().st_size == 2048 * 4
 
 
 
@@ -381,9 +418,11 @@ def test_state_loop_propagates_one_real_token_across_all_48_layers():
 def test_state_loop_applies_real_final_norm_and_complete_lm_head(tmp_path):
     if not EXE.exists() or not MODEL.exists():
         pytest.skip("real Qwen runtime fixtures are not available")
+    dump_dir = tmp_path / "final-head-dump"
+    dump_dir.mkdir()
     payload = json.loads(
         subprocess.check_output(
-            [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8", "--temperature", "0", "--seed", "7", "--full-moe", "--final-head", "--top-n", "5"],
+            [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8", "--temperature", "0", "--seed", "7", "--full-moe", "--final-head", "--top-n", "5", "--dump-residuals", str(dump_dir)],
             text=True,
         )
     )
@@ -408,6 +447,10 @@ def test_state_loop_applies_real_final_norm_and_complete_lm_head(tmp_path):
     assert head["logits_computed"] == 151936
     assert head["full_vocabulary"] is True
     assert head["logits_checksum"] > 0
+    logits_path = dump_dir / "step-0-logits.f32"
+    assert payload["logits_dump_count"] == 1
+    assert logits_path.stat().st_size == 151936 * 4
+    assert fnv1a64(logits_path.read_bytes()) == head["logits_checksum"]
     assert math.isfinite(head["logits_rms"])
     assert head["logits_rms"] > 0
     assert len(head["top_tokens"]) == 5
@@ -492,7 +535,7 @@ def test_state_loop_runs_two_real_greedy_tokens_from_selected_embedding(tmp_path
     assert first["input_token"] == 42
     assert first["selected_token"] == 1124
     assert second["input_token"] == first["selected_token"]
-    assert second["selected_token"] == 29626
+    assert second["selected_token"] == 11287
     assert second["position"] == 1
     assert all(layer["attention_context_tokens"] == 1 for layer in first["layers"])
     assert all(layer["attention_context_tokens"] == 2 for layer in second["layers"])
@@ -500,8 +543,8 @@ def test_state_loop_runs_two_real_greedy_tokens_from_selected_embedding(tmp_path
     assert all(layer["kv_token"] == 1 for layer in second["layers"])
     assert first["final_head"]["logits_computed"] == 151936
     assert second["final_head"]["logits_computed"] == 151936
-    assert first["final_head"]["logits_checksum"] == 17094101101096419516
-    assert second["final_head"]["logits_checksum"] == 9438484627875866845
+    assert first["final_head"]["logits_checksum"] == 12662891110960910958
+    assert second["final_head"]["logits_checksum"] == 2895445711150549338
     assert second["residual_checksum"] != first["final_head"]["final_residual_checksum"]
     embedding = metadata("token_embd.weight")
     assert embedding["ggml_type"] == 12

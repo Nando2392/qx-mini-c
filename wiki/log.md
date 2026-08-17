@@ -75,3 +75,32 @@
 - Añadido comparador con max-abs, RMSE, cosine y primera capa divergente.
 - Token `42`: input layer 0 exacto; input layer 1 diverge (`max_abs≈1.08`, cosine≈0.964); argmax externo `1124` coincide con QX.
 - llama.cpp KV F16 y Q8_0 mantienen la misma primera divergencia, por lo que el siguiente gate debe separar attention y MoE dentro de layer 0.
+
+## [2026-08-17] update | Gate #7 attention/MoE/logits
+
+- Capturados `Vcur`, contexto attention, post-attention, salida MoE, salida de bloque y 151936 logits F32 en QX/llama.cpp.
+- Corregido bug de routing: los pesos top-8 ahora se renormalizan a suma `1.0` en ambas rutas QX.
+- Layer-1 max-abs bajó de ~`1.08` a `0.00589` (F32/F16) y `0.01082` (INT8/Q8_0).
+- La primera diferencia restante aparece en `Vcur`: QX usa activación F32; ggml usa activación temporal Q8_K para IQ4_XS.
+- Logits completos no son pares (cosine ~`0.875`), aunque argmax coincide en token `1124`.
+- Añadidos comparadores reproducibles de checkpoints/logits y modo KV F32 diagnóstico.
+
+## [2026-08-17] update | Goldens supersedidos por router normalizado
+
+- Los goldens anteriores `42 → 1124 → 29626` pertenecían al router sin renormalización y quedan supersedidos, no borrados del historial.
+- Secuencia QX corregida: `42 → 1124 → 11287`.
+- Checksums logits corregidos: `[12662891110960910958, 2895445711150549338]`.
+- El segundo argmax/checksum sigue recalculado por el helper Q6_K independiente.
+
+## [2026-08-17] baseline | Oracle externo secuencial
+
+- Añadido oracle llama.cpp standalone con contexto persistente, KV F16/Q8_0 y múltiples pasos greedy desde IDs.
+- `[42]`: llama F16/Q8_0 `[1124, 50853]`; QX INT8 `[1124, 11287]`.
+- `Hello!` tokeniza a `[9707, 0]`: llama F16 `[358, 1184]`, llama Q8_0 `[358, 614]`, QX INT8 `[81379, 44707]`.
+- GGUF SHA-256 registrado: `c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652`.
+
+## [2026-08-17] baseline | Residual final pre-head
+
+- Oracle ampliado con captura directa `l_out-47`; QX usa `step-0-layer-47-output.f32`.
+- F32/F16: max-abs `1099.6502`, RMSE `32.9520`, cosine `0.439279`.
+- INT8/Q8_0: max-abs `1100.9628`, RMSE `33.0204`, cosine `0.440512`.

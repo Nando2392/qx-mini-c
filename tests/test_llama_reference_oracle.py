@@ -33,7 +33,7 @@ def test_llama_reference_oracle_rebuilds_and_runs_standalone(tmp_path):
     for kv_type in ("f16", "q8_0"):
         output = tmp_path / kv_type
         result = subprocess.run(
-            [str(EXE), str(MODEL), str(output), "42", "0,1", kv_type],
+            [str(EXE), str(MODEL), str(output), "42", "0,1", kv_type, "internals"],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -48,6 +48,12 @@ def test_llama_reference_oracle_rebuilds_and_runs_standalone(tmp_path):
         assert payload["n_layer"] == 48
         assert payload["n_vocab"] == 151936
         assert payload["logits"]["argmax"] == 1124
+        assert payload["internals_captured"] == 6
         assert (output / "layer-0.f32").stat().st_size == 2048 * 4
         assert (output / "layer-1.f32").stat().st_size == 2048 * 4
         assert (output / "logits.f32").stat().st_size == 151936 * 4
+        for name in ("ffn_inp-0", "ffn_moe_out-0", "l_out-0"):
+            assert (output / f"{name}.f32").stat().st_size == 2048 * 4
+        assert (output / "Vcur-0.f32").stat().st_size == 512 * 4
+        assert (output / "kqv_out-0.f32").stat().st_size == 4096 * 4
+        assert (output / "l_out-47.f32").stat().st_size == 2048 * 4

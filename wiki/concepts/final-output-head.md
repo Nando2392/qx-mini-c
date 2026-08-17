@@ -26,10 +26,8 @@ residual real después de layer 47, 2048 F32
 
 - `logits_computed=151936` y `full_vocabulary=true`.
 - Checksums QXF de `output_norm.weight` y `output.weight` verificados antes del cálculo.
-- Argmax para el token de entrada 42 y seed 7: token `1124`, logit `11.739152169035485`.
-- Checksum del vector final normalizado: `1087599452263700755`.
-- Checksum del vector completo de logits F32: `17094101101096419516`.
-- RMS de logits: `3.1986617278737643`.
+- Argmax para el token de entrada 42 y seed 7: token `1124`.
+- Checksum del vector completo de logits F32 después del fix de normalización top-8: `12662891110960910958`.
 - Probe instrumentado completo medido: ~8.35 s en una corrida caliente.
 
 ## Golden independiente

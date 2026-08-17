@@ -40,7 +40,7 @@ text prompt
 → persistent KV update and repeated 48-layer forward
 ```
 
-The fixed-token greedy gate is GREEN for `42 → 1124 → 29626`. Fixed-prompt tokenizer parity against `llama-tokenize` is also GREEN. `Hello!` maps to `[9707, 0]`, prefills both positions, then produces two QX greedy tokens through the verified loop. External end-to-end residual/sequence comparison remains pending.
+The fixed-token QX greedy gate is GREEN for `42 → 1124 → 11287` after the top-8 router normalization fix. Fixed-prompt tokenizer parity against `llama-tokenize` is also GREEN. `Hello!` maps to `[9707, 0]` and prefills both positions. External single-token residual/logit parity is now reproducibly refuted while argmax `1124` matches; external multi-token sequence parity remains a separate gate.
 
 ## Honest performance state
 
@@ -100,9 +100,13 @@ tests\build_ggml_reference.bat
 tests\build_llama_reference_oracle.bat
 ```
 
-The second helper is a standalone llama.cpp oracle; it is not linked into the QX runtime. It writes selected layer-input residuals and final logits as lossless F32 sidecars. QX can write matching sidecars with `state-loop-probe --full-moe --dump-residuals <existing-dir>`, and `scripts/compare_residuals.py` reports max absolute error, RMSE, cosine similarity and the first divergent layer. Local model paths and sidecars must remain outside Git.
+The build creates standalone residual/logit and sequence llama.cpp oracles; neither is linked into the QX runtime. The residual oracle writes selected layer inputs, layer-0 attention/MoE checkpoints and final logits as lossless F32 sidecars. The sequence oracle keeps a persistent context for token-ID prompts and multiple greedy steps. QX can write matching sidecars with `state-loop-probe --full-moe --dump-residuals <existing-dir>`. `scripts/compare_residuals.py` compares `input`, `v-cur`, `kqv-out`, `ffn-inp`, `ffn-moe-out` or `output`; `scripts/compare_logits.py` compares the complete vocabulary and both argmax values. Local model paths and sidecars must remain outside Git.
 
-Current fixed-token baseline against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: token `42` has an exact layer-0 input residual and both runtimes select argmax `1124`, but the first residual divergence appears at layer 1. llama.cpp F16 and Q8_0 KV produce the same boundary, so exact end-to-end residual parity is not yet claimed.
+Current fixed-token result against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: exact end-to-end numerical parity is **refuted**, while greedy argmax still matches (`1124`). Instrumentation found and fixed a material router bug: QX did not renormalize selected top-8 MoE weights. After the fix, layer-1 max-abs fell from about `1.08` to `0.00589` with diagnostic F32 KV (`0.01082` for QX INT8 versus llama Q8_0). The first remaining mismatch is `Vcur` (`max_abs=0.000305`, RMSE `8.32e-5`, cosine `0.999943`), where QX dots decoded IQ4_XS weights against F32 activations while ggml's IQ4_XS matmul uses temporary Q8_K activations. Complete logits also differ (`max_abs≈9.09–9.14`, RMSE≈`1.48`, cosine≈`0.875`) despite matching argmax. See [`wiki/comparisons/llama-cpp-parity.md`](wiki/comparisons/llama-cpp-parity.md).
+
+The final pre-head residual is explicitly compared, not inferred: F32/F16 gives max-abs `1099.6502`, RMSE `32.9520`, cosine `0.439279`; INT8/Q8_0 gives max-abs `1100.9628`, RMSE `33.0204`, cosine `0.440512`.
+
+Sequence parity is also refuted. For token-ID prompt `[42]`, llama F16/Q8_0 generates `[1124, 50853]` while QX INT8 generates `[1124, 11287]`. For `Hello!` (`[9707, 0]`), llama generates `[358, 1184]` with F16 and `[358, 614]` with Q8_0; QX generates `[81379, 44707]`.
 
 ## Model setup
 
@@ -130,7 +134,7 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. Compare residuals and greedy sequence end-to-end against an external Qwen3 runtime.
+1. Decide whether a ggml-compatible Q8_K activation mode is required or retain higher-precision F32 activation dots as an explicitly non-bit-parity design.
 2. Expand tokenizer parity beyond the fixed prompt matrix and add chat-template application.
 3. Add QXF mmap and persistent scratch buffers.
 4. Add fused quant-dot, thread pool and AVX2 CPU kernels.

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "ggml-backend.h"
 #include "llama.h"
 #include "llama-ext.h"
 
@@ -62,12 +63,81 @@ static bool write_f32(const std::string & path, const float * values, size_t cou
     return ok;
 }
 
+struct internal_capture_record {
+    const char * name;
+    std::vector<float> values;
+    bool captured;
+};
+
+struct internal_capture_state {
+    internal_capture_record records[6] = {
+        {"ffn_inp-0", {}, false},
+        {"ffn_moe_out-0", {}, false},
+        {"l_out-0", {}, false},
+        {"Vcur-0", {}, false},
+        {"kqv_out-0", {}, false},
+        {"l_out-47", {}, false},
+    };
+    bool failed = false;
+};
+
+static bool capture_internal_tensor(struct ggml_tensor * tensor, bool ask, void * user_data) {
+    auto * state = static_cast<internal_capture_state *>(user_data);
+    internal_capture_record * target = nullptr;
+    for (auto & record : state->records) {
+        if (std::strcmp(tensor->name, record.name) == 0) {
+            target = &record;
+            break;
+        }
+    }
+    if (ask) return target != nullptr;
+    if (!target || target->captured || state->failed) return true;
+    if (!tensor->buffer || !ggml_is_contiguous(tensor) ||
+        (tensor->type != GGML_TYPE_F32 && tensor->type != GGML_TYPE_F16)) {
+        state->failed = true;
+        return true;
+    }
+    const int64_t elements_signed = ggml_nelements(tensor);
+    if (elements_signed <= 0 || static_cast<uint64_t>(elements_signed) > std::numeric_limits<size_t>::max()) {
+        state->failed = true;
+        return true;
+    }
+    const size_t elements = static_cast<size_t>(elements_signed);
+    const size_t bytes = ggml_nbytes(tensor);
+    const size_t item_size = tensor->type == GGML_TYPE_F32 ? sizeof(float) : sizeof(ggml_fp16_t);
+    if (elements > std::numeric_limits<size_t>::max() / sizeof(float) ||
+        elements > std::numeric_limits<size_t>::max() / item_size || bytes != elements * item_size) {
+        state->failed = true;
+        return true;
+    }
+    std::vector<unsigned char> raw(bytes);
+    if (ggml_backend_buffer_is_host(tensor->buffer)) std::memcpy(raw.data(), tensor->data, bytes);
+    else ggml_backend_tensor_get(tensor, raw.data(), 0, bytes);
+    target->values.resize(elements);
+    if (tensor->type == GGML_TYPE_F32) {
+        std::memcpy(target->values.data(), raw.data(), bytes);
+    } else {
+        for (size_t i = 0; i < elements; ++i) {
+            ggml_fp16_t value;
+            std::memcpy(&value, raw.data() + i * sizeof(value), sizeof(value));
+            target->values[i] = ggml_fp16_to_fp32(value);
+        }
+    }
+    target->captured = true;
+    return true;
+}
+
 int main(int argc, char ** argv) {
-    if (argc != 5 && argc != 6) {
-        std::fprintf(stderr, "usage: llama_reference_oracle <model.gguf> <output-dir> <token-id> <layers-csv> [f16|q8_0]\n");
+    if (argc < 5 || argc > 7) {
+        std::fprintf(stderr, "usage: llama_reference_oracle <model.gguf> <output-dir> <token-id> <layers-csv> [f16|q8_0] [internals]\n");
         return 2;
     }
-    const char * kv_type_name = argc == 6 ? argv[5] : "f16";
+    const char * kv_type_name = argc >= 6 ? argv[5] : "f16";
+    const bool capture_internals = argc == 7 && std::strcmp(argv[6], "internals") == 0;
+    if (argc == 7 && !capture_internals) {
+        std::fprintf(stderr, "unsupported capture mode\n");
+        return 2;
+    }
     enum ggml_type kv_type = GGML_TYPE_F16;
     if (std::strcmp(kv_type_name, "q8_0") == 0) kv_type = GGML_TYPE_Q8_0;
     else if (std::strcmp(kv_type_name, "f16") != 0) {
@@ -118,6 +188,11 @@ int main(int argc, char ** argv) {
     ctx_params.type_v = kv_type;
     ctx_params.embeddings = true;
     ctx_params.offload_kqv = false;
+    internal_capture_state capture_state;
+    if (capture_internals) {
+        ctx_params.cb_eval = capture_internal_tensor;
+        ctx_params.cb_eval_user_data = &capture_state;
+    }
     llama_context * ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
         std::fprintf(stderr, "context init failed\n");
@@ -137,7 +212,7 @@ int main(int argc, char ** argv) {
         return 7;
     }
 
-    bool ok = true;
+    bool ok = !capture_state.failed;
     std::printf("{\"schema\":1,\"llama_commit\":\"%s\",\"kv_type\":\"%s\",\"token_id\":%u,\"n_embd\":%d,\"n_layer\":%d,\"n_vocab\":%d,\"layers\":[", LLAMA_COMMIT, kv_type_name, token_id, n_embd, n_layer, n_vocab);
     for (size_t i = 0; i < layers.size(); ++i) {
         const uint32_t layer = layers[i];
@@ -159,9 +234,26 @@ int main(int argc, char ** argv) {
     if (logits) {
         for (int32_t i = 1; i < n_vocab; ++i) if (logits[i] > logits[argmax]) argmax = static_cast<uint32_t>(i);
     }
-    std::printf("],\"logits\":{\"count\":%d,\"fnv1a64\":\"%" PRIu64 "\",\"argmax\":%u,\"written\":%s},\"ok\":%s}\n",
+    std::printf("],\"logits\":{\"count\":%d,\"fnv1a64\":\"%" PRIu64 "\",\"argmax\":%u,\"written\":%s},\"internals\":[",
                 n_vocab, logits ? fnv1a64(logits, static_cast<size_t>(n_vocab) * sizeof(float)) : 0,
-                argmax, logits_written ? "true" : "false", ok ? "true" : "false");
+                argmax, logits_written ? "true" : "false");
+    size_t internals_captured = 0;
+    if (capture_internals) {
+        for (size_t i = 0; i < sizeof(capture_state.records) / sizeof(capture_state.records[0]); ++i) {
+            auto & record = capture_state.records[i];
+            const bool valid = record.captured && !record.values.empty();
+            const std::string path = std::string(argv[2]) + "/" + record.name + ".f32";
+            const bool written = valid && write_f32(path, record.values.data(), record.values.size());
+            ok = ok && written;
+            if (written) ++internals_captured;
+            if (i) std::printf(",");
+            std::printf("{\"name\":\"%s\",\"count\":%zu,\"fnv1a64\":\"%" PRIu64 "\",\"written\":%s}",
+                        record.name, record.values.size(),
+                        valid ? fnv1a64(record.values.data(), record.values.size() * sizeof(float)) : 0,
+                        written ? "true" : "false");
+        }
+    }
+    std::printf("],\"internals_captured\":%zu,\"ok\":%s}\n", internals_captured, ok ? "true" : "false");
 
     llama_free(ctx);
     llama_model_free(model);

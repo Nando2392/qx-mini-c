@@ -36,18 +36,28 @@ Cada slice se valida antes de combinarlo:
 ## Gates finales pendientes
 
 ```text
-tokens greedy idénticos
-comparación de logits/capas
+tokens greedy multi-token idénticos
+decisión explícita sobre activaciones F32 QX versus Q8_K ggml
 Δppl KV INT8 <0.5%
 contexto 4K sin fugas
 RSS ±5%
 8 h sostenidas y guarda térmica
 ```
 
-## Baseline externo por capa
+## Resultado externo por capa
 
-El oracle standalone de llama.cpp extrae sidecars F32 de inputs de capa sin reutilizar resultados QX. Para token `42`, QX y llama.cpp coinciden exactamente en el input de layer 0 (`max_abs=0`, cosine `1`) y ambos producen argmax `1124`. La primera divergencia está en el input de layer 1 (`max_abs≈1.08`, cosine≈`0.964`). Repetir llama.cpp con KV Q8_0 en vez de F16 no mueve esa frontera; el siguiente experimento debe separar attention output y MoE de layer 0 mediante tensors internos del oracle.
+El oracle standalone de llama.cpp extrae sidecars F32 sin reutilizar resultados QX. La instrumentación interna localizó un defecto real: QX aplicaba las probabilidades globales de router a los expertos top-8 sin renormalizarlas. Qwen3MoE/llama.cpp normaliza los pesos seleccionados por su suma. Un test RED reprodujo el contrato incorrecto y el fix dejó la suma top-8 en `1.0` en las dos rutas QX.
 
-Este baseline localiza el error; no constituye PASS de paridad externa.
+Después del fix, token `42` conserva input layer 0 exacto y argmax `1124` en QX/llama. Layer 1 queda mucho más próximo pero no exacto: F32/F16 `max_abs=0.0058906`, RMSE `0.0007032`, cosine `0.999961`; INT8/Q8_0 `max_abs=0.0108175`, RMSE `0.0008303`, cosine `0.999956`. La primera diferencia medible aparece antes del KV en `Vcur`: `max_abs=0.0003050`, RMSE `8.316e-5`, cosine `0.999943`.
+
+La causa de esa primera diferencia es un contrato de multiplicación distinto: QX usa pesos IQ4_XS decodificados × activación F32, mientras la ruta CPU ggml empareja IQ4_XS con activación temporal Q8_K. El cache también difiere: QX INT8 escala por vector y llama Q8_0 por bloques. El modo diagnóstico F32 QX separa ese efecto sin cambiar el runtime INT8 normal.
+
+La comparación de 151936 logits refuta paridad completa: F32/F16 tiene max-abs `9.09395`, RMSE `1.47826`, cosine `0.874880`; INT8/Q8_0 tiene max-abs `9.13947`, RMSE `1.48539`, cosine `0.875121`. Ambos conservan argmax `1124`. Detalle y comandos: [[llama-cpp-parity]].
+
+El residual final pre-head también se mide directamente: F32/F16 `max_abs=1099.6502`, RMSE `32.9520`, cosine `0.439279`; INT8/Q8_0 `max_abs=1100.9628`, RMSE `33.0204`, cosine `0.440512`.
+
+El oracle secuencial también refuta paridad greedy a dos tokens. Para `[42]`, llama produce `[1124, 50853]` y QX `[1124, 11287]`. Para `Hello!` (`[9707, 0]`), llama F16/Q8_0 produce `[358, 1184]`/`[358, 614]`, mientras QX produce `[81379, 44707]`.
+
+Este resultado es una refutación reproducible de paridad exacta, no un PASS numérico.
 
 La política de investigación está en [[auto-research-loop]] y el avance en [[current-status-and-roadmap]].

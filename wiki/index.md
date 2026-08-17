@@ -1,7 +1,7 @@
 # QX-mini-MoE Wiki
 
 > Bóveda Obsidian y wiki compilada al estilo Karpathy. Leer primero esta página y [[current-status-and-roadmap]].
-> Última actualización: 2026-08-17 | Páginas de conocimiento: 12
+> Última actualización: 2026-08-17 | Páginas de conocimiento: 13
 
 ## Proyecto
 
@@ -17,6 +17,10 @@
 - [[numerical-correctness]] — golden tests, referencias y gates.
 - [[qwen3-tokenizer]] — QXT2, BPE Qwen2/GPT-2, goldens externos y prefill desde texto.
 - [[auto-research-loop]] — ciclo hipótesis → experimento → evidencia → decisión.
+
+## Comparaciones
+
+- [[llama-cpp-parity]] — residuals/checkpoints/logits completos, bug de routing corregido y refutación de bit-parity.
 
 ## Rendimiento
 

@@ -65,3 +65,41 @@ def test_compare_residuals_rejects_malformed_sidecar(tmp_path):
     )
     assert result.returncode == 2
     assert "invalid F32 sidecar size" in json.loads(result.stdout)["error"]
+
+
+def test_compare_residuals_maps_internal_checkpoint_names(tmp_path):
+    qx_dir, llama_dir = tmp_path / "qx", tmp_path / "llama"
+    qx_dir.mkdir()
+    llama_dir.mkdir()
+    write_f32(qx_dir / "step-0-layer-0-ffn-inp.f32", [1.0, 2.0])
+    write_f32(llama_dir / "ffn_inp-0.f32", [1.0, 2.0])
+    result = subprocess.run(
+        [
+            sys.executable, str(COMPARE), "--qx-dir", str(qx_dir),
+            "--llama-dir", str(llama_dir), "--layers", "0", "--phase", "ffn-inp",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["phase"] == "ffn-inp"
+    assert payload["layers"][0]["max_abs"] == 0
+
+
+def test_compare_residuals_maps_attention_checkpoint_names(tmp_path):
+    qx_dir, llama_dir = tmp_path / "qx", tmp_path / "llama"
+    qx_dir.mkdir()
+    llama_dir.mkdir()
+    for phase, llama_name in (("v-cur", "Vcur-0.f32"), ("kqv-out", "kqv_out-0.f32")):
+        write_f32(qx_dir / f"step-0-layer-0-{phase}.f32", [1.0, 2.0])
+        write_f32(llama_dir / llama_name, [1.0, 2.0])
+        result = subprocess.run(
+            [
+                sys.executable, str(COMPARE), "--qx-dir", str(qx_dir),
+                "--llama-dir", str(llama_dir), "--layers", "0", "--phase", phase,
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 0

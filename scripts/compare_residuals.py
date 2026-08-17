@@ -8,6 +8,15 @@ import struct
 import sys
 from pathlib import Path
 
+LLAMA_PHASE_NAMES = {
+    "input": "layer-{layer}.f32",
+    "v-cur": "Vcur-{layer}.f32",
+    "kqv-out": "kqv_out-{layer}.f32",
+    "ffn-inp": "ffn_inp-{layer}.f32",
+    "ffn-moe-out": "ffn_moe_out-{layer}.f32",
+    "output": "l_out-{layer}.f32",
+}
+
 
 def read_f32(path: Path) -> tuple[float, ...]:
     data = path.read_bytes()
@@ -45,13 +54,20 @@ def parse_layers(text: str) -> list[int]:
     return layers
 
 
-def compare_directories(qx_dir: Path, llama_dir: Path, layers: list[int], max_abs: float, min_cosine: float) -> dict:
+def compare_directories(
+    qx_dir: Path,
+    llama_dir: Path,
+    layers: list[int],
+    max_abs: float,
+    min_cosine: float,
+    phase: str = "input",
+) -> dict:
     results = []
     first_divergent = None
     for layer in layers:
         metrics = compare_values(
-            read_f32(qx_dir / f"step-0-layer-{layer}-input.f32"),
-            read_f32(llama_dir / f"layer-{layer}.f32"),
+            read_f32(qx_dir / f"step-0-layer-{layer}-{phase}.f32"),
+            read_f32(llama_dir / LLAMA_PHASE_NAMES[phase].format(layer=layer)),
         )
         within_tolerance = metrics["max_abs"] <= max_abs and metrics["cosine"] >= min_cosine
         if not within_tolerance and first_divergent is None:
@@ -59,6 +75,7 @@ def compare_directories(qx_dir: Path, llama_dir: Path, layers: list[int], max_ab
         results.append({"layer": layer, **metrics, "within_tolerance": within_tolerance})
     return {
         "schema": 1,
+        "phase": phase,
         "max_abs_tolerance": max_abs,
         "min_cosine_tolerance": min_cosine,
         "layers": results,
@@ -72,6 +89,7 @@ def main() -> int:
     parser.add_argument("--qx-dir", type=Path, required=True)
     parser.add_argument("--llama-dir", type=Path, required=True)
     parser.add_argument("--layers", default="0,1,24,47")
+    parser.add_argument("--phase", choices=tuple(LLAMA_PHASE_NAMES), default="input")
     parser.add_argument("--max-abs", type=float, default=1e-5)
     parser.add_argument("--min-cosine", type=float, default=0.999999)
     args = parser.parse_args()
@@ -84,6 +102,7 @@ def main() -> int:
             parse_layers(args.layers),
             args.max_abs,
             args.min_cosine,
+            args.phase,
         )
     except (OSError, ValueError) as exc:
         print(json.dumps({"schema": 1, "error": str(exc), "passed": False}))
