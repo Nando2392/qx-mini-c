@@ -476,9 +476,15 @@ def test_state_loop_runs_two_real_greedy_tokens_from_selected_embedding(tmp_path
     assert first["final_head"]["logits_checksum"] == 17094101101096419516
     assert second["final_head"]["logits_checksum"] == 9438484627875866845
     assert second["residual_checksum"] != first["final_head"]["final_residual_checksum"]
+    embedding = metadata("token_embd.weight")
+    assert embedding["ggml_type"] == 12
+    embedding_row_bytes = 8 * 144
+    prompt_embedding_raw = read_at(embedding["offset"] + first["input_token"] * embedding_row_bytes, embedding_row_bytes)
+    selected_embedding_raw = read_at(embedding["offset"] + second["input_token"] * embedding_row_bytes, embedding_row_bytes)
+    assert first["residual_checksum"] == fnv1a64(prompt_embedding_raw)
+    assert second["residual_checksum"] == fnv1a64(selected_embedding_raw)
+    assert prompt_embedding_raw != selected_embedding_raw
     output_tensor = metadata("output.weight")
     second_reference_logits = ggml_reference_full_q6_logits(output_tensor, second["final_head"]["final_norm_raw"], tmp_path / "second-final-norm.f32")
     assert second["final_head"]["logits_checksum"] == fnv1a64(struct.pack(f"<{len(second_reference_logits)}f", *second_reference_logits))
     assert second["selected_token"] == max(range(len(second_reference_logits)), key=second_reference_logits.__getitem__)
-    standalone = json.loads(subprocess.check_output(common + ["--prompt-token", str(first["selected_token"]), "--steps", "1"], text=True))
-    assert second["residual_checksum"] == standalone["tokens"][0]["residual_checksum"]
