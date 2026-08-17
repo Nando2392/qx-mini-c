@@ -1546,7 +1546,7 @@ Discovery from real QXF:
 
 ```text
 layer 0 experts: gate/up IQ2_XS (17), down IQ3_XXS (18) => supported
-layer 1 experts: gate/up IQ2_S (22), down IQ3_S (23) => unsupported for numeric expert probe yet
+layer 1 experts: gate/up IQ2_S (22), down IQ4_XS (23) => unsupported for numeric expert probe yet
 ```
 
 Verification:
@@ -2975,3 +2975,35 @@ smoke_check.py including --full-moe: PASS
 ```
 
 Honesty boundary: this is a complete real forward slice for layer 0, but the packed IQ2_XS/IQ3_XXS expert math currently relies on the C decoders already exercised by block-level tests; unlike the router and residual arithmetic, complete expert rows do not yet have an independent Python decoder golden. The persistent state loop still uses probe MoE deltas rather than this full top-8 path. All 48 layers, final norm, full lm_head, tokenizer equivalence, and reference token equality remain open.
+
+## 2026-08-17: real state propagation across layers 0 and 1
+
+`state-loop-probe --full-moe` now executes the real attention and MoE path for two consecutive layers. Each layer performs its own attention RMSNorm, Q/K/V projections, per-head Q/K RMSNorm, split-half RoPE, GQA, dynamic INT8 KV, output projection, attention residual, FFN RMSNorm, global router softmax, unnormalized top-8 selection, SwiGLU experts and weighted residual. The Q/K normalization order is independently checked in Python against raw `blk.N.attn_q_norm.weight` and `blk.N.attn_k_norm.weight` values emitted by the real-model golden probe.
+
+Measured one-token probe:
+
+```text
+elapsed: ~0.34 s for two layers
+layer 0 experts: [49, 89, 92, 48, 108, 58, 4, 38]
+layer 0 types:   IQ2_XS / IQ2_XS / IQ3_XXS
+layer 0 MoE L2:  1.1315761998040383
+layer 0 output checksum: 15037121990391945191
+
+layer 1 input checksum:  15037121990391945191
+layer 1 experts: [68, 13, 28, 73, 63, 32, 124, 114]
+layer 1 types:   IQ2_S / IQ2_S / IQ4_XS
+layer 1 MoE L2:  2.7100691687759846
+layer 1 output checksum: 9586706624653950598
+```
+
+Verification:
+
+```text
+MSVC C17 /O2 /W4: PASS
+pytest: 25 passed
+smoke_check.py: PASS, real_two_layer_state=true
+wiki lint: PASS
+Auto Research project check: PASS
+```
+
+Honesty boundary: residual carry 0→1 is now real and checksum-gated, but layer 1 does not yet have an independent full-vector golden against a separate implementation. Layers 2–47, final norm, complete lm_head, tokenizer parity and identical greedy tokens remain open. The two-layer timing is not full-model decode throughput.

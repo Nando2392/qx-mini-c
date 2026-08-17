@@ -2,7 +2,7 @@
 
 Experimental C runtime and mmap-oriented model format for correctness-first local inference of **Qwen3-30B-A3B MoE**.
 
-> Status: research runtime. Layer 0 executes real attention and top-8 MoE weights, but complete 48-layer token generation is not finished. Historical probe throughput is not full-model throughput.
+> Status: research runtime. Layers 0→1 now propagate one token's real residual through attention, INT8 KV and top-8 MoE. Complete 48-layer or multi-token autoregressive generation is not finished. Historical probe throughput is not full-model throughput.
 
 ## Goals
 
@@ -20,6 +20,7 @@ GGUF tensor bytes
 → embedding Q4_K
 → attention RMSNorm
 → Q/K/V IQ4_XS
+→ per-head Q/K RMSNorm
 → Qwen3 split-half RoPE
 → dynamic INT8 KV
 → GQA 32Q/4KV + causal softmax
@@ -28,10 +29,10 @@ GGUF tensor bytes
 → F32 router + top-8
 → IQ2_XS gate/up + SwiGLU
 → IQ3_XXS down
-→ weighted MoE sum + layer-0 residual
+→ weighted MoE sum + residual propagation from layer 0 to layer 1
 ```
 
-The next correctness gate is persistent real residual propagation across layers 0 and 1, then all 48 layers, final RMSNorm, full lm_head, tokenizer parity and identical greedy tokens.
+The one-token, two-layer state gate is GREEN. The next correctness gate is extending the same state loop to all 48 layers, then final RMSNorm, full lm_head, per-token embedding reset/tokenizer parity and identical greedy tokens.
 
 ## Honest performance state
 
@@ -113,8 +114,8 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. Persistent real attention+MoE state loop.
-2. Full 48-layer forward, final norm and lm_head.
+1. Extend the verified two-layer attention+MoE state loop to all 48 layers.
+2. Add final norm and full lm_head.
 3. Tokenizer parity and identical greedy-token gate.
 4. QXF mmap and persistent scratch buffers.
 5. Fused quant-dot, thread pool and AVX2 CPU kernels.

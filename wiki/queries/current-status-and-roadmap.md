@@ -16,30 +16,31 @@ confidence: high
 - Loader, checksums y decoders quant necesarios.
 - Attention real completa de layer 0.
 - [[moe-forward]] real completo de layer 0.
+- State loop real 0→1 para un token: residual, attention normalizada, Q/K RMSNorm, RoPE/GQA, KV INT8 y MoE top-8 en ambas capas.
 - Golden independientes para embedding, IQ4_XS e IQ2_XS/IQ3_XXS representativos.
 - Smoke check y suite pytest.
 
 ## Gate activo
 
 ```text
-state loop con residual real
-→ layers 0 y 1
-→ 48 layers
+state loop real layers 0 y 1: GREEN
+→ extender a 48 layers
 → final norm
 → lm_head completo
 → tokenizer
 greedy tokens idénticos
 ```
 
-Existe un test RED para `state-loop-probe --full-moe`; debe permanecer documentado como trabajo en curso hasta quedar GREEN.
+`state-loop-probe --full-moe` propaga checksums reales entre layers 0 y 1. El checksum de salida de layer 0 coincide con el checksum de entrada de layer 1.
 
 ## Después
 
 1. Completar correctitud multi-layer.
-2. Aplicar [[optimization-priorities]] CPU.
-3. Medir baseline de inferencia real.
-4. Diseñar backend CUDA híbrido.
-5. Gates 4K, RSS, calidad KV y 8 h.
+2. Implementar el ciclo autoregresivo multi-token con embedding nuevo por token.
+3. Aplicar [[optimization-priorities]] CPU.
+4. Medir baseline de inferencia real.
+5. Diseñar backend CUDA híbrido.
+6. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 

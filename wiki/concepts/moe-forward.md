@@ -10,7 +10,7 @@ confidence: high
 
 # MoE forward
 
-## Layer 0 implementado
+## Layer 0 implementado y carry a layer 1
 
 ```text
 post-attention residual
@@ -37,8 +37,10 @@ down: [768, 2048, 128] IQ3_XXS
 
 ## Límites
 
-- Implementado y ejercitado: un layer real.
-- Pendiente: propagar el residual por 48 layers.
+- Implementado y ejercitado: layers 0 y 1 con residual real encadenado.
+- Layer 0 usa gate/up IQ2_XS y down IQ3_XXS; layer 1 usa gate/up IQ2_S y down IQ4_XS.
+- Medición del probe 0→1, un token: ~0.34 s en la máquina de desarrollo; no es tok/s de inferencia completa.
+- Pendiente: propagar el residual por las 48 layers.
 - Pendiente: golden end-to-end de todos los tipos quant multi-layer.
 
 Gates: [[numerical-correctness]]. Rendimiento: [[performance-model]].

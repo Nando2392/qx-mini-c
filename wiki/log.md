@@ -19,3 +19,12 @@
 - El loader QXF valida tamaño declarado, límites del directorio, rank, terminación de nombres y spans de tensor sin sumas vulnerables a overflow.
 - Añadidos dos tests de archivos QXF malformados.
 - Gate local: 24 passed, 1 xfailed documentado.
+
+## [2026-08-17] update | State loop real 0→1
+
+- `state-loop-probe --full-moe` ejecuta attention normalizada, Q/K RMSNorm por cabeza, RoPE/GQA, KV INT8 y top-8 MoE en layers 0 y 1.
+- El golden Python independiente verifica pesos y orden Q/K RMSNorm antes de RoPE.
+- Evidencia de carry: checksum salida layer 0 `15037121990391945191` = checksum entrada layer 1.
+- Expertos layer 0: `[49, 89, 92, 48, 108, 58, 4, 38]`.
+- Expertos layer 1: `[68, 13, 28, 73, 63, 32, 124, 114]`.
+- Probe medido: ~0.34 s para dos layers; no es decode completo.

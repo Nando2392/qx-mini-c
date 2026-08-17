@@ -34,15 +34,26 @@ def quantize(values):
     return [max(-127, min(127, round(value / scale))) for value in values], scale
 
 
+def head_rmsnorm(values, heads, head_dim, weights, epsilon=1e-6):
+    out = list(values)
+    for head in range(heads):
+        base = head * head_dim
+        mean_square = sum(float(out[base + dim]) ** 2 for dim in range(head_dim)) / head_dim
+        inverse_rms = 1.0 / math.sqrt(mean_square + epsilon)
+        for dim in range(head_dim):
+            out[base + dim] = f32(float(out[base + dim]) * inverse_rms * float(weights[dim]))
+    return out
+
+
 def external_attention(payload):
     head_dim = payload["head_dim"]
     q_heads_run = payload["q_heads_run"]
     kv_heads = payload["kv_heads_total"]
     group_size = payload["gqa_group_size"]
-    q = rope(payload["q_raw"], q_heads_run, head_dim, 1)
+    q = rope(head_rmsnorm(payload["q_raw"], q_heads_run, head_dim, payload["q_norm_raw"]), q_heads_run, head_dim, 1)
     keys, values, kscales, vscales = [], [], [], []
     for position in range(2):
-        key = rope(payload["k_raw"][position], kv_heads, head_dim, position)
+        key = rope(head_rmsnorm(payload["k_raw"][position], kv_heads, head_dim, payload["k_norm_raw"]), kv_heads, head_dim, position)
         key_q, key_scale = quantize(key)
         value_q, value_scale = quantize(payload["v_raw"][position])
         keys.append(key_q)
@@ -89,6 +100,10 @@ def test_real_qwen_qkv_matches_external_rope_gqa_reference():
     assert len(payload["q_raw"]) == 1152
     assert len(payload["k_raw"]) == 2 and all(len(row) == 512 for row in payload["k_raw"])
     assert len(payload["v_raw"]) == 2 and all(len(row) == 512 for row in payload["v_raw"])
+    assert payload["q_norm_tensor"] == "blk.0.attn_q_norm.weight"
+    assert payload["k_norm_tensor"] == "blk.0.attn_k_norm.weight"
+    assert len(payload["q_norm_raw"]) == 128
+    assert len(payload["k_norm_raw"]) == 128
     scores, weights, context = external_attention(payload)
     for got, expected in zip(payload["score_samples"], scores):
         assert math.isclose(got, expected, rel_tol=5e-6, abs_tol=5e-6)

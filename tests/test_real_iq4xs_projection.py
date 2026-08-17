@@ -247,16 +247,20 @@ def test_expert_decoders_match_external_llama_cpp_reference():
         assert math.isclose(payload["expert0_down_raw"][row], down_expected, rel_tol=5e-6, abs_tol=5e-6)
 
 
-@pytest.mark.xfail(strict=True, reason="state-loop --full-moe is the next documented correctness gate")
 def test_state_loop_propagates_real_attention_and_moe_across_two_layers():
     tokens = Path.home() / "AppData" / "Local" / "Temp" / "qwen3-a3b.tokens.tsv"
     if not EXE.exists() or not MODEL.exists() or not tokens.exists():
         pytest.skip("real Qwen runtime fixtures are not available")
     payload = json.loads(subprocess.check_output([str(EXE), "state-loop-probe", "--in", str(MODEL), "--tokens", str(tokens), "--prompt-token", "42", "--steps", "1", "--layers", "2", "--ctx", "4", "--kv", "int8", "--top-k", "3", "--scan", "64", "--temperature", "0", "--seed", "7", "--full-moe"], text=True))
     assert payload["residual_source"] == "real_attention_moe_carry"
+    assert len(payload["tokens"]) == 1
     layer0, layer1 = payload["tokens"][0]["layers"]
     assert layer0["full_moe"] is True
     assert layer1["full_moe"] is True
+    assert layer0["qk_head_norm"] is True
+    assert layer1["qk_head_norm"] is True
+    assert layer0["attention_context_tokens"] == 1
+    assert layer1["attention_context_tokens"] == 1
     assert layer0["experts_run"] == 8
     assert layer1["experts_run"] == 8
     assert len(layer0["selected_experts"]) == 8
@@ -270,3 +274,10 @@ def test_state_loop_propagates_real_attention_and_moe_across_two_layers():
     assert layer1["down_ggml_type"] == 23
     assert layer0["moe_output_l2"] > 0
     assert layer1["moe_output_l2"] > 0
+    invalid = subprocess.run(
+        [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "2", "--ctx", "4", "--kv", "int8", "--seed", "7", "--full-moe", "--norm", "blk.0.attn_norm.weight"],
+        text=True,
+        capture_output=True,
+    )
+    assert invalid.returncode != 0
+    assert "--norm cannot be combined with --full-moe" in invalid.stderr

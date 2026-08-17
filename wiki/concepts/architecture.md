@@ -26,7 +26,7 @@ GGUF
 ```text
 raw residual
 → attention RMSNorm
-→ Q/K/V + RoPE + persistent KV
+→ Q/K/V + per-head Q/K RMSNorm + RoPE + persistent KV
 → GQA causal attention
 → output projection + residual
 → FFN RMSNorm
