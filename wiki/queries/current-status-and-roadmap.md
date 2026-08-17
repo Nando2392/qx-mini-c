@@ -35,11 +35,13 @@ QXF corruption/legacy-clamp gate: GREEN
 → tokens greedy end-to-end idénticos
 ```
 
+El oracle externo por capas ya está operativo. Para token `42`, layer-0 input es exacto y el argmax externo es `1124`, pero layer-1 input diverge (`cosine≈0.964`) tanto con KV F16 como Q8_0 en llama.cpp. El gate activo es aislar dentro de layer 0 si la primera diferencia aparece en attention output o en MoE.
+
 `state-loop-probe --full-moe --final-head --steps 2` produjo `42 → 1124 → 29626`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y el segundo checksum de 151936 logits coincide con el helper Q6_K oficial. `prompt-state-loop-probe` tokenizó `Hello!` como `[9707, 0]`, hizo prefill y continuó greedy con inputs `[9707, 0, 117268]`.
 
 ## Después
 
-1. Comparar tokens y residuales end-to-end contra referencia externa.
+1. Aislar la divergencia de layer 0 contra tensors internos de llama.cpp y cerrar paridad residual.
 2. Ampliar tokenizer a cobertura Unicode/chat-template exhaustiva.
 3. Aplicar [[optimization-priorities]] CPU.
 4. Medir baseline de inferencia real.

@@ -317,6 +317,33 @@ def test_state_loop_propagates_real_attention_and_moe_across_two_layers():
     assert "--norm cannot be combined with --full-moe" in invalid.stderr
 
 
+def test_state_loop_can_dump_lossless_layer_residuals(tmp_path):
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    dump_dir = tmp_path / "residuals"
+    dump_dir.mkdir()
+    payload = json.loads(
+        subprocess.check_output(
+            [
+                str(EXE), "state-loop-probe", "--in", str(MODEL),
+                "--prompt-token", "42", "--steps", "1", "--layers", "2",
+                "--ctx", "4", "--kv", "int8", "--temperature", "0",
+                "--seed", "7", "--full-moe", "--dump-residuals", str(dump_dir),
+            ],
+            text=True,
+        )
+    )
+    assert payload["residual_dump"] is True
+    assert payload["residual_dump_count"] == 4
+    for layer in range(2):
+        for phase in ("input", "output"):
+            path = dump_dir / f"step-0-layer-{layer}-{phase}.f32"
+            assert path.stat().st_size == 2048 * 4
+            values = struct.unpack("<2048f", path.read_bytes())
+            assert all(math.isfinite(value) for value in values)
+
+
+
 def test_state_loop_propagates_one_real_token_across_all_48_layers():
     if not EXE.exists() or not MODEL.exists():
         pytest.skip("real Qwen runtime fixtures are not available")

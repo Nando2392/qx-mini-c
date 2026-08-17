@@ -68,3 +68,10 @@
 - Metadata-only queda permitido sólo con spans de tensor cero; los QXF con datos exigen offsets alineados y tamaños no cero.
 - Embedding, forward, logits, residual, token-forward, RMSNorm y matvec-stub ya no truncan spans ni rebobinan silenciosamente a la fila 0.
 - Gate focal: 29 mutaciones/paths adversariales; suite local completa: 70 passed; smoke real: 96 layers y secuencia greedy `1124 → 29626`.
+
+## [2026-08-17] baseline | Oracle externo de residuales
+
+- Añadido helper standalone contra llama.cpp pinned y sidecars F32 opcionales en `state-loop-probe --full-moe`.
+- Añadido comparador con max-abs, RMSE, cosine y primera capa divergente.
+- Token `42`: input layer 0 exacto; input layer 1 diverge (`max_abs≈1.08`, cosine≈0.964); argmax externo `1124` coincide con QX.
+- llama.cpp KV F16 y Q8_0 mantienen la misma primera divergencia, por lo que el siguiente gate debe separar attention y MoE dentro de layer 0.

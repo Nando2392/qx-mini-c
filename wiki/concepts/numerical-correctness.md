@@ -44,4 +44,10 @@ RSS ±5%
 8 h sostenidas y guarda térmica
 ```
 
+## Baseline externo por capa
+
+El oracle standalone de llama.cpp extrae sidecars F32 de inputs de capa sin reutilizar resultados QX. Para token `42`, QX y llama.cpp coinciden exactamente en el input de layer 0 (`max_abs=0`, cosine `1`) y ambos producen argmax `1124`. La primera divergencia está en el input de layer 1 (`max_abs≈1.08`, cosine≈`0.964`). Repetir llama.cpp con KV Q8_0 en vez de F16 no mueve esa frontera; el siguiente experimento debe separar attention output y MoE de layer 0 mediante tensors internos del oracle.
+
+Este baseline localiza el error; no constituye PASS de paridad externa.
+
 La política de investigación está en [[auto-research-loop]] y el avance en [[current-status-and-roadmap]].

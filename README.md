@@ -96,8 +96,13 @@ Tests requiring the real 10+ GB model skip when local model files are absent. Sy
 An optional external decoder gate links a small test helper against a local llama.cpp build. Build it only when that checkout is available:
 
 ```bat
-testsuild_ggml_reference.bat
+tests\build_ggml_reference.bat
+tests\build_llama_reference_oracle.bat
 ```
+
+The second helper is a standalone llama.cpp oracle; it is not linked into the QX runtime. It writes selected layer-input residuals and final logits as lossless F32 sidecars. QX can write matching sidecars with `state-loop-probe --full-moe --dump-residuals <existing-dir>`, and `scripts/compare_residuals.py` reports max absolute error, RMSE, cosine similarity and the first divergent layer. Local model paths and sidecars must remain outside Git.
+
+Current fixed-token baseline against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: token `42` has an exact layer-0 input residual and both runtimes select argmax `1124`, but the first residual divergence appears at layer 1. llama.cpp F16 and Q8_0 KV produce the same boundary, so exact end-to-end residual parity is not yet claimed.
 
 ## Model setup
 
