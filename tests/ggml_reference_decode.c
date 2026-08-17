@@ -19,8 +19,33 @@ static int parse_u64(const char *text, uint64_t *value) {
 
 int main(int argc, char **argv) {
     _setmode(_fileno(stdout), _O_BINARY);
+    if (argc == 6 && strcmp(argv[1], "q6_k_logits") == 0) {
+        uint64_t offset = 0, rows = 0;
+        if (!parse_u64(argv[3], &offset) || !parse_u64(argv[4], &rows) || !rows || rows > UINT32_MAX) return 2;
+        FILE *activation_file = fopen(argv[5], "rb");
+        if (!activation_file) return 3;
+        float activation[2048];
+        if (fread(activation, sizeof(float), 2048, activation_file) != 2048) { fclose(activation_file); return 3; }
+        fclose(activation_file);
+        FILE *input = fopen(argv[2], "rb");
+        if (!input) return 3;
+        if (_fseeki64(input, (__int64)offset, SEEK_SET) != 0) { fclose(input); return 3; }
+        block_q6_K raw[8];
+        float weights[2048];
+        for (uint64_t row = 0; row < rows; ++row) {
+            if (fread(raw, sizeof(block_q6_K), 8, input) != 8) { fclose(input); return 3; }
+            dequantize_row_q6_K(raw, weights, 2048);
+            double dot = 0.0;
+            for (uint32_t i = 0; i < 2048; ++i) dot += (double)weights[i] * (double)activation[i];
+            float logit = (float)dot;
+            if (fwrite(&logit, sizeof(logit), 1, stdout) != 1) { fclose(input); return 5; }
+        }
+        fclose(input);
+        return 0;
+    }
     if (argc != 5) {
-        fprintf(stderr, "usage: ggml_reference_decode <iq2_xs|iq3_xxs> <file> <offset> <blocks>\n");
+        fprintf(stderr, "usage: ggml_reference_decode <iq2_xs|iq3_xxs> <file> <offset> <blocks>\n"
+                        "   or: ggml_reference_decode q6_k_logits <file> <offset> <rows> <activation.f32>\n");
         return 2;
     }
     uint64_t offset = 0, blocks = 0;

@@ -1,7 +1,7 @@
 # QX-mini-MoE Wiki
 
 > Bóveda Obsidian y wiki compilada al estilo Karpathy. Leer primero esta página y [[current-status-and-roadmap]].
-> Última actualización: 2026-08-17 | Páginas de conocimiento: 9
+> Última actualización: 2026-08-17 | Páginas de conocimiento: 10
 
 ## Proyecto
 
@@ -12,6 +12,7 @@
 
 ## Correctitud
 
+- [[final-output-head]] — final RMSNorm, head Q6_K completo y golden externo.
 - [[numerical-correctness]] — golden tests, referencias y gates.
 - [[auto-research-loop]] — ciclo hipótesis → experimento → evidencia → decisión.
 

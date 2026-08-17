@@ -20,6 +20,29 @@ def f32(value):
     return struct.unpack("<f", struct.pack("<f", value))[0]
 
 
+def fnv1a64(data):
+    value = 1469598103934665603
+    for byte in data:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return value
+
+
+def qxf_with_manifest_u32(source, destination, manifest_field_offset, value):
+    with source.open("rb") as handle:
+        fixed = handle.read(56)
+        data_offset = struct.unpack_from("<Q", fixed, 32)[0]
+        file_size = struct.unpack_from("<Q", fixed, 40)[0]
+        handle.seek(0)
+        prefix = bytearray(handle.read(data_offset))
+    struct.pack_into("<I", prefix, 56 + manifest_field_offset, value)
+    struct.pack_into("<Q", prefix, 48, fnv1a64(prefix[56:108]))
+    with destination.open("wb") as handle:
+        handle.write(prefix)
+        handle.seek(file_size - 1)
+        handle.write(b"\0")
+
+
 def scale_min_k4(index, scales):
     if index < 4:
         return scales[index] & 63, scales[index + 4] & 63
@@ -105,6 +128,17 @@ def ggml_reference_row(tensor, expert, row, quant_name, block_size):
     env["PATH"] = str(GGML_REFERENCE_DLLS) + os.pathsep + env.get("PATH", "")
     raw = subprocess.check_output([str(GGML_REFERENCE), quant_name, str(MODEL), str(offset), str(blocks)], env=env)
     return struct.unpack(f"<{blocks * 256}f", raw)
+
+
+def ggml_reference_full_q6_logits(tensor, activation, activation_path):
+    activation_path.write_bytes(struct.pack(f"<{len(activation)}f", *activation))
+    env = os.environ.copy()
+    env["PATH"] = str(GGML_REFERENCE_DLLS) + os.pathsep + env.get("PATH", "")
+    raw = subprocess.check_output(
+        [str(GGML_REFERENCE), "q6_k_logits", str(MODEL), str(tensor["offset"]), str(tensor["dims"][1]), str(activation_path)],
+        env=env,
+    )
+    return struct.unpack(f"<{tensor['dims'][1]}f", raw)
 
 
 def test_real_iq4_xs_full_rows_match_independent_python_decoder():
@@ -315,3 +349,100 @@ def test_state_loop_propagates_one_real_token_across_all_48_layers():
         if index:
             assert layers[index - 1]["residual_output_checksum"] == layer["residual_input_checksum"]
     assert layers[0]["residual_input_checksum"] != layers[-1]["residual_output_checksum"]
+
+
+def test_state_loop_applies_real_final_norm_and_complete_lm_head(tmp_path):
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    payload = json.loads(
+        subprocess.check_output(
+            [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8", "--temperature", "0", "--seed", "7", "--full-moe", "--final-head", "--top-n", "5"],
+            text=True,
+        )
+    )
+    head = payload["tokens"][0]["final_head"]
+    assert head["enabled"] is True
+    assert head["norm_tensor"] == "output_norm.weight"
+    assert head["norm_ggml_type"] == 0
+    assert head["norm_values"] == 2048
+    assert head["norm_checksum_verified"] is True
+    assert head["norm_raw_checksum"] > 0
+    assert len(head["final_residual_raw"]) == 2048
+    assert len(head["final_norm_raw"]) == 2048
+    assert head["final_residual_checksum"] == payload["tokens"][0]["layers"][-1]["residual_output_checksum"]
+    assert head["final_norm_checksum"] != head["final_residual_checksum"]
+    assert head["lm_head_tensor"] == "output.weight"
+    assert head["lm_head_ggml_type"] == 14
+    assert head["lm_head_decoder"] == "Q6_K"
+    assert head["lm_head_checksum_verified"] is True
+    assert head["lm_head_raw_checksum"] > 0
+    assert head["input_dims"] == 2048
+    assert head["vocab_size"] == 151936
+    assert head["logits_computed"] == 151936
+    assert head["full_vocabulary"] is True
+    assert head["logits_checksum"] > 0
+    assert math.isfinite(head["logits_rms"])
+    assert head["logits_rms"] > 0
+    assert len(head["top_tokens"]) == 5
+    assert head["argmax_token"] == head["top_tokens"][0]["token"]
+    assert head["argmax_logit"] == head["top_tokens"][0]["logit"]
+    assert all(head["top_tokens"][index]["logit"] >= head["top_tokens"][index + 1]["logit"] for index in range(4))
+    base = [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8", "--temperature", "0", "--seed", "7", "--full-moe", "--final-head"]
+    invalid_commands = [
+        base + ["--layers", "47"],
+        base + ["--layers", "49"],
+        base + ["--steps", "0"],
+        base + ["--steps", "2"],
+        base + ["--temperature", "0.1"],
+        base + ["--bench"],
+        [arg for arg in base if arg != "--full-moe"],
+    ]
+    for command in invalid_commands:
+        invalid = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+        )
+        assert invalid.returncode != 0
+        assert "--final-head requires --full-moe, one step, all manifest layers, temperature 0, and no --bench" in invalid.stderr
+    oversized_ctx = subprocess.run(base + ["--ctx", "4097"], text=True, capture_output=True)
+    assert oversized_ctx.returncode != 0
+    assert "state loop context must be between 1 and 4096" in oversized_ctx.stderr
+    zero_ctx = subprocess.run(base + ["--ctx", "0"], text=True, capture_output=True)
+    assert zero_ctx.returncode != 0
+    assert "state loop context must be between 1 and 4096" in zero_ctx.stderr
+    zero_kv_heads = tmp_path / "zero-kv-heads.qxf"
+    qxf_with_manifest_u32(MODEL, zero_kv_heads, 24, 0)
+    malformed_command = [str(zero_kv_heads) if arg == str(MODEL) else arg for arg in base]
+    malformed = subprocess.run(malformed_command, text=True, capture_output=True)
+    assert malformed.returncode != 0
+    assert "invalid attention dimensions" in malformed.stderr
+
+
+def test_final_norm_and_argmax_match_independent_llama_cpp_reference(tmp_path):
+    if not EXE.exists() or not MODEL.exists() or not GGML_REFERENCE.exists():
+        pytest.skip("real Qwen fixtures or external llama.cpp reference are not available")
+    payload = json.loads(
+        subprocess.check_output(
+            [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8", "--temperature", "0", "--seed", "7", "--full-moe", "--final-head", "--top-n", "5"],
+            text=True,
+        )
+    )
+    head = payload["tokens"][0]["final_head"]
+    residual = head["final_residual_raw"]
+    norm_tensor = metadata("output_norm.weight")
+    norm_weights = struct.unpack("<2048f", read_at(norm_tensor["offset"], norm_tensor["byte_size"]))
+    rms = math.sqrt(sum(float(value) * float(value) for value in residual) / 2048 + 1e-6)
+    expected_norm = [f32(f32(float(value) / rms) * norm_weights[index]) for index, value in enumerate(residual)]
+    for got, expected in zip(head["final_norm_raw"], expected_norm):
+        assert math.isclose(got, expected, rel_tol=3e-6, abs_tol=3e-6)
+    output_tensor = metadata("output.weight")
+    reference_logits = ggml_reference_full_q6_logits(output_tensor, head["final_norm_raw"], tmp_path / "final-norm.f32")
+    assert head["logits_checksum"] == fnv1a64(struct.pack(f"<{len(reference_logits)}f", *reference_logits))
+    reference_top = sorted(range(len(reference_logits)), key=lambda token: reference_logits[token], reverse=True)[:5]
+    assert head["argmax_token"] == reference_top[0]
+    assert [item["token"] for item in head["top_tokens"]] == reference_top
+    for item in head["top_tokens"]:
+        assert math.isclose(item["logit"], reference_logits[item["token"]], rel_tol=4e-6, abs_tol=4e-6)
+    for token in (0, 75968, 151935):
+        assert math.isfinite(reference_logits[token])

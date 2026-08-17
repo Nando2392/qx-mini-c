@@ -37,3 +37,12 @@
 - Checksums extremos: entrada `8017452295594298460`, salida `675293441229675006`.
 - Tiempo medido: ~8.50 s para el probe instrumentado; no es decode completo ni tok/s.
 - Próximo gate: final RMSNorm y lm_head completo.
+
+## [2026-08-17] update | Final RMSNorm y output head completo
+
+- Añadido `--final-head` fail-closed sobre el forward real de 48 capas.
+- Ejecutadas las 151936 filas Q6_K de `output.weight`; argmax medido: token `1124`.
+- Golden independiente: RMSNorm Python + `dequantize_row_q6_K` oficial de llama.cpp para todo el vocabulario.
+- El golden detectó un layout incorrecto en el decoder Q6_K propio; corregido contra la fuente oficial.
+- Checksum logits F32: `17094101101096419516`; tiempo caliente observado: ~8.35 s.
+- Límite: no demuestra todavía paridad end-to-end de todas las capas ni autoregresión multi-token.

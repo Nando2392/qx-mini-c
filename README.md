@@ -2,7 +2,7 @@
 
 Experimental C runtime and mmap-oriented model format for correctness-first local inference of **Qwen3-30B-A3B MoE**.
 
-> Status: research runtime. One token now propagates a real residual through all 48 layers with attention, INT8 KV and top-8 MoE. Final RMSNorm, complete lm_head and multi-token autoregressive generation are not finished. Probe timing is not decode throughput.
+> Status: research runtime. One token now traverses all 48 layers, final RMSNorm and the complete 151936-row Q6_K output head. Tokenizer parity and valid multi-token autoregression are not finished. Probe timing is not conversational decode throughput.
 
 ## Goals
 
@@ -30,9 +30,12 @@ GGUF tensor bytes
 → IQ2_XS gate/up + SwiGLU
 → IQ3_XXS down
 → weighted MoE sum + residual propagation across layers 0–47
+→ final RMSNorm F32
+→ output.weight Q6_K, 2048→151936
+→ complete logits + argmax/top-N
 ```
 
-The one-token, 48-layer state gate is GREEN. The next correctness gate is final RMSNorm and full lm_head, followed by tokenizer parity and identical greedy tokens.
+The one-token forward-to-logits gate is GREEN. The next correctness gate is tokenizer parity and then a valid multi-token loop where every selected token starts from its own embedding.
 
 ## Honest performance state
 
@@ -41,9 +44,10 @@ Measured on the current scalar CPU path:
 ```text
 real layer-0 probe median: ~0.2085 s/layer
 real one-token 48-layer state probe: ~8.50 s
+real one-token 48-layer + complete output head probe: ~8.35 s warm run
 ```
 
-The 48-layer measurement excludes final norm, complete lm_head and tokenizer. It is not completed inference and must not be reported as token/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
+The complete-head measurement includes final RMSNorm and all 151936 logits but excludes tokenizer parity and multi-token execution. It must not be reported as sustained conversational tok/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
 
 CUDA is planned but **not implemented**.
 

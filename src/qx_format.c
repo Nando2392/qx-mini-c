@@ -43,6 +43,15 @@ uint64_t qx_fnv1a64(const void *data, uint64_t len) {
     return h;
 }
 
+static uint64_t qx_fnv1a64_update(uint64_t hash, const void *data, uint64_t len) {
+    const unsigned char *p = (const unsigned char *)data;
+    for (uint64_t i = 0; i < len; ++i) {
+        hash ^= (uint64_t)p[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 const char *qx_model_type_name(qx_model_type t) {
     switch (t) {
         case QX_MODEL_QWEN3_DENSE: return "qwen3_dense";
@@ -1669,22 +1678,25 @@ static int qx_decode_q5_k_block(const unsigned char *buf, float out[256]) {
 }
 
 static int qx_decode_q6_k_block(const unsigned char *buf, float out[256]) {
+    const float d = qx_fp16_to_f32(qx_rd_le16(buf + 208));
     const unsigned char *ql = buf;
     const unsigned char *qh = buf + 128;
     const signed char *scales = (const signed char *)(buf + 192);
-    const float d = qx_fp16_to_f32(qx_rd_le16(buf + 208));
-    int y = 0;
-    for (int group = 0; group < 16; ++group) {
-        const int base = group * 16;
-        const float scale = d * (float)scales[group];
-        for (int j = 0; j < 16; ++j) {
-            const int idx = base + j;
-            const unsigned char lo = (idx < 128) ? (ql[idx] & 0x0fu) : (ql[idx - 128] >> 4);
-            const unsigned char hb = qh[idx >> 2];
-            const unsigned char hi = (hb >> (2 * (idx & 3))) & 0x03u;
-            const int q = (int)(lo | (hi << 4)) - 32;
-            out[y++] = scale * (float)q;
+    for (int base = 0; base < 256; base += 128) {
+        for (int l = 0; l < 32; ++l) {
+            int is = l / 16;
+            int q1 = (int)((ql[l] & 0x0fu) | (((qh[l] >> 0) & 3u) << 4)) - 32;
+            int q2 = (int)((ql[l + 32] & 0x0fu) | (((qh[l] >> 2) & 3u) << 4)) - 32;
+            int q3 = (int)((ql[l] >> 4) | (((qh[l] >> 4) & 3u) << 4)) - 32;
+            int q4 = (int)((ql[l + 32] >> 4) | (((qh[l] >> 6) & 3u) << 4)) - 32;
+            out[base + l] = d * (float)scales[is] * (float)q1;
+            out[base + l + 32] = d * (float)scales[is + 2] * (float)q2;
+            out[base + l + 64] = d * (float)scales[is + 4] * (float)q3;
+            out[base + l + 96] = d * (float)scales[is + 6] * (float)q4;
         }
+        ql += 64;
+        qh += 32;
+        scales += 8;
     }
     return 1;
 }
@@ -2790,8 +2802,8 @@ int qx_dump_generate_probe_summary(const char *path, const char *tokens_path, ui
 static int qx_kv_bytes_for_format(const char *kv_format, uint64_t values_per_k_or_v, uint64_t *bytes_per_k_or_v, uint32_t *bytes_per_value) {
     if (!kv_format || !bytes_per_k_or_v || !bytes_per_value) return 0;
     if (strcmp(kv_format, "int8") == 0) { *bytes_per_value = 1; *bytes_per_k_or_v = values_per_k_or_v; return 1; }
-    if (strcmp(kv_format, "f16") == 0 || strcmp(kv_format, "fp16") == 0) { *bytes_per_value = 2; *bytes_per_k_or_v = values_per_k_or_v * 2ull; return 1; }
-    if (strcmp(kv_format, "int4") == 0) { *bytes_per_value = 0; *bytes_per_k_or_v = (values_per_k_or_v + 1ull) / 2ull; return 1; }
+    if (strcmp(kv_format, "f16") == 0 || strcmp(kv_format, "fp16") == 0) { if (values_per_k_or_v > UINT64_MAX / 2ull) return 0; *bytes_per_value = 2; *bytes_per_k_or_v = values_per_k_or_v * 2ull; return 1; }
+    if (strcmp(kv_format, "int4") == 0) { if (values_per_k_or_v == UINT64_MAX) return 0; *bytes_per_value = 0; *bytes_per_k_or_v = (values_per_k_or_v + 1ull) / 2ull; return 1; }
     return 0;
 }
 
@@ -2844,6 +2856,115 @@ static int qx_apply_f32_rmsnorm(qx_file *file, const qx_tensor_dir_entry *norm, 
     for (uint32_t i = 0; i < dims; ++i) dst[i] = (float)((double)src[i] / rms) * qx_rd_le_f32(weights + (uint64_t)i * 4ull);
     free(weights);
     if (rms_out) *rms_out = rms;
+    return 1;
+}
+
+typedef struct {
+    uint32_t input_dims;
+    uint32_t vocab_size;
+    uint32_t logits_computed;
+    uint32_t top_n;
+    uint32_t lm_head_ggml_type;
+    double input_rms;
+    double normalized_l2;
+    double logits_min;
+    double logits_max;
+    double logits_rms;
+    uint64_t residual_checksum;
+    uint64_t normalized_checksum;
+    uint64_t logits_checksum;
+    uint64_t norm_raw_checksum;
+    uint64_t lm_head_raw_checksum;
+    qx_top_token top[32];
+} qx_real_head_result;
+
+static int qx_compute_real_final_head(qx_file *file, const float *residual, float *normalized,
+                                      uint32_t dims, uint32_t top_n, qx_real_head_result *result,
+                                      char *err, uint64_t err_len) {
+    if (!file || !residual || !normalized || !dims || !result) {
+        qx_set_err(err, err_len, "invalid final head argument"); return 0;
+    }
+    if (top_n == 0u) top_n = 1u;
+    if (top_n > 32u) top_n = 32u;
+    const qx_tensor_dir_entry *norm = qx_find_tensor(file, "output_norm.weight");
+    const qx_tensor_dir_entry *lm = qx_find_tensor(file, "output.weight");
+    if (!norm || norm->rank != 1u || norm->dims[0] != dims || norm->flags != 0u || norm->byte_size != (uint64_t)dims * 4ull) {
+        qx_set_err(err, err_len, "invalid output_norm.weight tensor"); return 0;
+    }
+    uint32_t vocab = file->header.manifest.vocab;
+    if (!lm || lm->rank != 2u || lm->dims[0] != dims || lm->dims[1] != vocab || vocab == 0u) {
+        qx_set_err(err, err_len, "invalid output.weight tensor shape"); return 0;
+    }
+    const char *decoder = NULL;
+    uint64_t block_size = 0;
+    if (!qx_decoder_info(lm->flags, &decoder, &block_size) || lm->flags != 14u || block_size != 210ull || dims % 256u != 0u) {
+        qx_set_err(err, err_len, "final head requires Q6_K output.weight"); return 0;
+    }
+    uint64_t blocks_per_row = dims / 256u;
+    if (blocks_per_row > UINT64_MAX / block_size) { qx_set_err(err, err_len, "final head row size overflow"); return 0; }
+    uint64_t row_bytes = blocks_per_row * block_size;
+    if ((uint64_t)vocab > UINT64_MAX / row_bytes || lm->byte_size != (uint64_t)vocab * row_bytes) {
+        qx_set_err(err, err_len, "invalid output.weight byte size"); return 0;
+    }
+    if (!qx_verify_tensor_checksum(file, norm, err, err_len)) return 0;
+    if (!qx_verify_tensor_checksum(file, lm, err, err_len)) return 0;
+    memset(result, 0, sizeof(*result));
+    result->input_dims = dims;
+    result->vocab_size = vocab;
+    result->top_n = top_n;
+    result->lm_head_ggml_type = lm->flags;
+    result->norm_raw_checksum = norm->checksum;
+    result->lm_head_raw_checksum = lm->checksum;
+    result->residual_checksum = qx_fnv1a64(residual, (uint64_t)dims * sizeof(float));
+    if (!qx_apply_f32_rmsnorm(file, norm, residual, normalized, dims, &result->input_rms, err, err_len)) return 0;
+    result->normalized_checksum = qx_fnv1a64(normalized, (uint64_t)dims * sizeof(float));
+    double normalized_sumsq = 0.0;
+    for (uint32_t i = 0; i < dims; ++i) normalized_sumsq += (double)normalized[i] * (double)normalized[i];
+    result->normalized_l2 = sqrt(normalized_sumsq);
+    for (uint32_t i = 0; i < top_n; ++i) { result->top[i].token = 0u; result->top[i].logit = -1.0e300; result->top[i].checksum = 0ull; }
+    result->logits_min = 1.0e300;
+    result->logits_max = -1.0e300;
+    result->logits_checksum = 1469598103934665603ull;
+    double logits_sumsq = 0.0;
+    const uint32_t chunk_rows = 64u;
+    for (uint32_t first = 0; first < vocab; first += chunk_rows) {
+        uint32_t rows = vocab - first;
+        if (rows > chunk_rows) rows = chunk_rows;
+        uint64_t span = (uint64_t)rows * row_bytes;
+        unsigned char *raw = NULL;
+        if (!qx_read_raw_span(file, lm->offset + (uint64_t)first * row_bytes, span, &raw, err, err_len)) return 0;
+        for (uint32_t local = 0; local < rows; ++local) {
+            const unsigned char *row = raw + (uint64_t)local * row_bytes;
+            double logit = 0.0;
+            for (uint64_t block = 0; block < blocks_per_row; ++block) {
+                float weights[256];
+                if (!qx_decode_supported_block(lm->flags, row + block * block_size, weights)) {
+                    free(raw); qx_set_err(err, err_len, "Q6_K decode failed in final head"); return 0;
+                }
+                const float *input = normalized + block * 256u;
+                for (uint32_t i = 0; i < 256u; ++i) logit += (double)weights[i] * (double)input[i];
+            }
+            if (!isfinite(logit)) { free(raw); qx_set_err(err, err_len, "non-finite final logit"); return 0; }
+            float stored_logit = (float)logit;
+            result->logits_checksum = qx_fnv1a64_update(result->logits_checksum, &stored_logit, sizeof(stored_logit));
+            logits_sumsq += logit * logit;
+            if (logit < result->logits_min) result->logits_min = logit;
+            if (logit > result->logits_max) result->logits_max = logit;
+            uint32_t token = first + local;
+            for (uint32_t rank = 0; rank < top_n; ++rank) {
+                if (logit > result->top[rank].logit) {
+                    for (uint32_t move = top_n - 1u; move > rank; --move) result->top[move] = result->top[move - 1u];
+                    result->top[rank].token = token;
+                    result->top[rank].logit = logit;
+                    result->top[rank].checksum = qx_fnv1a64(row, row_bytes);
+                    break;
+                }
+            }
+        }
+        free(raw);
+    }
+    result->logits_computed = vocab;
+    result->logits_rms = sqrt(logits_sumsq / (double)vocab);
     return 1;
 }
 
@@ -3804,13 +3925,13 @@ static int qx_apply_real_moe_layer(
     return 1;
 }
 
-int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, double temperature, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
+    uint32_t requested_steps = steps;
     if (steps == 0) steps = 1;
     if (steps > 64) steps = 64;
     if (layers == 0) layers = 1;
-    if (ctx_tokens == 0) ctx_tokens = steps;
     if (top_k == 0) top_k = 1;
     if (top_k > 32) top_k = 32;
     if (residual_dims == 0) residual_dims = 64;
@@ -3824,29 +3945,59 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
         residual_dims = file.header.manifest.hidden;
         if (residual_dims == 0u || residual_dims > 2048u) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported full MoE hidden size"); return 0; }
     }
+    uint32_t requested_layers = layers;
     uint32_t manifest_layers = file.header.manifest.layers ? file.header.manifest.layers : layers;
     if (layers > manifest_layers) layers = manifest_layers;
-    uint32_t q_heads = file.header.manifest.q_heads ? file.header.manifest.q_heads : 32u;
-    uint32_t kv_heads = file.header.manifest.kv_heads ? file.header.manifest.kv_heads : 4u;
-    uint32_t head_dim = file.header.manifest.head_dim ? file.header.manifest.head_dim : 128u;
+    uint32_t q_heads = file.header.manifest.q_heads;
+    uint32_t kv_heads = file.header.manifest.kv_heads;
+    uint32_t head_dim = file.header.manifest.head_dim;
+    if (q_heads == 0u || kv_heads == 0u || head_dim == 0u || q_heads > UINT32_MAX / head_dim || kv_heads > UINT32_MAX / head_dim) {
+        qx_close_file(&file);
+        qx_set_err(err, err_len, "invalid attention dimensions");
+        return 0;
+    }
+    if (final_head && (!full_moe || requested_steps != 1u || requested_layers != manifest_layers || temperature != 0.0 || bench)) {
+        qx_close_file(&file);
+        qx_set_err(err, err_len, "--final-head requires --full-moe, one step, all manifest layers, temperature 0, and no --bench");
+        return 0;
+    }
+    if (final_head && (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE || manifest_layers != 48u || file.header.manifest.hidden != 2048u || file.header.manifest.vocab != 151936u || q_heads != 32u || kv_heads != 4u || head_dim != 128u)) {
+        qx_close_file(&file);
+        qx_set_err(err, err_len, "--final-head requires exact Qwen3-30B-A3B manifest dimensions");
+        return 0;
+    }
+    if (ctx_tokens == 0u || ctx_tokens > 4096u) {
+        qx_close_file(&file);
+        qx_set_err(err, err_len, "state loop context must be between 1 and 4096");
+        return 0;
+    }
+    if (logits_top_n == 0u) logits_top_n = 1u;
+    if (logits_top_n > 32u) logits_top_n = 32u;
     uint32_t vocab = file.header.manifest.vocab ? file.header.manifest.vocab : 151936u;
     if (prompt_token >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "prompt token out of range"); return 0; }
     if (steps > ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "steps exceed ctx"); return 0; }
+    if (kv_heads != 0u && (uint64_t)head_dim > UINT64_MAX / (uint64_t)kv_heads) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); return 0; }
     uint64_t values_per_k_or_v = (uint64_t)kv_heads * (uint64_t)head_dim;
     uint64_t bytes_per_k_or_v = 0;
     uint32_t bytes_per_value = 0;
     if (!qx_kv_bytes_for_format(kv_format, values_per_k_or_v, &bytes_per_k_or_v, &bytes_per_value)) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported kv format"); return 0; }
+    if (bytes_per_k_or_v > UINT64_MAX / 2ull || bytes_per_k_or_v > (uint64_t)SIZE_MAX / sizeof(float)) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); return 0; }
     uint64_t bytes_per_token_layer = bytes_per_k_or_v * 2ull;
+    if ((uint64_t)ctx_tokens > UINT64_MAX / bytes_per_token_layer) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); return 0; }
     uint64_t layer_stride = (uint64_t)ctx_tokens * bytes_per_token_layer;
+    if ((uint64_t)layers > UINT64_MAX / (uint64_t)ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); return 0; }
+    uint64_t cache_slots = (uint64_t)layers * (uint64_t)ctx_tokens;
+    if (cache_slots > UINT64_MAX / bytes_per_k_or_v || cache_slots > (uint64_t)SIZE_MAX / sizeof(float)) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); return 0; }
+    uint64_t persistent_cache_bytes = cache_slots * bytes_per_k_or_v;
+    if (persistent_cache_bytes > (uint64_t)SIZE_MAX) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); return 0; }
     unsigned char *kbuf = (unsigned char *)malloc((size_t)bytes_per_k_or_v);
     unsigned char *vbuf = (unsigned char *)malloc((size_t)bytes_per_k_or_v);
-    uint64_t persistent_cache_bytes = (uint64_t)layers * (uint64_t)ctx_tokens * bytes_per_k_or_v;
     unsigned char *kcache = causal_attention ? (unsigned char *)calloc(1, (size_t)persistent_cache_bytes) : NULL;
     unsigned char *vcache = causal_attention ? (unsigned char *)calloc(1, (size_t)persistent_cache_bytes) : NULL;
     float *kfloat = causal_attention ? (float *)malloc((size_t)bytes_per_k_or_v * sizeof(float)) : NULL;
     float *vfloat = causal_attention ? (float *)malloc((size_t)bytes_per_k_or_v * sizeof(float)) : NULL;
-    float *kscales = causal_attention ? (float *)calloc((size_t)layers * ctx_tokens, sizeof(float)) : NULL;
-    float *vscales = causal_attention ? (float *)calloc((size_t)layers * ctx_tokens, sizeof(float)) : NULL;
+    float *kscales = causal_attention ? (float *)calloc((size_t)cache_slots, sizeof(float)) : NULL;
+    float *vscales = causal_attention ? (float *)calloc((size_t)cache_slots, sizeof(float)) : NULL;
     float *residual_vec = residual_vector ? (float *)malloc((size_t)residual_dims * (full_moe ? 2u : 1u) * sizeof(float)) : NULL;
     if (!kbuf || !vbuf || (causal_attention && (!kcache || !vcache || !kfloat || !vfloat || !kscales || !vscales)) || (residual_vector && !residual_vec)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
     uint32_t current = prompt_token;
@@ -4100,11 +4251,24 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
             ++layers_run;
         }
         qx_top_token top[32];
+        qx_real_head_result head_result;
+        int head_ready = 0;
         const char *lm_name = NULL;
         int tied = 0;
         uint32_t scanned = 0;
-        if (!qx_collect_top_logits(&file, residual_probe, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
-        qx_sample_result sr = qx_sample_from_top(top, top_k, temperature, seed + step * 101u + current);
+        uint32_t sample_top_n = top_k;
+        if (final_head) {
+            float *normalized = residual_vec + residual_values;
+            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, &head_result, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
+            memcpy(top, head_result.top, (size_t)head_result.top_n * sizeof(qx_top_token));
+            sample_top_n = head_result.top_n;
+            lm_name = "output.weight";
+            scanned = head_result.logits_computed;
+            head_ready = 1;
+        } else if (!qx_collect_top_logits(&file, residual_probe, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) {
+            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+        }
+        qx_sample_result sr = qx_sample_from_top(top, sample_top_n, temperature, seed + step * 101u + current);
         char piece[8192];
         char fallback[64];
         const char *source = "fallback_token_id";
@@ -4123,6 +4287,23 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
         if (residual_carry && residual_vec && residual_values) {
             uint64_t after = qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float));
             fprintf(out, ", \"residual_checksum_after\": %llu", (unsigned long long)after);
+        }
+        if (head_ready) {
+            const float *normalized = residual_vec + residual_values;
+            fprintf(out, ", \"final_head\": {\"enabled\": true, \"norm_tensor\": \"output_norm.weight\", \"norm_ggml_type\": 0, \"norm_values\": %u, \"norm_checksum_verified\": true, \"norm_raw_checksum\": %llu, \"input_rms\": %.17g, \"normalized_l2\": %.17g, \"final_residual_checksum\": %llu, \"final_norm_checksum\": %llu, \"lm_head_tensor\": \"output.weight\", \"lm_head_ggml_type\": %u, \"lm_head_decoder\": \"Q6_K\", \"lm_head_checksum_verified\": true, \"lm_head_raw_checksum\": %llu, \"input_dims\": %u, \"vocab_size\": %u, \"logits_computed\": %u, \"full_vocabulary\": true, \"logits_checksum\": %llu, \"logits_min\": %.17g, \"logits_max\": %.17g, \"logits_rms\": %.17g, \"argmax_token\": %u, \"argmax_logit\": %.17g, \"top_tokens\": [",
+                head_result.input_dims, (unsigned long long)head_result.norm_raw_checksum, head_result.input_rms, head_result.normalized_l2,
+                (unsigned long long)head_result.residual_checksum, (unsigned long long)head_result.normalized_checksum,
+                head_result.lm_head_ggml_type, (unsigned long long)head_result.lm_head_raw_checksum, head_result.input_dims, head_result.vocab_size, head_result.logits_computed,
+                (unsigned long long)head_result.logits_checksum, head_result.logits_min, head_result.logits_max, head_result.logits_rms,
+                head_result.top[0].token, head_result.top[0].logit);
+            for (uint32_t rank = 0; rank < head_result.top_n; ++rank) {
+                fprintf(out, "%s{\"token\": %u, \"logit\": %.17g, \"row_checksum\": %llu}", rank ? ", " : "", head_result.top[rank].token, head_result.top[rank].logit, (unsigned long long)head_result.top[rank].checksum);
+            }
+            fprintf(out, "], \"final_residual_raw\": [");
+            for (uint32_t i = 0; i < residual_values; ++i) fprintf(out, "%s%.9g", i ? "," : "", residual_vec[i]);
+            fprintf(out, "], \"final_norm_raw\": [");
+            for (uint32_t i = 0; i < residual_values; ++i) fprintf(out, "%s%.9g", i ? "," : "", normalized[i]);
+            fprintf(out, "]}");
         }
         fprintf(out, ", \"selected_token\": %u, \"piece\": ", sr.selected_token);
         qx_json_print_escaped(out, piece);
@@ -4145,7 +4326,12 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
         double lps = (double)layers_run / elapsed;
         fprintf(out, "  \"bench\": {\"enabled\": true, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g, \"ms_per_token\": %.9g, \"layer_steps\": %llu, \"layer_steps_per_second\": %.9g},\n", elapsed, tps, mspt, (unsigned long long)layers_run, lps);
     }
-    fprintf(out, "  \"note\": \"%s\"\n}\n", rope_gqa_attention ? "partial Qwen3 attention: split-half RoPE on Q/K, GQA head mapping, per-head causal softmax, dynamically scaled INT8 KV, and output projection; dimensions and heads remain probe-limited" : (causal_attention ? "partial causal attention: Q/K/V projection, dynamically scaled INT8 KV persistence, stable causal softmax, context aggregation, and output projection; dimensions remain probe-limited" : "state loop skeleton: per-token per-layer KV append/checksum/readback plus sampled-token carry; residual math remains probe-level"));
+    const char *note = final_head
+        ? "one-token Qwen3 forward through 48 layers, final RMSNorm, and complete Q6_K vocabulary head; tokenizer parity and valid multi-token autoregression remain pending"
+        : (full_moe
+            ? "one-token Qwen3 transformer forward with real attention, dynamic INT8 KV, and top-8 MoE; final head disabled"
+            : (rope_gqa_attention ? "partial Qwen3 attention: split-half RoPE on Q/K, GQA head mapping, per-head causal softmax, dynamically scaled INT8 KV, and output projection; dimensions and heads remain probe-limited" : (causal_attention ? "partial causal attention: Q/K/V projection, dynamically scaled INT8 KV persistence, stable causal softmax, context aggregation, and output projection; dimensions remain probe-limited" : "state loop skeleton: per-token per-layer KV append/checksum/readback plus sampled-token carry; residual math remains probe-level")));
+    fprintf(out, "  \"note\": \"%s\"\n}\n", note);
     free(kbuf);
     free(vbuf);
     free(kcache);

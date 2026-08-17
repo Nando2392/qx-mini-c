@@ -3036,3 +3036,24 @@ Observed `(gate, up, down)` GGML type triples:
 ```
 
 Honesty boundary: this proves one-token state propagation and execution across all transformer layers. It does not include final RMSNorm, complete lm_head logits, reference-token equality or valid multi-token autoregression. The measured time is an instrumented probe duration, not token throughput.
+
+## 2026-08-17: final RMSNorm and complete Q6_K output head
+
+`state-loop-probe --full-moe --final-head` now consumes the real layer-47 residual, applies `output_norm.weight`, and computes all 151936 rows of `output.weight`.
+Both tensor checksums are verified fail-closed before normalization or head evaluation.
+
+```text
+output_norm: F32 [2048]
+output.weight: Q6_K type 14 [2048, 151936]
+logits computed: 151936
+argmax token: 1124
+argmax logit: 11.739152169035485
+final norm checksum: 1087599452263700755
+logits F32 checksum: 17094101101096419516
+logits RMS: 3.1986617278737643
+warm measured probe: ~8.35 s
+```
+
+The independent gate recomputes final RMSNorm in Python and all vocabulary logits with llama.cpp's official `dequantize_row_q6_K`. It compares the FNV checksum of all 151936 F32 logits, top-5 and argmax. It initially failed with QX argmax `112567` versus reference `1124`, exposing a real Q6_K layout bug. The QX decoder was corrected to the official two-128-value/four-32-value layout; the complete checksum, top-5 and argmax then matched.
+
+Honesty boundary: this validates the complete output head for QX's residual. It does not yet prove that every intermediate layer residual matches an external end-to-end Qwen3 implementation, and it does not implement tokenizer parity or valid multi-token autoregression.

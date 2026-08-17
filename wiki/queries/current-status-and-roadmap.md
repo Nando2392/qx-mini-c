@@ -17,6 +17,7 @@ confidence: high
 - Attention real completa de layer 0.
 - [[moe-forward]] real completo de layer 0.
 - State loop real 0→47 para un token: residual, attention normalizada, Q/K RMSNorm, RoPE/GQA, KV INT8 y MoE top-8 en las 48 capas.
+- [[final-output-head]] completo: final RMSNorm, 151936 logits Q6_K, top-N y argmax.
 - Golden independientes para embedding, IQ4_XS e IQ2_XS/IQ3_XXS representativos.
 - Smoke check y suite pytest.
 
@@ -24,19 +25,19 @@ confidence: high
 
 ```text
 state loop real layers 0–47: GREEN
-→ final norm
-→ lm_head completo
-→ tokenizer
-greedy tokens idénticos
+final norm + lm_head completo: GREEN
+→ tokenizer parity
+→ autoregresión multi-token correcta
+→ tokens greedy end-to-end idénticos
 ```
 
-`state-loop-probe --full-moe` ejecutó las 48 capas y verificó los 47 enlaces adyacentes de checksum. La medición de un token fue ~8.50 s; no incluye final norm, lm_head ni selección real del token siguiente.
+`state-loop-probe --full-moe --final-head` ejecutó las 48 capas, final RMSNorm y todas las 151936 filas de `output.weight`. El argmax `1124` coincide con el helper Q6_K oficial para el mismo residual QX.
 
 ## Después
 
-1. Implementar final RMSNorm y lm_head completo.
-2. Comparar logits y greedy token contra referencia externa.
-3. Implementar el ciclo autoregresivo multi-token.
+1. Cerrar tokenizer parity.
+2. Implementar el ciclo autoregresivo multi-token.
+3. Comparar tokens greedy end-to-end contra referencia externa.
 4. Aplicar [[optimization-priorities]] CPU.
 5. Medir baseline de inferencia real.
 6. Diseñar backend CUDA híbrido.

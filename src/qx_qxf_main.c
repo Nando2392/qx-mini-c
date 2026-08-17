@@ -39,7 +39,7 @@ static void usage(const char *argv0) {
         "  %s generate-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --top-k 5 --scan 64 --temperature 0 --seed 7\n"
         "  %s residual-vector-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --dims 64 --seed 7\n"
         "  %s projection-matvec-probe --in model.qxf --layer 0 --token-id 42 --rows 4 --dims 64 --kv int8 --seed 7\n"
-        "  %s state-loop-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --layers 2 --ctx 16 --kv int8 --top-k 5 --scan 64 --temperature 0 --seed 7 [--causal-attention|--rope-gqa-attention|--full-moe] [--bench]\n"
+        "  %s state-loop-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 1 --layers 48 --ctx 16 --kv int8 --temperature 0 --seed 7 --full-moe [--final-head --top-n 5] [--bench]\n"
         "  %s rope-gqa-golden-probe --tokens 2 --q-heads-run 9 --seed 7\n"
         "  qxqxf real-qkv-golden-probe --in model.qxf --layer 0 --token-a 42 --token-b 43 --q-heads-run 9 --seed 7\n"
         "  %s token-embedding --in model.qxf --token-id 42\n"
@@ -1218,6 +1218,7 @@ int main(int argc, char **argv) {
         int causal_attention = 0;
         int rope_gqa_attention = 0;
         int full_moe = 0;
+        int final_head = 0;
         int bench = 0;
         const char *norm = NULL;
         uint32_t residual_dims = 64;
@@ -1227,6 +1228,7 @@ int main(int argc, char **argv) {
         uint32_t ctx = 16;
         uint32_t top_k = 5;
         uint32_t scan = 64;
+        uint32_t logits_top_n = 5;
         double temperature = 0.0;
         uint32_t seed = 1;
         for (int i = 2; i < argc; i++) {
@@ -1247,18 +1249,20 @@ int main(int argc, char **argv) {
             else if (strcmp(argv[i], "--causal-attention") == 0) { causal_attention = 1; attention_output_vector = 1; delta_vectors = 1; numeric_deltas = 1; residual_carry = 1; residual_vector = 1; projection_matvec = 1; real_kv = 1; }
             else if (strcmp(argv[i], "--rope-gqa-attention") == 0) { rope_gqa_attention = 1; causal_attention = 1; attention_output_vector = 1; delta_vectors = 1; numeric_deltas = 1; residual_carry = 1; residual_vector = 1; projection_matvec = 1; real_kv = 1; }
             else if (strcmp(argv[i], "--full-moe") == 0) { full_moe = 1; rope_gqa_attention = 1; causal_attention = 1; attention_output_vector = 1; delta_vectors = 1; numeric_deltas = 1; residual_carry = 1; residual_vector = 1; projection_matvec = 1; real_kv = 1; residual_dims = 2048; }
+            else if (strcmp(argv[i], "--final-head") == 0) final_head = 1;
             else if (strcmp(argv[i], "--bench") == 0) bench = 1;
             else if (strcmp(argv[i], "--residual-dims") == 0 && i + 1 < argc) residual_dims = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--norm") == 0 && i + 1 < argc) norm = argv[++i];
             else if (strcmp(argv[i], "--top-k") == 0 && i + 1 < argc) top_k = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--scan") == 0 && i + 1 < argc) scan = (uint32_t)strtoul(argv[++i], NULL, 10);
+            else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) logits_top_n = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--temperature") == 0 && i + 1 < argc) temperature = strtod(argv[++i], NULL);
             else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = (uint32_t)strtoul(argv[++i], NULL, 10);
             else { usage(argv[0]); return 2; }
         }
         if (!in_path) { usage(argv[0]); return 2; }
         char err[256];
-        if (!qx_dump_state_loop_probe_summary(in_path, tokens_path, prompt_token, steps, layers, ctx, kv_format, real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector, causal_attention, rope_gqa_attention, full_moe, bench, residual_dims, norm, top_k, scan, temperature, seed, stdout, err, sizeof(err))) {
+        if (!qx_dump_state_loop_probe_summary(in_path, tokens_path, prompt_token, steps, layers, ctx, kv_format, real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector, causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm, top_k, scan, logits_top_n, temperature, seed, stdout, err, sizeof(err))) {
             fprintf(stderr, "state-loop-probe failed: %s\n", err);
             return 1;
         }

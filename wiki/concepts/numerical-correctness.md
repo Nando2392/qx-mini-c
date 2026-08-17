@@ -24,11 +24,13 @@ Cada slice se valida antes de combinarlo:
 8. Residual y FFN RMSNorm.
 9. Router/top-8.
 10. Expert gate/up/down y SwiGLU.
+11. [[final-output-head]] F32 + Q6_K sobre vocabulario completo.
 
 ## Referencias independientes
 
 - Python lee bytes QXF directamente para Q4_K e IQ4_XS.
 - Un helper enlazado con llama.cpp valida filas IQ2_XS/IQ3_XXS.
+- El mismo helper usa `dequantize_row_q6_K` oficial para recalcular las 151936 logits y el argmax.
 - El output C nunca se reutiliza como referencia esperada.
 
 ## Gates finales pendientes

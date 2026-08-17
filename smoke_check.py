@@ -69,7 +69,7 @@ def main() -> int:
     real_state = None
     if real_model.exists():
         real_golden = json.loads(run(EXE, "real-qkv-golden-probe", "--in", real_model, "--layer", 0, "--token-a", 42, "--token-b", 43, "--q-heads-run", 32, "--seed", 7, "--full-moe"))
-        real_state = json.loads(run(EXE, "state-loop-probe", "--in", real_model, "--prompt-token", 42, "--steps", 1, "--layers", 48, "--ctx", 4, "--kv", "int8", "--top-k", 3, "--scan", 64, "--temperature", 0, "--seed", 7, "--full-moe"))
+        real_state = json.loads(run(EXE, "state-loop-probe", "--in", real_model, "--prompt-token", 42, "--steps", 1, "--layers", 48, "--ctx", 4, "--kv", "int8", "--temperature", 0, "--seed", 7, "--full-moe", "--final-head", "--top-n", 5))
 
     layer0 = result["tokens"][0]["layers"][0]
     assert result["delta_source"] == "rope_gqa_attention"
@@ -119,6 +119,12 @@ def main() -> int:
         assert all(layer["qk_head_norm"] is True for layer in real_layers)
         assert all(layer["experts_run"] == 8 for layer in real_layers)
         assert all(real_layers[index - 1]["residual_output_checksum"] == real_layers[index]["residual_input_checksum"] for index in range(1, 48))
+        real_head = real_state["tokens"][0]["final_head"]
+        assert real_head["norm_tensor"] == "output_norm.weight"
+        assert real_head["lm_head_tensor"] == "output.weight"
+        assert real_head["lm_head_ggml_type"] == 14
+        assert real_head["logits_computed"] == 151936
+        assert real_head["argmax_token"] == real_head["top_tokens"][0]["token"]
 
     print(
         json.dumps(
@@ -135,6 +141,8 @@ def main() -> int:
                 "real_48_layer_state": real_state is not None,
                 "real_layers_run": real_state["layers_run"] if real_state is not None else 0,
                 "real_carry_links": 47 if real_state is not None else 0,
+                "real_final_head": real_state is not None,
+                "real_argmax_token": real_state["tokens"][0]["final_head"]["argmax_token"] if real_state is not None else None,
             }
         )
     )
