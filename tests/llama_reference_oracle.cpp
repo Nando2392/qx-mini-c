@@ -230,13 +230,19 @@ int main(int argc, char ** argv) {
     std::string logits_path = std::string(argv[2]) + "/logits.f32";
     const bool logits_written = logits && write_f32(logits_path, logits, static_cast<size_t>(n_vocab));
     ok = ok && logits_written;
+    float * result_norm = llama_get_embeddings(ctx);
+    std::string result_norm_path = std::string(argv[2]) + "/result_norm.f32";
+    const bool result_norm_written = result_norm && write_f32(result_norm_path, result_norm, static_cast<size_t>(n_embd));
+    ok = ok && result_norm_written;
     uint32_t argmax = 0;
     if (logits) {
         for (int32_t i = 1; i < n_vocab; ++i) if (logits[i] > logits[argmax]) argmax = static_cast<uint32_t>(i);
     }
-    std::printf("],\"logits\":{\"count\":%d,\"fnv1a64\":\"%" PRIu64 "\",\"argmax\":%u,\"written\":%s},\"internals\":[",
+    std::printf("],\"logits\":{\"count\":%d,\"fnv1a64\":\"%" PRIu64 "\",\"argmax\":%u,\"written\":%s},\"result_norm\":{\"count\":%d,\"fnv1a64\":\"%" PRIu64 "\",\"written\":%s},\"internals\":[",
                 n_vocab, logits ? fnv1a64(logits, static_cast<size_t>(n_vocab) * sizeof(float)) : 0,
-                argmax, logits_written ? "true" : "false");
+                argmax, logits_written ? "true" : "false", n_embd,
+                result_norm ? fnv1a64(result_norm, static_cast<size_t>(n_embd) * sizeof(float)) : 0,
+                result_norm_written ? "true" : "false");
     size_t internals_captured = 0;
     if (capture_internals) {
         for (size_t i = 0; i < sizeof(capture_state.records) / sizeof(capture_state.records[0]); ++i) {

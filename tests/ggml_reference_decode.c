@@ -19,6 +19,17 @@ static int parse_u64(const char *text, uint64_t *value) {
 
 int main(int argc, char **argv) {
     _setmode(_fileno(stdout), _O_BINARY);
+    if (argc == 3 && strcmp(argv[1], "q8_k_quantize") == 0) {
+        FILE *input = fopen(argv[2], "rb");
+        if (!input) return 3;
+        float activation[QK_K];
+        if (fread(activation, sizeof(float), QK_K, input) != QK_K) { fclose(input); return 3; }
+        if (fgetc(input) != EOF) { fclose(input); return 3; }
+        fclose(input);
+        block_q8_K block;
+        quantize_row_q8_K_ref(activation, &block, QK_K);
+        return fwrite(&block, sizeof(block), 1, stdout) == 1 ? 0 : 5;
+    }
     if (argc == 6 && strcmp(argv[1], "q6_k_logits") == 0) {
         uint64_t offset = 0, rows = 0;
         if (!parse_u64(argv[3], &offset) || !parse_u64(argv[4], &rows) || !rows || rows > UINT32_MAX) return 2;
@@ -44,7 +55,8 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc != 5) {
-        fprintf(stderr, "usage: ggml_reference_decode <iq2_xs|iq3_xxs> <file> <offset> <blocks>\n"
+        fprintf(stderr, "usage: ggml_reference_decode q8_k_quantize <activation.f32>\n"
+                        "   or: ggml_reference_decode <iq2_xs|iq3_xxs> <file> <offset> <blocks>\n"
                         "   or: ggml_reference_decode q6_k_logits <file> <offset> <rows> <activation.f32>\n");
         return 2;
     }

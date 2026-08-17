@@ -27,6 +27,8 @@ venv/
 *.key
 
 # Obsidian local workspace state
+.obsidian/
+wiki/.obsidian/
 wiki/.obsidian/workspace*.json
 wiki/.obsidian/cache/
 wiki/.trash/

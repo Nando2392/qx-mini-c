@@ -1,0 +1,2 @@
+# Optional dependency for scripts/q8k_perf_experiment.py
+psutil==7.2.2

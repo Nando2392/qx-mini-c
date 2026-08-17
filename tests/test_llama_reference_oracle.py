@@ -49,6 +49,8 @@ def test_llama_reference_oracle_rebuilds_and_runs_standalone(tmp_path):
         assert payload["n_vocab"] == 151936
         assert payload["logits"]["argmax"] == 1124
         assert payload["internals_captured"] == 6
+        assert payload["result_norm"]["written"] is True
+        assert payload["result_norm"]["count"] == 2048
         assert (output / "layer-0.f32").stat().st_size == 2048 * 4
         assert (output / "layer-1.f32").stat().st_size == 2048 * 4
         assert (output / "logits.f32").stat().st_size == 151936 * 4
@@ -57,3 +59,4 @@ def test_llama_reference_oracle_rebuilds_and_runs_standalone(tmp_path):
         assert (output / "Vcur-0.f32").stat().st_size == 512 * 4
         assert (output / "kqv_out-0.f32").stat().st_size == 4096 * 4
         assert (output / "l_out-47.f32").stat().st_size == 2048 * 4
+        assert (output / "result_norm.f32").stat().st_size == 2048 * 4

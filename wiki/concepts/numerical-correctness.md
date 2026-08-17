@@ -37,7 +37,7 @@ Cada slice se valida antes de combinarlo:
 
 ```text
 tokens greedy multi-token idénticos
-decisión explícita sobre activaciones F32 QX versus Q8_K ggml
+bisect de activaciones/kernels MoE después de atención Q8_K compatible
 Δppl KV INT8 <0.5%
 contexto 4K sin fugas
 RSS ±5%
@@ -59,5 +59,17 @@ El residual final pre-head también se mide directamente: F32/F16 `max_abs=1099.
 El oracle secuencial también refuta paridad greedy a dos tokens. Para `[42]`, llama produce `[1124, 50853]` y QX `[1124, 11287]`. Para `Hello!` (`[9707, 0]`), llama F16/Q8_0 produce `[358, 1184]`/`[358, 614]`, mientras QX produce `[81379, 44707]`.
 
 Este resultado es una refutación reproducible de paridad exacta, no un PASS numérico.
+
+## Gate Q8_K compatible
+
+**Implementado y medido:** `q8_k_compat` reproduce el temporal CPU de ggml para proyecciones IQ4_XS y mantiene fallback F32 explícito para Q5_K/Q6_K. F32 continúa siendo el default.
+
+La serialización QX coincide byte por byte con `quantize_row_q8_K_ref` del oracle fijado para cuatro distribuciones: mixed, todo positivo, todo negativo y extremos alternos ±1. El gate cubre signo de escala, redondeo, clamp, `qs` y `bsums`; no se infiere equivalencia sólo de logits.
+
+En `Vcur-0`, el modo reduce max-abs de `0.000305031` a `7.45e-9` y RMSE de `8.316e-5` a `1.158e-9`. En `kqv_out-0`, max-abs baja de `0.000305337` a `1.486e-5`. La mejora no cierra el forward: la siguiente diferencia material aparece en `ffn_moe_out-0`; logits Q8_K/F32-KV mantienen max-abs `9.09348`, RMSE `1.47465`, cosine `0.875527` y argmax `1124`.
+
+El final norm también se captura desde la API pública de embeddings del oracle. Q8_K/F32-KV frente a llama F16 mantiene max-abs `8.71117`, RMSE `1.07502`, cosine `0.809426`; por tanto, la normalización final no recupera la divergencia acumulada.
+
+Las secuencias greedy siguen divergentes. La decisión, matriz completa, índices máximos y trade-offs están en [[f32-vs-q8k-activation]].
 
 La política de investigación está en [[auto-research-loop]] y el avance en [[current-status-and-roadmap]].

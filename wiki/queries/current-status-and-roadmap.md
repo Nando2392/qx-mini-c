@@ -32,12 +32,16 @@ final norm + lm_head completo: GREEN
 autoregresión multi-token correcta: GREEN
 tokenizer parity para prompts fijos: GREEN
 QXF corruption/legacy-clamp gate: GREEN
-→ decidir activación F32 QX versus compatibilidad Q8_K ggml
+modo Q8_K CPU compatible: GREEN, opt-in
+F32 continúa default: DECIDIDO
+→ bisect MoE desde ffn_moe_out-0
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
 
 El gate [[llama-cpp-parity]] aisló layer 0, encontró y corrigió la falta de renormalización de pesos top-8. Tras el fix, layer-1 cosine sube a `0.999961` (F32/F16), pero exactitud residual/logit queda refutada. La primera diferencia aparece en `Vcur`: QX usa activación F32 y ggml usa activación temporal Q8_K para IQ4_XS.
+
+El gate [[f32-vs-q8k-activation]] implementó `q8_k_compat` como modo CPU explícito. En `Vcur-0` reduce max-abs de `3.05e-4` a `7.45e-9`, usa 4672 bytes de workspace y fue ~7.4% más rápido en la mediana del probe. No logra paridad de logits ni secuencia; F32 permanece default y la próxima divergencia a bisectar es `ffn_moe_out-0`.
 
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 11287`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
@@ -45,11 +49,11 @@ La comparación externa secuencial está cerrada como refutación: llama F16/Q8_
 
 ## Después
 
-1. Decidir si añadir un modo de activación Q8_K compatible con ggml o mantener F32 explícitamente no bit-compatible.
+1. Bisectar gate/up, SwiGLU y down de [[moe-forward]] desde `ffn_moe_out-0`.
 2. Ampliar tokenizer a cobertura Unicode/chat-template exhaustiva.
-3. Aplicar [[optimization-priorities]] CPU.
+3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 4. Medir baseline de inferencia real.
-5. Diseñar backend CUDA híbrido.
+5. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
 6. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos

@@ -112,3 +112,13 @@
 - Suite local final: `83 passed`; smoke y wiki lint: PASS; revisión independiente focal: `11 passed`, sin blockers.
 - Publicado commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`; CI `32064105028`: PASS.
 - Issue GitHub #7 cerrado como validación completada: paridad residual, de logits y de secuencia refutada de forma reproducible.
+
+## [2026-08-17] decision | F32 default y Q8_K compatible opt-in
+
+- Añadido `q8_k_compat`: cuantización temporal block Q8_K y dot IQ4_XS × Q8_K con workspace reutilizable de 4672 bytes; Q5_K/Q6_K conservan fallback F32 explícito.
+- `Vcur-0` mejora de max-abs `3.05e-4` a `7.45e-9`; `kqv_out-0` mejora a `1.49e-5`.
+- La siguiente divergencia aparece en `ffn_moe_out-0`; logits y greedy continúan sin paridad.
+- Oracle ampliado con `result_norm.f32`: Q8_K/F32-KV mantiene max-abs `8.71117`, RMSE `1.07502`, cosine `0.809426`.
+- Gate byte-for-byte contra `quantize_row_q8_K_ref`: mixed/positive/negative/edge PASS; metadata de kernel refleja ejecución real.
+- Benchmark un token/48 capas/KV INT8: mediana F32 `8.22912 s`, Q8_K `7.62247 s`, cinco repeticiones; mismo peak RSS observado.
+- Decisión: F32 sigue default; Q8_K queda modo compatibilidad/diagnóstico. Próximo gate: bisect MoE.

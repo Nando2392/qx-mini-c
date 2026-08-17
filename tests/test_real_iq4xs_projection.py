@@ -188,6 +188,7 @@ def test_real_state_loop_uses_all_heads_and_full_output_projection():
         pytest.skip("real Qwen runtime fixtures are not available")
     payload = json.loads(subprocess.check_output([str(EXE), "state-loop-probe", "--in", str(MODEL), "--tokens", str(tokens), "--prompt-token", "42", "--steps", "1", "--layers", "1", "--ctx", "4", "--kv", "int8", "--top-k", "3", "--scan", "64", "--temperature", "0", "--seed", "7", "--rope-gqa-attention", "--residual-dims", "2048", "--norm", "blk.0.attn_norm.weight"], text=True))
     layer = payload["tokens"][0]["layers"][0]
+    assert {layer["q_ggml_type"], layer["k_ggml_type"], layer["v_ggml_type"], layer["output_ggml_type"]} == {23}
     assert layer["q_heads_run"] == 32
     assert layer["kv_heads_touched"] == 4
     assert layer["output_projection_input_dims"] == 4096
@@ -378,6 +379,45 @@ def test_state_loop_supports_diagnostic_f32_kv(tmp_path):
     assert (dump_dir / "step-0-layer-0-v-cur.f32").stat().st_size == 512 * 4
     assert (dump_dir / "step-0-layer-0-kqv-out.f32").stat().st_size == 4096 * 4
     assert (dump_dir / "step-0-layer-0-ffn-inp.f32").stat().st_size == 2048 * 4
+
+
+def test_q8_k_compat_preserves_explicit_f32_fallback_for_non_iq4_xs_layers():
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    payload = json.loads(
+        subprocess.check_output(
+            [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "2", "--ctx", "4", "--kv", "f32", "--activation", "q8_k_compat", "--temperature", "0", "--seed", "7", "--full-moe"],
+            text=True,
+        )
+    )
+    assert payload["activation_format"] == "q8_k_compat"
+    assert payload["projection_kernel"] == "iq4_xs_q8_k_with_f32_fallback"
+    assert payload["layers_run"] == 2
+    assert payload["tokens"][0]["layers"][1]["q_ggml_type"] == 13
+
+
+def test_state_loop_exposes_explicit_q8_k_compat_activation_mode(tmp_path):
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    dump_dir = tmp_path / "q8-k-residuals"
+    dump_dir.mkdir()
+    payload = json.loads(
+        subprocess.check_output(
+            [
+                str(EXE), "state-loop-probe", "--in", str(MODEL),
+                "--prompt-token", "42", "--steps", "1", "--layers", "1",
+                "--ctx", "4", "--kv", "f32", "--activation", "q8_k_compat",
+                "--temperature", "0", "--seed", "7", "--full-moe",
+                "--dump-residuals", str(dump_dir),
+            ],
+            text=True,
+        )
+    )
+    assert payload["activation_format"] == "q8_k_compat"
+    assert payload["projection_kernel"] == "iq4_xs_q8_k"
+    assert payload["activation_workspace_bytes"] == 16 * 292
+    assert (dump_dir / "step-0-layer-0-v-cur.f32").stat().st_size == 512 * 4
+
 
 
 

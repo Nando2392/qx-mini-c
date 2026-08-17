@@ -44,5 +44,6 @@ down: [768, 2048, 128] IQ3_XXS
 - Los 47 enlaces adyacentes cumplieron `residual_output_checksum[N] == residual_input_checksum[N+1]`.
 - Validado externamente: el fix de routing redujo el error de entrada de layer 1 desde max-abs aproximado `1.08` hasta `0.00589` en F32/F16; la paridad exacta restante está refutada por diferencias de contrato numérico posteriores.
 - Pendiente: golden end-to-end de todos los tipos quant multi-layer.
+- El modo attention `q8_k_compat` deja `ffn_inp-0` casi idéntico al oracle (max-abs `4.89e-5`), pero `ffn_moe_out-0` vuelve a divergir (max-abs `0.00792`). El próximo bisect debe separar gate/up, SwiGLU y down por experto; no atribuir esta diferencia al KV. Véase [[f32-vs-q8k-activation]].
 
 Gates: [[numerical-correctness]]. Rendimiento: [[performance-model]].

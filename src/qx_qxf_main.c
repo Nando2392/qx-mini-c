@@ -40,12 +40,13 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-inspect --tokenizer model.qxt\n"
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
-        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --temperature 0 --seed 7 --full-moe --final-head [--parse-special] [--top-n 5]\n"
+        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe --final-head [--parse-special] [--top-n 5]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
         "  %s generate-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --top-k 5 --scan 64 --temperature 0 --seed 7\n"
         "  %s residual-vector-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --dims 64 --seed 7\n"
         "  %s projection-matvec-probe --in model.qxf --layer 0 --token-id 42 --rows 4 --dims 64 --kv int8 --seed 7\n"
-        "  %s state-loop-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 1 --layers 48 --ctx 16 --kv int8 --temperature 0 --seed 7 --full-moe [--final-head --top-n 5] [--dump-residuals dir] [--bench]\n"
+        "  qxqxf q8-k-activation-probe --values 256 [--inject zero|nan|inf]\n"
+        "  %s state-loop-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 1 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe [--final-head --top-n 5] [--dump-residuals dir] [--bench]\n"
         "  %s rope-gqa-golden-probe --tokens 2 --q-heads-run 9 --seed 7\n"
         "  qxqxf real-qkv-golden-probe --in model.qxf --layer 0 --token-a 42 --token-b 43 --q-heads-run 9 --seed 7\n"
         "  %s token-embedding --in model.qxf --token-id 42\n"
@@ -214,6 +215,32 @@ static void qx_cli_json_string(const unsigned char *text, uint32_t length) {
 int main(int argc, char **argv) {
     if (argc < 2) { usage(argv[0]); return 2; }
 
+    if (strcmp(argv[1], "q8-k-activation-probe") == 0) {
+        uint32_t values = 0u;
+        int values_seen = 0;
+        const char *inject = "none";
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--values") == 0 && i + 1 < argc) {
+                errno = 0;
+                char *end = NULL;
+                unsigned long long parsed = strtoull(argv[++i], &end, 10);
+                if (errno != 0 || !end || *end != '\0' || parsed > UINT32_MAX) {
+                    fprintf(stderr, "q8-k-activation-probe failed: invalid --values\n"); return 2;
+                }
+                values = (uint32_t)parsed;
+                values_seen = 1;
+            }
+            else if (strcmp(argv[i], "--inject") == 0 && i + 1 < argc) inject = argv[++i];
+            else { usage(argv[0]); return 2; }
+        }
+        if (!values_seen) { fprintf(stderr, "q8-k-activation-probe failed: invalid --values\n"); return 2; }
+        char err[256];
+        if (!qx_dump_q8_k_activation_probe_summary(values, inject, stdout, err, sizeof(err))) {
+            fprintf(stderr, "q8-k-activation-probe failed: %s\n", err); return 1;
+        }
+        return 0;
+    }
+
     if (strcmp(argv[1], "tokenizer-inspect") == 0) {
         const char *tokenizer_path = NULL;
         for (int i = 2; i < argc; ++i) {
@@ -302,6 +329,7 @@ int main(int argc, char **argv) {
         const char *tokenizer_path = NULL;
         const char *text_path = NULL;
         const char *kv_format = "int8";
+        const char *activation_format = "f32";
         uint32_t generation_steps = 0u;
         uint32_t layers = 48u;
         uint32_t ctx = 16u;
@@ -319,6 +347,7 @@ int main(int argc, char **argv) {
             else if (strcmp(argv[i], "--layers") == 0 && i + 1 < argc) layers = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--ctx") == 0 && i + 1 < argc) ctx = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--kv") == 0 && i + 1 < argc) kv_format = argv[++i];
+            else if (strcmp(argv[i], "--activation") == 0 && i + 1 < argc) activation_format = argv[++i];
             else if (strcmp(argv[i], "--temperature") == 0 && i + 1 < argc) temperature = strtod(argv[++i], NULL);
             else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) top_n = (uint32_t)strtoul(argv[++i], NULL, 10);
@@ -352,7 +381,7 @@ int main(int argc, char **argv) {
         }
         qx_tokenizer_free(&tokenizer);
         free(input);
-        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format,
+        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, full_moe, final_head, 0, 2048u, NULL, 8u, 151936u,
                 top_n, temperature, seed, NULL, stdout, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;
@@ -1413,6 +1442,7 @@ int main(int argc, char **argv) {
         const char *in_path = NULL;
         const char *tokens_path = NULL;
         const char *kv_format = "int8";
+        const char *activation_format = "f32";
         int real_kv = 0;
         int projection_matvec = 0;
         int residual_vector = 0;
@@ -1445,6 +1475,7 @@ int main(int argc, char **argv) {
             else if (strcmp(argv[i], "--layers") == 0 && i + 1 < argc) layers = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--ctx") == 0 && i + 1 < argc) ctx = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--kv") == 0 && i + 1 < argc) kv_format = argv[++i];
+            else if (strcmp(argv[i], "--activation") == 0 && i + 1 < argc) activation_format = argv[++i];
             else if (strcmp(argv[i], "--real-kv") == 0) real_kv = 1;
             else if (strcmp(argv[i], "--projection-matvec") == 0) { projection_matvec = 1; real_kv = 1; }
             else if (strcmp(argv[i], "--residual-vector") == 0) { residual_vector = 1; projection_matvec = 1; real_kv = 1; }
@@ -1469,7 +1500,7 @@ int main(int argc, char **argv) {
         }
         if (!in_path) { usage(argv[0]); return 2; }
         char err[256];
-        if (!qx_dump_state_loop_probe_summary(in_path, tokens_path, prompt_token, steps, layers, ctx, kv_format, real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector, causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm, top_k, scan, logits_top_n, temperature, seed, residual_dump_dir, stdout, err, sizeof(err))) {
+        if (!qx_dump_state_loop_probe_summary(in_path, tokens_path, prompt_token, steps, layers, ctx, kv_format, activation_format, real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector, causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm, top_k, scan, logits_top_n, temperature, seed, residual_dump_dir, stdout, err, sizeof(err))) {
             fprintf(stderr, "state-loop-probe failed: %s\n", err);
             return 1;
         }

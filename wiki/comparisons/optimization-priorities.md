@@ -29,4 +29,6 @@ confidence: medium
 - KV 2-bit a contexto 4K: ahorro limitado frente al gap escalar actual.
 - Persistent kernels/PTX antes de Nsight.
 
+El kernel scalar `IQ4_XS × Q8_K` ya existe como modo `q8_k_compat` y fue más rápido en el probe de 48 capas, pero no pasa a default: no cerró logits ni greedy y el siguiente error aparece en MoE. Antes de SIMD/threading, preservar el A/B con F32 y ampliar el bisect de expertos. Véase [[f32-vs-q8k-activation]].
+
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].
