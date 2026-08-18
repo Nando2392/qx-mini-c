@@ -3100,17 +3100,28 @@ typedef struct {
     uint64_t logits_checksum;
     uint64_t norm_raw_checksum;
     uint64_t lm_head_raw_checksum;
+    const char *lm_head_kernel;
+    uint32_t activation_quantizations;
     qx_top_token top[32];
 } qx_real_head_result;
 
+static int qx_compute_real_final_head_q8_k(qx_file *file, const qx_tensor_dir_entry *lm,
+        const float *normalized, uint32_t dims, uint64_t row_bytes, float *logits_out,
+        qx_real_head_result *result, char *err, uint64_t err_len);
+
 static int qx_compute_real_final_head(qx_file *file, const float *residual, float *normalized,
-                                      uint32_t dims, uint32_t top_n, float *logits_out, uint32_t logits_capacity, qx_real_head_result *result,
+                                      uint32_t dims, uint32_t top_n, const char *activation_mode,
+                                      float *logits_out, uint32_t logits_capacity, qx_real_head_result *result,
                                       char *err, uint64_t err_len) {
     if (!file || !residual || !normalized || !dims || !result) {
         qx_set_err(err, err_len, "invalid final head argument"); return 0;
     }
     if (top_n == 0u) top_n = 1u;
     if (top_n > 32u) top_n = 32u;
+    int use_q8_k = activation_mode && strcmp(activation_mode, "q8_k_compat") == 0;
+    if (!use_q8_k && (!activation_mode || strcmp(activation_mode, "f32") != 0)) {
+        qx_set_err(err, err_len, "unsupported final head activation mode"); return 0;
+    }
     const qx_tensor_dir_entry *norm = qx_find_tensor(file, "output_norm.weight");
     const qx_tensor_dir_entry *lm = qx_find_tensor(file, "output.weight");
     if (!norm || norm->rank != 1u || norm->dims[0] != dims || norm->flags != 0u || norm->byte_size != (uint64_t)dims * 4ull) {
@@ -3141,6 +3152,8 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     result->vocab_size = vocab;
     result->top_n = top_n;
     result->lm_head_ggml_type = lm->flags;
+    result->lm_head_kernel = use_q8_k ? "q6_k_q8_k" : "dequant_f32";
+    result->activation_quantizations = use_q8_k ? 1u : 0u;
     result->norm_raw_checksum = norm->checksum;
     result->lm_head_raw_checksum = lm->checksum;
     result->residual_checksum = qx_fnv1a64(residual, (uint64_t)dims * sizeof(float));
@@ -3154,6 +3167,10 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     result->logits_max = -1.0e300;
     result->logits_checksum = 1469598103934665603ull;
     double logits_sumsq = 0.0;
+    if (use_q8_k) {
+        return qx_compute_real_final_head_q8_k(file, lm, normalized, dims, row_bytes,
+            logits_out, result, err, err_len);
+    }
     const uint32_t chunk_rows = 64u;
     for (uint32_t first = 0; first < vocab; first += chunk_rows) {
         uint32_t rows = vocab - first;
@@ -3478,6 +3495,47 @@ static float qx_dot_q6_k_q8_k(const unsigned char *row, const qx_projection_work
     float total = 0.0f;
     for (uint32_t lane = 0; lane < 8u; ++lane) total += sums[lane];
     return total;
+}
+
+static int qx_compute_real_final_head_q8_k(qx_file *file, const qx_tensor_dir_entry *lm,
+        const float *normalized, uint32_t dims, uint64_t row_bytes, float *logits_out,
+        qx_real_head_result *result, char *err, uint64_t err_len) {
+    qx_projection_workspace workspace = {0};
+    if (!qx_quantize_q8_k(normalized, dims, &workspace, err, err_len)) return 0;
+    double logits_sumsq = 0.0;
+    const uint32_t chunk_rows = 64u;
+    for (uint32_t first = 0; first < result->vocab_size; first += chunk_rows) {
+        uint32_t rows = result->vocab_size - first;
+        if (rows > chunk_rows) rows = chunk_rows;
+        if ((uint64_t)rows > UINT64_MAX / row_bytes) { qx_set_err(err, err_len, "final head chunk size overflow"); return 0; }
+        uint64_t span = (uint64_t)rows * row_bytes;
+        unsigned char *raw = NULL;
+        if (!qx_read_raw_span(file, lm->offset + (uint64_t)first * row_bytes, span, &raw, err, err_len)) return 0;
+        for (uint32_t local = 0; local < rows; ++local) {
+            const unsigned char *row = raw + (uint64_t)local * row_bytes;
+            float stored_logit = qx_dot_q6_k_q8_k(row, &workspace);
+            if (!isfinite(stored_logit)) { free(raw); qx_set_err(err, err_len, "non-finite final Q6_K Q8_K logit"); return 0; }
+            if (logits_out) logits_out[first + local] = stored_logit;
+            result->logits_checksum = qx_fnv1a64_update(result->logits_checksum, &stored_logit, sizeof(stored_logit));
+            logits_sumsq += (double)stored_logit * (double)stored_logit;
+            if (stored_logit < result->logits_min) result->logits_min = stored_logit;
+            if (stored_logit > result->logits_max) result->logits_max = stored_logit;
+            uint32_t token = first + local;
+            for (uint32_t rank = 0; rank < result->top_n; ++rank) {
+                if ((double)stored_logit > result->top[rank].logit) {
+                    for (uint32_t move = result->top_n - 1u; move > rank; --move) result->top[move] = result->top[move - 1u];
+                    result->top[rank].token = token;
+                    result->top[rank].logit = stored_logit;
+                    result->top[rank].checksum = qx_fnv1a64(row, row_bytes);
+                    break;
+                }
+            }
+        }
+        free(raw);
+    }
+    result->logits_computed = result->vocab_size;
+    result->logits_rms = sqrt(logits_sumsq / (double)result->vocab_size);
+    return 1;
 }
 
 static float qx_dot_iq2_xs_q8_k(const unsigned char *row, const qx_projection_workspace *workspace) {
@@ -4666,6 +4724,73 @@ static int qx_read_exact_f32_sidecar(const char *path, float *values, uint32_t c
     return 1;
 }
 
+static int qx_write_final_head_sidecar(const char *dir, const char *name, const float *values,
+        uint32_t count, char *err, uint64_t err_len) {
+    if (!dir || !*dir || !name || !*name || !values || count == 0u ||
+            (uint64_t)count > (uint64_t)SIZE_MAX / sizeof(float)) {
+        qx_set_err(err, err_len, "invalid final head sidecar argument"); return 0;
+    }
+    char path[1024];
+    int length = snprintf(path, sizeof(path), "%s/%s.f32", dir, name);
+    if (length < 0 || (size_t)length >= sizeof(path)) { qx_set_err(err, err_len, "final head sidecar path too long"); return 0; }
+    FILE *fp = fopen(path, "wb");
+    if (!fp) { qx_set_err(err, err_len, "cannot open final head sidecar"); return 0; }
+    int ok = fwrite(values, sizeof(float), count, fp) == count;
+    if (fclose(fp) != 0) ok = 0;
+    if (!ok) { remove(path); qx_set_err(err, err_len, "cannot write final head sidecar"); return 0; }
+    return 1;
+}
+
+static void qx_remove_final_head_sidecar(const char *dir, const char *name) {
+    char path[1024];
+    int length = snprintf(path, sizeof(path), "%s/%s.f32", dir, name);
+    if (length >= 0 && (size_t)length < sizeof(path)) remove(path);
+}
+
+int qx_dump_final_head_probe_summary(const char *path, const char *residual_path,
+        const char *output_dir, const char *activation_mode, uint32_t top_n,
+        FILE *out, char *err, uint64_t err_len) {
+    int use_q8_k = activation_mode && strcmp(activation_mode, "q8_k_compat") == 0;
+    if (!path || !residual_path || !output_dir || !out || top_n == 0u || top_n > 32u ||
+            (!use_q8_k && (!activation_mode || strcmp(activation_mode, "f32") != 0))) {
+        qx_set_err(err, err_len, "invalid final head probe argument or activation mode"); return 0;
+    }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    uint32_t hidden = file.header.manifest.hidden;
+    uint32_t vocab = file.header.manifest.vocab;
+    if (hidden == 0u || hidden > QX_Q8_K_VALUES * QX_Q8_K_MAX_BLOCKS || vocab == 0u ||
+            (uint64_t)hidden > (uint64_t)SIZE_MAX / (2u * sizeof(float)) ||
+            (uint64_t)vocab > (uint64_t)SIZE_MAX / sizeof(float)) {
+        qx_close_file(&file); qx_set_err(err, err_len, "unsupported final head probe dimensions"); return 0;
+    }
+    float *vectors = (float *)malloc((size_t)hidden * 2u * sizeof(float));
+    float *logits = (float *)malloc((size_t)vocab * sizeof(float));
+    if (!vectors || !logits) { free(vectors); free(logits); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    float *residual = vectors;
+    float *normalized = vectors + hidden;
+    qx_real_head_result result;
+    int ok = qx_read_exact_f32_sidecar(residual_path, residual, hidden, err, err_len) &&
+        qx_compute_real_final_head(&file, residual, normalized, hidden, top_n, activation_mode,
+            logits, vocab, &result, err, err_len);
+    if (ok && !qx_write_final_head_sidecar(output_dir, "final-norm", normalized, hidden, err, err_len)) ok = 0;
+    if (ok && !qx_write_final_head_sidecar(output_dir, "logits", logits, vocab, err, err_len)) {
+        qx_remove_final_head_sidecar(output_dir, "final-norm");
+        ok = 0;
+    }
+    if (!ok) { free(vectors); free(logits); qx_close_file(&file); return 0; }
+    fprintf(out, "{\"probe\":\"final_head\",\"input_dims\":%u,\"vocab_size\":%u,"
+        "\"activation_mode\":\"%s\",\"lm_head_kernel\":\"%s\",\"activation_quantizations\":%u,"
+        "\"input_rms\":%.17g,\"normalized_l2\":%.17g,\"residual_checksum\":%llu,"
+        "\"normalized_checksum\":%llu,\"logits_checksum\":%llu,\"argmax_token\":%u,"
+        "\"argmax_logit\":%.17g}\n",
+        result.input_dims, result.vocab_size, activation_mode, result.lm_head_kernel,
+        result.activation_quantizations, result.input_rms, result.normalized_l2,
+        (unsigned long long)result.residual_checksum, (unsigned long long)result.normalized_checksum,
+        (unsigned long long)result.logits_checksum, result.top[0].token, result.top[0].logit);
+    free(vectors); free(logits); qx_close_file(&file); return 1;
+}
+
 int qx_dump_expert_q8_k_dot_probe_summary(const char *path, const char *tensor_name, uint32_t expert,
         uint32_t row, const char *activation_path, FILE *out, char *err, uint64_t err_len) {
     if (!path || !tensor_name || !activation_path || !out) { qx_set_err(err, err_len, "invalid expert Q8_K dot probe argument"); return 0; }
@@ -5454,7 +5579,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             float *normalized = residual_vec + residual_values;
             float *logits_dump = residual_dump_dir && *residual_dump_dir ? (float *)malloc((size_t)file.header.manifest.vocab * sizeof(float)) : NULL;
             if (residual_dump_dir && *residual_dump_dir && !logits_dump) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
-            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
+            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
             if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
             free(logits_dump);
             memcpy(top, head_result.top, (size_t)head_result.top_n * sizeof(qx_top_token));
@@ -5488,10 +5613,10 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         }
         if (head_ready) {
             const float *normalized = residual_vec + residual_values;
-            fprintf(out, ", \"final_head\": {\"enabled\": true, \"norm_tensor\": \"output_norm.weight\", \"norm_ggml_type\": 0, \"norm_values\": %u, \"norm_checksum_verified\": true, \"norm_raw_checksum\": %llu, \"input_rms\": %.17g, \"normalized_l2\": %.17g, \"final_residual_checksum\": %llu, \"final_norm_checksum\": %llu, \"lm_head_tensor\": \"output.weight\", \"lm_head_ggml_type\": %u, \"lm_head_decoder\": \"Q6_K\", \"lm_head_checksum_verified\": true, \"lm_head_raw_checksum\": %llu, \"input_dims\": %u, \"vocab_size\": %u, \"logits_computed\": %u, \"full_vocabulary\": true, \"logits_checksum\": %llu, \"logits_min\": %.17g, \"logits_max\": %.17g, \"logits_rms\": %.17g, \"argmax_token\": %u, \"argmax_logit\": %.17g, \"top_tokens\": [",
+            fprintf(out, ", \"final_head\": {\"enabled\": true, \"norm_tensor\": \"output_norm.weight\", \"norm_ggml_type\": 0, \"norm_values\": %u, \"norm_checksum_verified\": true, \"norm_raw_checksum\": %llu, \"input_rms\": %.17g, \"normalized_l2\": %.17g, \"final_residual_checksum\": %llu, \"final_norm_checksum\": %llu, \"lm_head_tensor\": \"output.weight\", \"lm_head_ggml_type\": %u, \"lm_head_decoder\": \"Q6_K\", \"lm_head_kernel\": \"%s\", \"activation_quantizations\": %u, \"lm_head_checksum_verified\": true, \"lm_head_raw_checksum\": %llu, \"input_dims\": %u, \"vocab_size\": %u, \"logits_computed\": %u, \"full_vocabulary\": true, \"logits_checksum\": %llu, \"logits_min\": %.17g, \"logits_max\": %.17g, \"logits_rms\": %.17g, \"argmax_token\": %u, \"argmax_logit\": %.17g, \"top_tokens\": [",
                 head_result.input_dims, (unsigned long long)head_result.norm_raw_checksum, head_result.input_rms, head_result.normalized_l2,
                 (unsigned long long)head_result.residual_checksum, (unsigned long long)head_result.normalized_checksum,
-                head_result.lm_head_ggml_type, (unsigned long long)head_result.lm_head_raw_checksum, head_result.input_dims, head_result.vocab_size, head_result.logits_computed,
+                head_result.lm_head_ggml_type, head_result.lm_head_kernel, head_result.activation_quantizations, (unsigned long long)head_result.lm_head_raw_checksum, head_result.input_dims, head_result.vocab_size, head_result.logits_computed,
                 (unsigned long long)head_result.logits_checksum, head_result.logits_min, head_result.logits_max, head_result.logits_rms,
                 head_result.top[0].token, head_result.top[0].logit);
             for (uint32_t rank = 0; rank < head_result.top_n; ++rank) {

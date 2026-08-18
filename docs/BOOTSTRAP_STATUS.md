@@ -3161,4 +3161,19 @@ Five warm 48-layer/full-MoE runs with INT8 KV measure F32 median `8.52569 s/toke
 
 Honesty boundary: the Q5_K and Q6_K same-input paths close against the pinned oracle, and two fixed two-token sequences pass. The end-to-end Q6_K trajectory is slightly worse than the preceding Q5_K-only baseline and is reported as such. These fixed-matrix gates do not establish exact global logits/residual parity or exhaustive prompt coverage. F32 remains the default; Q8_K remains CPU-only and opt-in.
 
+## 2026-08-18: final lm_head Q6_K × Q8_K same-input
+
+The final RMSNorm already closes with the exact oracle `l_out-47` (`max_abs=3.81470e-6`, `RMSE=1.17205e-7`). The remaining same-input logits mismatch came from a contract difference: the QX head always used dequantized Q6_K weights with F32 activations, while pinned ggml uses `Q6_K × Q8_K` on CPU.
+
+`final-head-probe` now accepts an exact 2048-value residual sidecar and writes `final-norm.f32` plus all 151936 logits. The CPU-only `q8_k_compat` path quantizes the normalized activation once, reuses eight Q8_K blocks for every vocabulary row, and reports `lm_head_kernel=q6_k_q8_k`. F32 remains default and reports `dequant_f32`.
+
+```text
+same-input final norm: max_abs 3.81470e-6, RMSE 1.17205e-7
+same-input logits:     max_abs 2.38419e-6, RMSE 4.91155e-7, cosine 0.999999999999927
+global logits:         max_abs 0.132130, RMSE 0.0257469, cosine 0.999967105223
+argmax:                1124
+```
+
+The preceding global logits were max-abs `0.187882`, RMSE `0.0393805`. The improvement is real but bounded. Global `l_out-47` remains max-abs `4.68347`, RMSE `0.172092`; therefore exact parity is still refuted and the next gate moves into layer 47 with the same input.
+
 Oracle provenance: llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`; source GGUF SHA-256 `c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652`. The integrated command additionally requires QXT2 payload fingerprint `6140965799433681264`; this FNV-1a64 value is a non-cryptographic compatibility guard, not an authenticity claim.

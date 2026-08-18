@@ -42,6 +42,7 @@ atención layer 1 con mismo attn_norm/KV F16: GREEN
 sensibilidad layer 1→2 clasificada: GREEN
 Q6_K decode + Q6_K×Q8_K atención CPU opt-in: GREEN
 sweep layer 2→47 y sensibilidad layer 46 clasificada: GREEN
+final RMSNorm + lm_head Q6_K×Q8_K same-input: GREEN
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -59,7 +60,7 @@ La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coinc
 
 ## Después
 
-1. Bisect layer 47 → residual final → RMSNorm final → logits con input idéntico, sin reabrir kernels cerrados.
+1. Bisect layer 47 same-input hasta `l_out-47`, separando atención y MoE sin reabrir kernels/head cerrados.
 2. Ampliar tokenizer a cobertura Unicode/chat-template exhaustiva.
 3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 4. Medir baseline de inferencia real.

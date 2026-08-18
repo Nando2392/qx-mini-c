@@ -102,7 +102,7 @@ tests\build_llama_reference_oracle.bat
 
 The build creates standalone residual/logit and sequence llama.cpp oracles; neither is linked into the QX runtime. The residual oracle writes selected layer inputs, layer-0 attention/MoE checkpoints and final logits as lossless F32 sidecars. The sequence oracle keeps a persistent context for token-ID prompts and multiple greedy steps. QX can write matching sidecars with `state-loop-probe --full-moe --dump-residuals <existing-dir>`. `scripts/compare_residuals.py` compares `input`, `v-cur`, `kqv-out`, `ffn-inp`, `ffn-moe-out` or `output`; `scripts/compare_logits.py` compares the complete vocabulary and both argmax values. Local model paths and sidecars must remain outside Git.
 
-Current fixed-token result against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: exact end-to-end numerical parity remains **refuted**. The Q5_K and Q6_K same-input gates pass, while the complete Q8_K/F32-KV sweep localizes the next material amplification at layer 46→47. Post-Q6_K complete logits are max-abs `0.187882`, RMSE `0.0393805`, cosine `0.999932289`, with argmax `1124`. The causal layer-46 bisect places the first amplification in MoE output (`3.663×`), not attention; top-8 is unchanged. See [`wiki/comparisons/layer1-layer2-sensitivity.md`](wiki/comparisons/layer1-layer2-sensitivity.md) and [`wiki/comparisons/layer2-logits-sweep.md`](wiki/comparisons/layer2-logits-sweep.md).
+Current fixed-token result against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: exact end-to-end numerical parity remains **refuted**. The Q5_K, Q6_K attention and final-head same-input gates pass. The opt-in final head now uses `Q6_K × Q8_K`, quantizes the normalized activation once and improves complete global logits to max-abs `0.132130`, RMSE `0.0257469`, cosine `0.999967105`, with argmax `1124`. F32 remains the default dequantized path. See [`wiki/comparisons/layer2-logits-sweep.md`](wiki/comparisons/layer2-logits-sweep.md) and [`wiki/comparisons/final-head-q6k-q8k.md`](wiki/comparisons/final-head-q6k-q8k.md).
 
 The final pre-head residual is explicitly compared, not inferred. Post-Q6_K Q8_K/F32-KV gives max-abs `4.68347`, RMSE `0.172092`, cosine `0.999995600`. This is worse than the prior Q5_K-only global baseline despite the layer-46 same-input fix, and is documented as quantized-path sensitivity rather than claimed as a global improvement.
 
@@ -134,7 +134,7 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. Bisect layer 47 through final RMSNorm and logits using identical inputs per stage; keep F32 default and Q8_K CPU-only opt-in.
+1. Bisect layer 47 from its same input through attention/MoE to `l_out-47`; final RMSNorm and lm_head are closed independently.
 2. Expand tokenizer parity beyond the fixed prompt matrix and add chat-template application.
 3. Add QXF mmap and persistent scratch buffers.
 4. Add fused quant-dot, thread pool and AVX2 CPU kernels.

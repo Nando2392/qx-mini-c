@@ -142,6 +142,7 @@ int qx_dump_rope_gqa_golden_probe_summary(uint32_t tokens, uint32_t q_heads_run,
 int qx_dump_real_qkv_golden_probe_summary(const char *path, uint32_t layer, uint32_t token_a, uint32_t token_b, uint32_t q_heads_run, uint32_t seed, int full_moe, FILE *out, char *err, uint64_t err_len);
 int qx_dump_attention_stage_probe_summary(const char *path, uint32_t layer, const char *layer_input_path, const char *output_dir, const char *activation_mode, const char *kv_format, FILE *out, char *err, uint64_t err_len);
 int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char *ffn_input_path, const char *output_dir, const char *activation_mode, FILE *out, char *err, uint64_t err_len);
+int qx_dump_final_head_probe_summary(const char *path, const char *residual_path, const char *output_dir, const char *activation_mode, uint32_t top_n, FILE *out, char *err, uint64_t err_len);
 int qx_dump_expert_q8_k_dot_probe_summary(const char *path, const char *tensor_name, uint32_t expert, uint32_t row, const char *activation_path, FILE *out, char *err, uint64_t err_len);
 int qx_dump_rmsnorm_probe_summary(const char *path, uint32_t token_id, const char *norm_name, uint32_t seed, FILE *out, char *err, uint64_t err_len);
 int qx_dump_attention_probe_summary(const char *path, uint32_t layer, uint32_t blocks, uint32_t seed, uint32_t ctx_tokens, const char *kv_format, int cache_write, FILE *out, char *err, uint64_t err_len);

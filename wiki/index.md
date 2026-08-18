@@ -1,7 +1,7 @@
 # QX-mini-MoE Wiki
 
 > Bóveda Obsidian y wiki compilada al estilo Karpathy. Leer primero esta página y [[current-status-and-roadmap]].
-> Última actualización: 2026-08-18 | Páginas de conocimiento: 17
+> Última actualización: 2026-08-18 | Páginas de conocimiento: 19
 
 ## Proyecto
 
@@ -26,6 +26,7 @@
 - [[iq2-s-iq4-xs-q8k]] — gate independiente de expertos layer 1/47, tipos 22/23 y amplificación hacia layer 2.
 - [[layer1-layer2-sensitivity]] — fix Q5_K, atención same-input y amplificación cuantificada por experto.
 - [[layer2-logits-sweep]] — sweep 0–47, kernel Q6_K×Q8_K y sensibilidad MoE de layer 46.
+- [[final-head-q6k-q8k]] — RMSNorm/head same-input, Q6_K×Q8_K completo y causalidad hasta logits.
 
 ## Rendimiento
 

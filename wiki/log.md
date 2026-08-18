@@ -163,3 +163,11 @@
 - Bisect causal: atención gain `0.153×`, MoE gain `3.663×`, layer output gain `3.993×`; top-8 estable y experto 74 aporta `76.08%` del delta MoE.
 - Benchmark de probe 48 capas/MoE: F32 `8.52569 s/token`, Q8_K `2.34729 s/token`, speedup `3.63214×`; no incluye lm_head/tokenización.
 - F32 permanece default; Q8_K permanece CPU-only opt-in. Siguiente gate: layer 47→RMSNorm final→logits con input idéntico.
+
+## [2026-08-18] fix | Final lm_head Q6_K × Q8_K same-input
+
+- Añadido `final-head-probe` con residual F32 exacto, sidecars de RMSNorm/logits completos y negativos fail-closed.
+- La ruta opt-in cuantiza el norm una sola vez y reutiliza ocho bloques Q8_K para las 151936 filas; F32 conserva `dequant_f32` como default.
+- Same-input: RMSNorm RMSE `1.17205e-7`; logits RMSE `4.91155e-7`, max-abs `2.38419e-6`, argmax `1124`.
+- End-to-end: logits mejoran de RMSE `0.0393805` a `0.0257469` y max-abs `0.187882` a `0.132130`; no se afirma paridad global.
+- La divergencia restante ya entra desde `l_out-47`; siguiente gate: layer 47 same-input por atención/MoE.

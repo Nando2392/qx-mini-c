@@ -51,6 +51,7 @@ static void usage(const char *argv0) {
         "  qxqxf real-qkv-golden-probe --in model.qxf --layer 0 --token-a 42 --token-b 43 --q-heads-run 9 --seed 7\n"
         "  qxqxf attention-stage-probe --in model.qxf --layer 1 --layer-in layer-1.f32 --out-dir sidecars --activation q8_k_compat --kv f16\n"
         "  qxqxf moe-stage-probe --in model.qxf --layer 0 --ffn-inp ffn_inp-0.f32 --out-dir sidecars\n"
+        "  qxqxf final-head-probe --in model.qxf --residual l_out-47.f32 --out-dir sidecars --activation q8_k_compat --top-n 5\n"
         "  qxqxf expert-q8-k-dot-probe --in model.qxf --name blk.0.ffn_gate_exps.weight --expert 49 --row 0 --activation ffn_norm-0.f32\n"
         "  %s token-embedding --in model.qxf --token-id 42\n"
         "  %s rmsnorm-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --seed 7\n"
@@ -1494,6 +1495,34 @@ int main(int argc, char **argv) {
         char err[256];
         if (!qx_dump_attention_stage_probe_summary(in_path, layer, layer_input_path, output_dir, activation_mode, kv_format, stdout, err, sizeof(err))) {
             fprintf(stderr, "attention-stage-probe failed: %s\n", err);
+            return 1;
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[1], "final-head-probe") == 0) {
+        const char *in_path = NULL;
+        const char *residual_path = NULL;
+        const char *output_dir = NULL;
+        const char *activation_mode = "f32";
+        uint32_t top_n = 5u;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
+            else if (strcmp(argv[i], "--residual") == 0 && i + 1 < argc) residual_path = argv[++i];
+            else if (strcmp(argv[i], "--out-dir") == 0 && i + 1 < argc) output_dir = argv[++i];
+            else if (strcmp(argv[i], "--activation") == 0 && i + 1 < argc) activation_mode = argv[++i];
+            else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) {
+                char *end = NULL;
+                errno = 0;
+                unsigned long parsed = strtoul(argv[++i], &end, 10);
+                if (errno || !end || *end || parsed == 0u || parsed > 32u) { usage(argv[0]); return 2; }
+                top_n = (uint32_t)parsed;
+            } else { usage(argv[0]); return 2; }
+        }
+        if (!in_path || !residual_path || !output_dir) { usage(argv[0]); return 2; }
+        char err[256];
+        if (!qx_dump_final_head_probe_summary(in_path, residual_path, output_dir, activation_mode, top_n, stdout, err, sizeof(err))) {
+            fprintf(stderr, "final-head-probe failed: %s\n", err);
             return 1;
         }
         return 0;

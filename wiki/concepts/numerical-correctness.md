@@ -30,7 +30,7 @@ Cada slice se valida antes de combinarlo:
 
 - Python lee bytes QXF directamente para Q4_K e IQ4_XS.
 - Un helper enlazado con llama.cpp valida filas IQ2_XS/IQ3_XXS/IQ2_S/IQ4_XS contra activaciones Q8_K.
-- El mismo helper usa `dequantize_row_q6_K` oficial para recalcular las 151936 logits y el argmax.
+- El mismo helper usa `dequantize_row_q6_K` y el vec-dot público `Q6_K × Q8_K`; el oracle completo valida las 151936 logits y el argmax.
 - El output C nunca se reutiliza como referencia esperada.
 
 ## Gates finales pendientes
@@ -62,7 +62,7 @@ Este resultado prueba secuencia para dos prompts y dos tokens; no prueba paridad
 
 ## Gate Q8_K compatible
 
-**Implementado y medido:** `q8_k_compat` reproduce el temporal CPU de ggml para proyecciones IQ4_XS y Q5_K; mantiene fallback F32 explícito para Q6_K y cualquier tipo sin golden. F32 continúa siendo el default.
+**Implementado y medido:** `q8_k_compat` reproduce el temporal CPU de ggml para proyecciones IQ4_XS, Q5_K y Q6_K, incluido el lm_head completo. Tipos sin golden conservan fallback F32 explícito. F32 continúa siendo el default.
 
 La serialización QX coincide byte por byte con `quantize_row_q8_K_ref` del oracle fijado para cuatro distribuciones: mixed, todo positivo, todo negativo y extremos alternos ±1. El gate cubre signo de escala, redondeo, clamp, `qs` y `bsums`; no se infiere equivalencia sólo de logits.
 
@@ -73,5 +73,7 @@ El bisect posterior [[moe-stage-bisect]] amplió el modo opt-in a expertos IQ2_X
 El final norm también se captura desde la API pública de embeddings del oracle. Post-Q5_K, Q8_K/F32-KV frente a llama F16 queda en max-abs `0.0659037`, RMSE `0.00731730`, cosine `0.999986548`; mejora fuertemente, pero no convierte la comparación en igualdad exacta.
 
 La matriz greedy fija queda GREEN post-Q5_K. La decisión, matriz numérica, índices máximos y trade-offs están en [[layer1-layer2-sensitivity]] y [[f32-vs-q8k-activation]].
+
+[[final-head-q6k-q8k]] cierra `l_out-47 → RMSNorm final → logits` con input idéntico. Same-input logits quedan en max-abs `2.38419e-6`, RMSE `4.91155e-7`; globalmente, el kernel correcto mejora RMSE de `0.0393805` a `0.0257469`, pero `l_out-47` sigue divergente y la paridad exacta permanece refutada.
 
 La política de investigación está en [[auto-research-loop]] y el avance en [[current-status-and-roadmap]].
