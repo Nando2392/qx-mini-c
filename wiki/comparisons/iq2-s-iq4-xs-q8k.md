@@ -98,6 +98,9 @@ Token `42`, oracle llama F16:
 
 El nuevo kernel reduce el error de entrada a layer 1 frente a F32, pero no elimina la sensibilidad del MoE: el experto 68 tiene activaciones grandes y amplifica la perturbación previa. El siguiente bisect debe separar atención/residual de layer 1 y sensibilidad del experto dominante; no debe atribuir el error al vec-dot ya validado con input idéntico.
 
+> [!NOTE]
+> Esta tabla preserva el baseline del issue #10. [[layer1-layer2-sensitivity]] la supersede tras corregir Q5_K: Q8_K/F32-KV baja layer-2-input de max-abs `28.2042`/RMSE `0.626792` a `0.294106`/`0.00660423`, y logits RMSE de `1.48097` a `0.0346769`.
+
 ## Greedy
 
 | Activación | KV | `[42]` | `Hello!` |

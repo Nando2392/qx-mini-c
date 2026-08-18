@@ -176,7 +176,7 @@ def main() -> int:
         assert real_state["layers_run"] == 96
         assert real_state["kv_appends"] == 96
         assert [token["input_token"] for token in real_state["tokens"]] == [42, 1124]
-        assert [token["selected_token"] for token in real_state["tokens"]] == [1124, 11287]
+        assert [token["selected_token"] for token in real_state["tokens"]] == [1124, 50853]
         assert [token["position"] for token in real_state["tokens"]] == [0, 1]
         assert len(real_layers) == 48
         assert len(second_layers) == 48

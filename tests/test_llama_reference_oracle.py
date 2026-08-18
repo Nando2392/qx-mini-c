@@ -48,7 +48,7 @@ def test_llama_reference_oracle_rebuilds_and_runs_standalone(tmp_path):
         assert payload["n_layer"] == 48
         assert payload["n_vocab"] == 151936
         assert payload["logits"]["argmax"] == 1124
-        assert payload["internals_captured"] == 18
+        assert payload["internals_captured"] == 19
         assert payload["result_norm"]["written"] is True
         assert payload["result_norm"]["count"] == 2048
         assert (output / "layer-0.f32").stat().st_size == 2048 * 4

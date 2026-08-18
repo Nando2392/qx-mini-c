@@ -81,9 +81,10 @@ def test_qx_and_llama_sequence_comparison_is_explicit(tmp_path):
     ], text=True))
     qx_hello_generated = [step["selected_token"] for step in qx_hello["tokens"] if step["phase"] == "generate"]
 
-    assert qx_42_generated == [1124, 11287]
+    assert qx_42_generated == [1124, 50853]
     assert qx_hello["prompt_token_ids"] == [9707, 0]
-    assert qx_hello_generated == [81379, 44707]
-    assert qx_42_generated[0] == llama_42_f16[0]
-    assert qx_42_generated[1] != llama_42_f16[1]
-    assert qx_hello_generated[0] != llama_hello_f16[0]
+    assert qx_hello_generated == [358, 1184]
+    assert qx_42_generated == llama_42_f16 == llama_42_q8
+    assert qx_hello_generated == llama_hello_f16
+    assert qx_hello_generated[0] == llama_hello_q8[0]
+    assert qx_hello_generated[1] != llama_hello_q8[1]

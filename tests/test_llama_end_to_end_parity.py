@@ -45,7 +45,7 @@ def test_real_end_to_end_parity_is_reproducibly_refuted(tmp_path):
         oracle = run_json([
             str(LLAMA_EXE), str(GGUF), str(llama_dir), "42", "0,1,24,47", llama_kv, "internals",
         ])
-        assert oracle["internals_captured"] == 18
+        assert oracle["internals_captured"] == 19
         assert oracle["logits"]["argmax"] == 1124
 
         qx = run_json([
@@ -70,7 +70,7 @@ def test_real_end_to_end_parity_is_reproducibly_refuted(tmp_path):
         ], expected_returncode=1)
         assert pre_head["first_divergent_layer"] == 47
         assert pre_head["layers"][0]["max_abs"] > 100
-        assert pre_head["layers"][0]["cosine"] < 0.5
+        assert pre_head["layers"][0]["cosine"] > 0.99
 
         logits = run_json([
             sys.executable, str(COMPARE_LOGITS), "--qx", str(qx_dir / "step-0-logits.f32"),

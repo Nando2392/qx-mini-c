@@ -40,7 +40,7 @@ text prompt
 → persistent KV update and repeated 48-layer forward
 ```
 
-The fixed-token QX greedy gate is GREEN for `42 → 1124 → 11287` after the top-8 router normalization fix. Fixed-prompt tokenizer parity against `llama-tokenize` is also GREEN. `Hello!` maps to `[9707, 0]` and prefills both positions. External single-token residual/logit parity is now reproducibly refuted while argmax `1124` matches; external multi-token sequence parity remains a separate gate.
+The fixed-token QX greedy gate is GREEN for `42 → 1124 → 50853` after the Q5_K decoder/attention fix. Fixed-prompt tokenizer parity against `llama-tokenize` is also GREEN. `Hello!` maps to `[9707, 0]`, prefills both positions and generates `[358, 1184]`. These two sequences exactly match the pinned llama.cpp F16 oracle; broader exact residual/logit and prompt coverage remains gated.
 
 ## Honest performance state
 
@@ -102,11 +102,11 @@ tests\build_llama_reference_oracle.bat
 
 The build creates standalone residual/logit and sequence llama.cpp oracles; neither is linked into the QX runtime. The residual oracle writes selected layer inputs, layer-0 attention/MoE checkpoints and final logits as lossless F32 sidecars. The sequence oracle keeps a persistent context for token-ID prompts and multiple greedy steps. QX can write matching sidecars with `state-loop-probe --full-moe --dump-residuals <existing-dir>`. `scripts/compare_residuals.py` compares `input`, `v-cur`, `kqv-out`, `ffn-inp`, `ffn-moe-out` or `output`; `scripts/compare_logits.py` compares the complete vocabulary and both argmax values. Local model paths and sidecars must remain outside Git.
 
-Current fixed-token result against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: exact end-to-end numerical parity is **refuted**, while greedy argmax still matches (`1124`). Instrumentation found and fixed a material router bug: QX did not renormalize selected top-8 MoE weights. After the fix, layer-1 max-abs fell from about `1.08` to `0.00589` with diagnostic F32 KV (`0.01082` for QX INT8 versus llama Q8_0). The first remaining mismatch is `Vcur` (`max_abs=0.000305`, RMSE `8.32e-5`, cosine `0.999943`), where QX dots decoded IQ4_XS weights against F32 activations while ggml's IQ4_XS matmul uses temporary Q8_K activations. Complete logits also differ (`max_abs≈9.09–9.14`, RMSE≈`1.48`, cosine≈`0.875`) despite matching argmax. See [`wiki/comparisons/llama-cpp-parity.md`](wiki/comparisons/llama-cpp-parity.md).
+Current fixed-token result against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: exact end-to-end numerical parity remains **refuted**, but the Q5_K fix materially narrows it and closes the fixed two-token sequence gate. Q8_K/F32-KV layer-2 input is now max-abs `0.294106`, RMSE `0.00660423`, cosine `0.999999906`; complete logits are max-abs `0.171505`, RMSE `0.0346769`, cosine `0.999936486`, with argmax `1124`. Same-input layer-1 attention and MoE gates both pass. See [`wiki/comparisons/layer1-layer2-sensitivity.md`](wiki/comparisons/layer1-layer2-sensitivity.md).
 
-The final pre-head residual is explicitly compared, not inferred: F32/F16 gives max-abs `1099.6502`, RMSE `32.9520`, cosine `0.439279`; INT8/Q8_0 gives max-abs `1100.9628`, RMSE `33.0204`, cosine `0.440512`.
+The final pre-head residual is explicitly compared, not inferred. Post-Q5_K fix, F32/F16 gives max-abs `199.862`, RMSE `6.67964`, cosine `0.997511`; Q8_K/F32-KV gives max-abs `1.09668`, RMSE `0.0932631`, cosine `0.999996986`.
 
-Sequence parity is also refuted. For token-ID prompt `[42]`, llama F16/Q8_0 generates `[1124, 50853]` while QX INT8 generates `[1124, 11287]`. For `Hello!` (`[9707, 0]`), llama generates `[358, 1184]` with F16 and `[358, 614]` with Q8_0; QX generates `[81379, 44707]`.
+Two-token sequence parity is now GREEN for the fixed matrix. For token-ID prompt `[42]`, llama F16/Q8_0 and QX F32/INT8 generate `[1124, 50853]`. For `Hello!` (`[9707, 0]`), QX generates `[358, 1184]`, matching llama F16; llama Q8_0 remains `[358, 614]`. This is not exhaustive prompt or exact-logit parity.
 
 ## Model setup
 

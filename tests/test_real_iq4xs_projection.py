@@ -391,7 +391,7 @@ def test_q8_k_compat_reports_combined_expert_kernel_families_for_two_layers():
         )
     )
     assert payload["activation_format"] == "q8_k_compat"
-    assert payload["projection_kernel"] == "iq4_xs_q8_k_with_f32_fallback"
+    assert payload["projection_kernel"] == "iq4_xs_q5_k_q8_k"
     assert payload["moe_projection_kernel"] == "iq2_xs_iq3_xxs_iq2_s_iq4_xs_q8_k"
     assert payload["moe_gate_up_projection_kernel"] == "iq2_xs_iq2_s_q8_k"
     assert payload["moe_down_projection_kernel"] == "iq3_xxs_iq4_xs_q8_k"
@@ -582,7 +582,7 @@ def test_state_loop_runs_two_real_greedy_tokens_from_selected_embedding(tmp_path
     assert first["input_token"] == 42
     assert first["selected_token"] == 1124
     assert second["input_token"] == first["selected_token"]
-    assert second["selected_token"] == 11287
+    assert second["selected_token"] == 50853
     assert second["position"] == 1
     assert all(layer["attention_context_tokens"] == 1 for layer in first["layers"])
     assert all(layer["attention_context_tokens"] == 2 for layer in second["layers"])
@@ -590,8 +590,8 @@ def test_state_loop_runs_two_real_greedy_tokens_from_selected_embedding(tmp_path
     assert all(layer["kv_token"] == 1 for layer in second["layers"])
     assert first["final_head"]["logits_computed"] == 151936
     assert second["final_head"]["logits_computed"] == 151936
-    assert first["final_head"]["logits_checksum"] == 12662891110960910958
-    assert second["final_head"]["logits_checksum"] == 2895445711150549338
+    assert first["final_head"]["logits_checksum"] == 10967348620636053936
+    assert second["final_head"]["logits_checksum"] == 14548714559300682082
     assert second["residual_checksum"] != first["final_head"]["final_residual_checksum"]
     embedding = metadata("token_embd.weight")
     assert embedding["ggml_type"] == 12

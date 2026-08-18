@@ -3100,6 +3100,38 @@ logits checksums: [18359823378288781632, 7341130597423700663]
 
 Intermediate prefill positions skip the complete output head. The last prompt position produces the first generated token; later outputs are re-embedded with persistent per-layer INT8 KV.
 
-Honesty boundary: parity is proven for the fixed prompt matrix, not every Unicode codepoint or automatic chat-template expansion. External end-to-end residual and greedy-sequence parity remains pending.
+Honesty boundary at that historical gate: parity was proven only for tokenizer IDs, not every Unicode codepoint or automatic chat-template expansion. The post-Q5_K gate below supersedes its greedy outputs.
+
+## 2026-08-18: layer-1 Q5_K attention and layer-2 sensitivity
+
+Issue #11 isolated the layer-1 attention path with exactly the same oracle layer input. An independent golden using real Q5_K blocks first exposed a decoder layout bug. The decoder now follows ggml `dequantize_row_q5_K`, and the CPU opt-in path implements scalar `Q5_K × Q8_K` with ggml-compatible scales, minima and Q8_K `bsums`.
+
+Same-input layer-1 evidence with F16 KV:
+
+```text
+attn_norm: max_abs 1.49012e-8, RMSE 5.13771e-10
+Vcur:      max_abs 8.38190e-9, RMSE 2.78220e-9
+kqv_out:   max_abs 1.90735e-6, RMSE 8.69279e-8
+attn_out:  max_abs 6.33299e-8, RMSE 1.50897e-8
+ffn_inp:   max_abs 5.96046e-8, RMSE 1.52099e-8
+kernel:    q5_k_q8_k
+```
+
+Post-fix Q8_K/F32-KV end-to-end evidence:
+
+```text
+layer-1 input RMSE: 0.000141082
+layer-2 input:      max_abs 0.294106, RMSE 0.00660423, cosine 0.999999906
+logits:             max_abs 0.171505, RMSE 0.0346769, cosine 0.999936486
+argmax:             1124
+```
+
+This improves layer-2 RMSE by 94.91x and logits RMSE by 42.71x over the pre-fix baseline. The remaining perturbation is not a same-input kernel mismatch. Attention amplifies the incoming layer-1 delta by 2.541x; layer-1 MoE amplifies its FFN input delta by 16.907x. Routing remains exactly `[68, 114, 55, 90, 0, 9, 28, 73]`. Expert 68 contributes 99.03% of the MoE delta; its large SwiGLU change independently reconstructs as `SiLU(gate) * up`.
+
+The same fix changes the two-token goldens: QX F32/INT8 now produces `[1124, 50853]` for `[42]` and `[358, 1184]` for `Hello!`, matching the pinned llama F16 oracle on this fixed matrix. New logits checksums for `[42]` are `10967348620636053936` and `14548714559300682082`.
+
+Post-fix five-run warm benchmark with 48 layers and INT8 KV: F32 median `8.64031 s/token`; Q8_K median `2.41209 s/token`; speedup `3.58208x`; both report median peak RSS `5,627,904 B`.
+
+Honesty boundary: this closes Q5_K decode and one-token layer-1 attention/MoE with identical inputs. It classifies the residual layer-1→2 difference as expected quantized sensitivity and passes two fixed two-token sequences, but it does not establish exact global logits/residual parity or exhaustive prompt coverage. F32 remains the default; Q8_K remains CPU-only and opt-in.
 
 Oracle provenance: llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`; source GGUF SHA-256 `c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652`. The integrated command additionally requires QXT2 payload fingerprint `6140965799433681264`; this FNV-1a64 value is a non-cryptographic compatibility guard, not an authenticity claim.

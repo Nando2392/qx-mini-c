@@ -16,7 +16,7 @@ confidence: high
 
 `q8_k_compat` cuantiza activaciones temporales F32 a bloques Q8_K para proyecciones IQ4_XS y, tras [[moe-stage-bisect]] y [[iq2-s-iq4-xs-q8k]], para expertos IQ2_XS/IQ3_XXS/IQ2_S/IQ4_XS. Los demás tipos conservan dot F32 y el runtime declara si ejecutó ruta Q8_K, F32 o mixta. No existe fallback silencioso ni metadata que afirme una ruta distinta de la ejecutada.
 
-La decisión no afirma paridad con llama.cpp. Q8_K corrige casi exactamente `Vcur` y reduce la salida MoE de layer 0, pero la divergencia reaparece al salir de layer 1 y continúa hasta logits y secuencia greedy. Véanse [[moe-stage-bisect]] y [[numerical-correctness]].
+La decisión no afirma paridad numérica exacta con llama.cpp. Las tablas pre-Q5_K de esta ADR mostraban divergencia desde layer 1 hasta greedy; [[layer1-layer2-sensitivity]] las supersede: corrige Q5_K, reduce logits a RMSE `0.0346769` y pasa la matriz greedy fija de dos prompts/dos tokens contra llama F16. Véase [[numerical-correctness]] para el estado vivo.
 
 ## Hipótesis
 
@@ -83,7 +83,9 @@ python -m pytest tests/test_q8k_activation.py -q
 
 Los modelos, sidecars y outputs temporales permanecen fuera de Git.
 
-## Fidelidad numérica
+## Baseline histórico pre-Q5_K: fidelidad numérica
+
+> Estas tablas conservan la medición que motivó el bisect. No son el estado post-Q5_K; véase [[layer1-layer2-sensitivity]].
 
 Token `[42]`, oracle llama F16, KV F32 en QX:
 
@@ -119,7 +121,7 @@ Resumen de checkpoints finales para las cuatro combinaciones QX contra llama F16
 | Q8_K compat | F32 | 1132.7604 / 0.411556 | 9.96629 / 0.797838 | 1.480970 / 0.874416 |
 | Q8_K compat | INT8 | 1133.1087 / 0.411358 | 9.98870 / 0.797812 | 1.478728 / 0.874826 |
 
-## Greedy
+## Baseline histórico pre-Q5_K: greedy
 
 | Activación | KV | `[42]` | `Hello!` |
 |---|---|---|---|
@@ -130,9 +132,9 @@ Resumen de checkpoints finales para las cuatro combinaciones QX contra llama F16
 | llama F16 | — | `[1124, 50853]` | `[358, 1184]` |
 | llama Q8_0 | — | `[1124, 50853]` | `[358, 614]` |
 
-Compartir el primer argmax `1124` no implica paridad. Ningún modo QX coincide en secuencia multi-token.
+En este baseline pre-Q5_K, compartir el primer argmax `1124` no implicaba paridad y ningún modo QX coincidía. Post-Q5_K, la matriz fija sí coincide con llama F16; no se extrapola a cobertura exhaustiva.
 
-## Rendimiento
+## Baseline histórico pre-Q5_K: rendimiento
 
 Un token, 48 capas, KV INT8. Cinco repeticiones warm; no es tok/s ni throughput sostenido:
 
@@ -143,13 +145,15 @@ Un token, 48 capas, KV INT8. Cinco repeticiones warm; no es tok/s ni throughput 
 
 **Medido tras extender MoE a IQ2_S/IQ4_XS:** Q8_K fue `3.50670×` más rápido en mediana (`71.4832%` menos latencia). El RSS mediano aumentó sólo `4096 B`, una página tratada como ruido. Son segundos/token de este probe, no throughput sostenido. Workspace adicional declarado: 4672 bytes para attention y hasta 2336 bytes por activación MoE.
 
+Benchmark post-Q5_K actual: F32 `8.64031 s/token`, Q8_K `2.41209 s/token`, speedup `3.58208×`, RSS mediano idéntico `5,627,904 B`.
+
 ## Trade-offs y riesgos
 
-- **Correctitud:** cierra vec-dot y etapas MoE con input idéntico, pero no cierra propagación, logits ni greedy.
+- **Correctitud:** cierra vec-dot y etapas MoE/atención con input idéntico. La propagación/logits no son bit-exactos; la matriz greedy fija post-Q5_K sí pasa.
 - **Memoria:** 4672 bytes de workspace reutilizable; impacto despreciable frente al modelo.
 - **CPU:** mejora medida, todavía sin SIMD ni thread pool.
-- **Complejidad:** añade un temporal y dispatchs estrechos para IQ4_XS, IQ2_XS, IQ3_XXS e IQ2_S; no generaliza por analogía a otros tipos.
-- **Tipos mixtos:** Q5_K/Q6_K/IQ3_S y cualquier tipo sin golden siguen F32 y se declaran como fallback.
+- **Complejidad:** añade un temporal y dispatchs estrechos para IQ4_XS, Q5_K, IQ2_XS, IQ3_XXS e IQ2_S; no generaliza por analogía a otros tipos.
+- **Tipos mixtos:** Q6_K/IQ3_S y cualquier tipo sin golden siguen F32 y se declaran como fallback. Q5_K queda validado por [[layer1-layer2-sensitivity]].
 - **CUDA:** no se promoverá este temporal a contrato CUDA sin golden y benchmark del backend real.
 - **Paridad:** `q8_k_compat` significa compatibilidad de la proyección IQ4_XS CPU, no paridad global.
 

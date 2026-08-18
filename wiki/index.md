@@ -24,6 +24,7 @@
 - [[f32-vs-q8k-activation]] — ADR y evidencia del modo CPU Q8_K compatible frente al default F32.
 - [[moe-stage-bisect]] — bisect Qwen3MoE por etapa/experto, kernels Q8_K y primera divergencia material.
 - [[iq2-s-iq4-xs-q8k]] — gate independiente de expertos layer 1/47, tipos 22/23 y amplificación hacia layer 2.
+- [[layer1-layer2-sensitivity]] — fix Q5_K, atención same-input y amplificación cuantificada por experto.
 
 ## Rendimiento
 

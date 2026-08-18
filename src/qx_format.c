@@ -1622,6 +1622,34 @@ static float qx_fp16_to_f32(uint16_t h) {
     return f;
 }
 
+static uint16_t qx_f32_to_fp16(float value) {
+    uint32_t bits = 0u;
+    memcpy(&bits, &value, sizeof(bits));
+    uint16_t sign = (uint16_t)((bits >> 16) & 0x8000u);
+    uint32_t exponent = (bits >> 23) & 0xffu;
+    uint32_t mantissa = bits & 0x7fffffu;
+    if (exponent == 0xffu) return (uint16_t)(sign | (mantissa ? 0x7e00u : 0x7c00u));
+    int32_t half_exponent = (int32_t)exponent - 127 + 15;
+    if (half_exponent >= 31) return (uint16_t)(sign | 0x7c00u);
+    if (half_exponent <= 0) {
+        if (half_exponent < -10) return sign;
+        mantissa |= 0x800000u;
+        uint32_t shift = (uint32_t)(14 - half_exponent);
+        uint32_t rounded = mantissa >> shift;
+        uint32_t remainder = mantissa & ((1u << shift) - 1u);
+        uint32_t halfway = 1u << (shift - 1u);
+        if (remainder > halfway || (remainder == halfway && (rounded & 1u))) ++rounded;
+        return (uint16_t)(sign | (uint16_t)rounded);
+    }
+    uint32_t rounded_mantissa = mantissa + 0x0fffu + ((mantissa >> 13) & 1u);
+    if (rounded_mantissa & 0x800000u) {
+        rounded_mantissa = 0u;
+        ++half_exponent;
+        if (half_exponent >= 31) return (uint16_t)(sign | 0x7c00u);
+    }
+    return (uint16_t)(sign | ((uint16_t)half_exponent << 10) | (uint16_t)(rounded_mantissa >> 13));
+}
+
 static uint16_t qx_rd_le16(const unsigned char *p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
@@ -1836,6 +1864,9 @@ static int qx_decode_q5_k_block(const unsigned char *buf, float out[256]) {
     const unsigned char *q = buf + 48;
     int y = 0;
     int is = 0;
+    /* ggml Q5_K reuses qh[0..31] for four 64-value groups. The mask pair
+       selects bits 0/1, 2/3, 4/5, then 6/7 while q advances by 32 bytes. */
+    unsigned char u1 = 1u, u2 = 2u;
     for (int j = 0; j < 256; j += 64) {
         unsigned char sc = 0, m = 0;
         qx_get_scale_min_k4(is + 0, scales, &sc, &m);
@@ -1845,17 +1876,17 @@ static int qx_decode_q5_k_block(const unsigned char *buf, float out[256]) {
         const float d2 = d * (float)sc;
         const float m2 = dmin * (float)m;
         for (int l = 0; l < 32; ++l) {
-            int idx = j + l;
-            int hi = (qh[idx >> 3] >> (idx & 7)) & 1;
-            out[y++] = d1 * (float)((q[l] & 0x0f) | (hi << 4)) - m1;
+            int hi = (qh[l] & u1) ? 16 : 0;
+            out[y++] = d1 * (float)((q[l] & 0x0f) | hi) - m1;
         }
         for (int l = 0; l < 32; ++l) {
-            int idx = j + 32 + l;
-            int hi = (qh[idx >> 3] >> (idx & 7)) & 1;
-            out[y++] = d2 * (float)((q[l] >> 4) | (hi << 4)) - m2;
+            int hi = (qh[l] & u2) ? 16 : 0;
+            out[y++] = d2 * (float)((q[l] >> 4) | hi) - m2;
         }
         q += 32;
         is += 2;
+        u1 <<= 2;
+        u2 <<= 2;
     }
     return 1;
 }
@@ -1931,6 +1962,7 @@ int qx_dump_decode_block_summary(const char *path, const char *name, uint64_t bl
         if (vals[i] > maxv) maxv = vals[i];
     }
     uint64_t raw_checksum = qx_fnv1a64(buf, block_size);
+    uint64_t f32_checksum = qx_fnv1a64(vals, sizeof(vals));
     fprintf(out, "{\n");
     fprintf(out, "  \"tensor\": \"%s\",\n", t->name);
     fprintf(out, "  \"ggml_type\": %u,\n", t->flags);
@@ -1944,6 +1976,7 @@ int qx_dump_decode_block_summary(const char *path, const char *name, uint64_t bl
     fprintf(out, "  \"min\": %.9g,\n", (double)minv);
     fprintf(out, "  \"max\": %.9g,\n", (double)maxv);
     fprintf(out, "  \"raw_checksum\": %llu,\n", (unsigned long long)raw_checksum);
+    fprintf(out, "  \"f32_checksum\": %llu,\n", (unsigned long long)f32_checksum);
     fprintf(out, "  \"first8\": [");
     for (int i = 0; i < 8; ++i) fprintf(out, "%s%.9g", i ? ", " : "", (double)vals[i]);
     fprintf(out, "]\n");
@@ -3378,6 +3411,40 @@ static float qx_dot_iq4_xs_q8_k(const unsigned char *row, const qx_projection_wo
     return total;
 }
 
+static float qx_dot_q5_k_q8_k(const unsigned char *row, const qx_projection_workspace *workspace) {
+    float sums[8] = {0.0f};
+    float sumf = 0.0f;
+    for (uint32_t block = 0; block < workspace->count; ++block) {
+        const unsigned char *raw = row + (uint64_t)block * 176u;
+        const qx_block_q8_k *activation = &workspace->blocks[block];
+        const float d = qx_fp16_to_f32(qx_rd_le16(raw));
+        const float dmin = qx_fp16_to_f32(qx_rd_le16(raw + 2u));
+        const unsigned char *scales = raw + 4u;
+        const unsigned char *qh = raw + 16u;
+        const unsigned char *quants = raw + 48u;
+        int32_t lane_sums[8] = {0};
+        int32_t min_sum = 0;
+        for (uint32_t group = 0; group < 8u; ++group) {
+            unsigned char scale = 0u, min = 0u;
+            qx_get_scale_min_k4((int)group, scales, &scale, &min);
+            min_sum += ((int32_t)activation->bsums[group * 2u] +
+                        (int32_t)activation->bsums[group * 2u + 1u]) * (int32_t)min;
+            const unsigned char *packed = quants + (group / 2u) * 32u;
+            unsigned char high_mask = (unsigned char)(1u << group);
+            for (uint32_t i = 0; i < 32u; ++i) {
+                int32_t quant = group & 1u ? (int32_t)(packed[i] >> 4) : (int32_t)(packed[i] & 0x0fu);
+                if (qh[i] & high_mask) quant += 16;
+                lane_sums[i & 7u] += (int32_t)scale * quant * (int32_t)activation->qs[group * 32u + i];
+            }
+        }
+        const float scaled_d = d * activation->d;
+        for (uint32_t lane = 0; lane < 8u; ++lane) sums[lane] += scaled_d * (float)lane_sums[lane];
+        sumf -= dmin * activation->d * (float)min_sum;
+    }
+    for (uint32_t lane = 0; lane < 8u; ++lane) sumf += sums[lane];
+    return sumf;
+}
+
 static float qx_dot_iq2_xs_q8_k(const unsigned char *row, const qx_projection_workspace *workspace) {
     float sumf = 0.0f;
     for (uint32_t block = 0; block < workspace->count; ++block) {
@@ -3491,10 +3558,11 @@ static int qx_projection_matvec_fill_mode(qx_file *file, const qx_tensor_dir_ent
     if (blocks_per_row == 0 || row_bytes == 0 || output_rows == 0 || row_bytes > t->byte_size) { qx_set_err(err, err_len, "invalid projection tensor layout"); return 0; }
     if (dims == 0 || dims > input_dims) dims = (uint32_t)input_dims;
     int q8_k_compat = activation_format && strcmp(activation_format, "q8_k_compat") == 0;
-    int q8_k_iq4_xs = q8_k_compat && t->flags == 23u;
-    if (q8_k_iq4_xs) {
-        if (input_dims != dims || residual_n != dims || row_bytes != blocks_per_row * 136u) {
-            qx_set_err(err, err_len, "q8_k_compat requires complete IQ4_XS rows and matching activation dimensions"); return 0;
+    int q8_k_projection = q8_k_compat && (t->flags == 13u || t->flags == 23u);
+    if (q8_k_projection) {
+        uint64_t expected_block_size = t->flags == 13u ? 176u : 136u;
+        if (input_dims != dims || residual_n != dims || row_bytes != blocks_per_row * expected_block_size) {
+            qx_set_err(err, err_len, "q8_k_compat requires complete supported rows and matching activation dimensions"); return 0;
         }
         if (!qx_quantize_q8_k(residual, dims, workspace, err, err_len)) return 0;
     }
@@ -3521,8 +3589,9 @@ static int qx_projection_matvec_fill_mode(qx_file *file, const qx_tensor_dir_ent
             if (!qx_read_raw_span_into(file, t->offset + window_start * row_bytes, window_count * row_bytes, window, err, err_len)) { free(window); return 0; }
         }
         const unsigned char *row_raw = window + ((uint64_t)r - window_start) * row_bytes;
-        if (q8_k_iq4_xs) {
-            dot = (double)qx_dot_iq4_xs_q8_k(row_raw, workspace);
+        if (q8_k_projection) {
+            dot = t->flags == 13u ? (double)qx_dot_q5_k_q8_k(row_raw, workspace) :
+                                   (double)qx_dot_iq4_xs_q8_k(row_raw, workspace);
             goto qx_projection_store_row;
         }
         uint32_t consumed = 0;
@@ -3607,20 +3676,22 @@ int qx_dump_q8_k_activation_probe_summary(uint32_t values, const char *inject, F
 }
 
 static void qx_detect_projection_kernel_usage(const qx_file *file, uint32_t layers, int causal_attention,
-        int *q8_k_used, int *f32_used) {
+        int *q8_k_used, int *f32_used, uint32_t *family_mask) {
     static const char *non_causal_suffixes[] = {"attn_k.weight", "attn_v.weight"};
     static const char *causal_suffixes[] = {"attn_q.weight", "attn_k.weight", "attn_v.weight", "attn_output.weight"};
     const char **suffixes = causal_attention ? causal_suffixes : non_causal_suffixes;
     uint32_t suffix_count = causal_attention ? 4u : 2u;
     *q8_k_used = 0;
     *f32_used = 0;
+    *family_mask = 0u;
     for (uint32_t layer = 0; layer < layers; ++layer) {
         for (uint32_t i = 0; i < suffix_count; ++i) {
             char name[QX_NAME_MAX];
             snprintf(name, sizeof(name), "blk.%u.%s", layer, suffixes[i]);
             const qx_tensor_dir_entry *tensor = qx_find_tensor(file, name);
             if (!tensor) continue;
-            if (tensor->flags == 23u) *q8_k_used = 1;
+            if (tensor->flags == 23u) { *q8_k_used = 1; *family_mask |= 1u; }
+            else if (tensor->flags == 13u) { *q8_k_used = 1; *family_mask |= 2u; }
             else *f32_used = 1;
         }
     }
@@ -4595,6 +4666,115 @@ static int qx_write_moe_stage_sidecar(const char *dir, const char *name, uint32_
     return 1;
 }
 
+int qx_dump_attention_stage_probe_summary(const char *path, uint32_t layer, const char *layer_input_path,
+        const char *output_dir, const char *activation_mode, const char *kv_format, FILE *out, char *err, uint64_t err_len) {
+    int use_q8_k = activation_mode && strcmp(activation_mode, "q8_k_compat") == 0;
+    int use_f16_kv = kv_format && strcmp(kv_format, "f16") == 0;
+    if (!path || !layer_input_path || !output_dir || !out ||
+            (!use_q8_k && (!activation_mode || strcmp(activation_mode, "f32") != 0)) ||
+            (!use_f16_kv && (!kv_format || strcmp(kv_format, "f32") != 0))) {
+        qx_set_err(err, err_len, "invalid attention stage probe argument, activation mode, or KV format"); return 0;
+    }
+    qx_file file;
+    if (!qx_open_file(path, &file, err, err_len)) return 0;
+    uint32_t hidden = file.header.manifest.hidden;
+    uint32_t q_heads = file.header.manifest.q_heads;
+    uint32_t kv_heads = file.header.manifest.kv_heads;
+    uint32_t head_dim = file.header.manifest.head_dim;
+    if (layer >= file.header.manifest.layers || hidden == 0u || hidden > 2048u ||
+            q_heads == 0u || kv_heads == 0u || head_dim == 0u || q_heads % kv_heads != 0u ||
+            q_heads > UINT32_MAX / head_dim || kv_heads > UINT32_MAX / head_dim) {
+        qx_close_file(&file); qx_set_err(err, err_len, "invalid attention stage layer or dimensions"); return 0;
+    }
+    uint32_t q_values = q_heads * head_dim;
+    uint32_t kv_values = kv_heads * head_dim;
+    if (q_values == 0u || q_values > QX_Q8_K_VALUES * QX_Q8_K_MAX_BLOCKS || kv_values == 0u) {
+        qx_close_file(&file); qx_set_err(err, err_len, "unsupported attention stage dimensions"); return 0;
+    }
+    char norm_name[QX_NAME_MAX], v_name[QX_NAME_MAX], output_name[QX_NAME_MAX];
+    snprintf(norm_name, sizeof(norm_name), "blk.%u.attn_norm.weight", layer);
+    snprintf(v_name, sizeof(v_name), "blk.%u.attn_v.weight", layer);
+    snprintf(output_name, sizeof(output_name), "blk.%u.attn_output.weight", layer);
+    const qx_tensor_dir_entry *norm = qx_find_tensor(&file, norm_name);
+    const qx_tensor_dir_entry *v_tensor = qx_find_tensor(&file, v_name);
+    const qx_tensor_dir_entry *output_tensor = qx_find_tensor(&file, output_name);
+    if (!norm || !v_tensor || !output_tensor || v_tensor->dims[0] != hidden || v_tensor->dims[1] != kv_values ||
+            output_tensor->dims[0] != q_values || output_tensor->dims[1] != hidden) {
+        qx_close_file(&file); qx_set_err(err, err_len, "unsupported attention stage tensor layout"); return 0;
+    }
+    if ((uint64_t)hidden > (uint64_t)SIZE_MAX / sizeof(float) ||
+            (uint64_t)q_values > (uint64_t)SIZE_MAX / sizeof(float) ||
+            (uint64_t)kv_values > (uint64_t)SIZE_MAX / sizeof(float)) {
+        qx_close_file(&file); qx_set_err(err, err_len, "attention stage allocation overflow"); return 0;
+    }
+    float *layer_input = (float *)malloc((size_t)hidden * sizeof(float));
+    float *normalized = (float *)malloc((size_t)hidden * sizeof(float));
+    float *v_cur = (float *)malloc((size_t)kv_values * sizeof(float));
+    float *context = (float *)malloc((size_t)q_values * sizeof(float));
+    float *attention_output = (float *)malloc((size_t)hidden * sizeof(float));
+    float *ffn_input = (float *)malloc((size_t)hidden * sizeof(float));
+    unsigned char *v_bytes = (unsigned char *)malloc((size_t)kv_values);
+    unsigned char *output_bytes = (unsigned char *)malloc((size_t)hidden);
+    if (!layer_input || !normalized || !v_cur || !context || !attention_output || !ffn_input || !v_bytes || !output_bytes) {
+        free(layer_input); free(normalized); free(v_cur); free(context); free(attention_output); free(ffn_input); free(v_bytes); free(output_bytes);
+        qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0;
+    }
+    int ok = 0;
+    double norm_rms = 0.0, v_probe = 0.0, output_probe = 0.0;
+    uint64_t v_count = 0u, output_count = 0u;
+    qx_projection_workspace workspace = {0};
+    if (!qx_read_exact_f32_sidecar(layer_input_path, layer_input, hidden, err, err_len) ||
+            !qx_apply_f32_rmsnorm(&file, norm, layer_input, normalized, hidden, &norm_rms, err, err_len) ||
+            !qx_projection_matvec_fill_mode(&file, v_tensor, v_bytes, v_cur, kv_values, hidden,
+                normalized, hidden, 0u, layer, 1u, activation_mode, &workspace, &v_probe, &v_count, err, err_len)) {
+        goto qx_attention_stage_cleanup;
+    }
+    uint32_t group_size = q_heads / kv_heads;
+    for (uint32_t qh = 0; qh < q_heads; ++qh) {
+        uint32_t kvh = qh / group_size;
+        for (uint32_t d = 0; d < head_dim; ++d) context[qh * head_dim + d] = v_cur[kvh * head_dim + d];
+    }
+    if (use_f16_kv) {
+        for (uint32_t i = 0; i < q_values; ++i) context[i] = qx_fp16_to_f32(qx_f32_to_fp16(context[i]));
+    }
+    if (!qx_projection_matvec_fill_mode(&file, output_tensor, output_bytes, attention_output, hidden, q_values,
+            context, q_values, 0u, layer, 1u ^ 0x63d83595u, activation_mode, &workspace,
+            &output_probe, &output_count, err, err_len)) {
+        goto qx_attention_stage_cleanup;
+    }
+    for (uint32_t i = 0; i < hidden; ++i) {
+        ffn_input[i] = layer_input[i] + attention_output[i];
+        if (!isfinite(attention_output[i]) || !isfinite(ffn_input[i])) {
+            qx_set_err(err, err_len, "non-finite attention stage output"); goto qx_attention_stage_cleanup;
+        }
+    }
+    if (!qx_write_moe_stage_sidecar(output_dir, "attn_norm", layer, normalized, hidden, err, err_len) ||
+            !qx_write_moe_stage_sidecar(output_dir, "Vcur", layer, v_cur, kv_values, err, err_len) ||
+            !qx_write_moe_stage_sidecar(output_dir, "kqv_out", layer, context, q_values, err, err_len) ||
+            !qx_write_moe_stage_sidecar(output_dir, "attn_out", layer, attention_output, hidden, err, err_len) ||
+            !qx_write_moe_stage_sidecar(output_dir, "ffn_inp", layer, ffn_input, hidden, err, err_len)) {
+        goto qx_attention_stage_cleanup;
+    }
+    const char *v_kernel = use_q8_k && v_tensor->flags == 13u ? "q5_k_q8_k" :
+        use_q8_k && v_tensor->flags == 23u ? "iq4_xs_q8_k" : "dequant_f32";
+    const char *output_kernel = use_q8_k && output_tensor->flags == 13u ? "q5_k_q8_k" :
+        use_q8_k && output_tensor->flags == 23u ? "iq4_xs_q8_k" : "dequant_f32";
+    const char *projection_kernel = strcmp(v_kernel, output_kernel) == 0 ? v_kernel :
+        strcmp(v_kernel, "dequant_f32") != 0 && strcmp(output_kernel, "dequant_f32") != 0 ? "iq4_xs_q5_k_q8_k" :
+        use_q8_k ? "q8_k_projection_kernels_with_f32_fallback" : "dequant_f32";
+    fprintf(out, "{\"probe\":\"attention_stage\",\"layer\":%u,\"hidden\":%u,\"q_values\":%u,\"kv_values\":%u,"
+        "\"activation_mode\":\"%s\",\"kv_format\":\"%s\",\"projection_kernel\":\"%s\",\"v_projection_kernel\":\"%s\","
+        "\"output_projection_kernel\":\"%s\",\"single_token_softmax\":1.0,\"norm_rms\":%.9g,"
+        "\"v_probe\":%.9g,\"output_probe\":%.9g,\"v_count\":%llu,\"output_count\":%llu}\n",
+        layer, hidden, q_values, kv_values, activation_mode, kv_format, projection_kernel, v_kernel, output_kernel,
+        norm_rms, v_probe, output_probe, (unsigned long long)v_count, (unsigned long long)output_count);
+    ok = 1;
+qx_attention_stage_cleanup:
+    free(layer_input); free(normalized); free(v_cur); free(context); free(attention_output); free(ffn_input); free(v_bytes); free(output_bytes);
+    qx_close_file(&file);
+    return ok;
+}
+
 int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char *ffn_input_path,
         const char *output_dir, const char *activation_mode, FILE *out, char *err, uint64_t err_len) {
     int use_q8_k = activation_mode && strcmp(activation_mode, "q8_k_compat") == 0;
@@ -4796,16 +4976,18 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     qx_projection_workspace projection_workspace = {0};
     int q8_k_kernel_used = 0;
     int f32_projection_used = 0;
+    uint32_t projection_family_mask = 0u;
     if (projection_matvec) {
         if (strcmp(activation_format, "q8_k_compat") == 0) {
-            qx_detect_projection_kernel_usage(&file, layers, causal_attention, &q8_k_kernel_used, &f32_projection_used);
+            qx_detect_projection_kernel_usage(&file, layers, causal_attention, &q8_k_kernel_used, &f32_projection_used, &projection_family_mask);
         } else {
             f32_projection_used = 1;
         }
     }
     const char *projection_kernel = "not_used";
-    if (q8_k_kernel_used && f32_projection_used) projection_kernel = "iq4_xs_q8_k_with_f32_fallback";
-    else if (q8_k_kernel_used) projection_kernel = "iq4_xs_q8_k";
+    if (q8_k_kernel_used && projection_family_mask == 1u) projection_kernel = f32_projection_used ? "iq4_xs_q8_k_with_f32_fallback" : "iq4_xs_q8_k";
+    else if (q8_k_kernel_used && projection_family_mask == 2u) projection_kernel = f32_projection_used ? "q5_k_q8_k_with_f32_fallback" : "q5_k_q8_k";
+    else if (q8_k_kernel_used && projection_family_mask == 3u) projection_kernel = f32_projection_used ? "iq4_xs_q5_k_q8_k_with_f32_fallback" : "iq4_xs_q5_k_q8_k";
     else if (f32_projection_used) projection_kernel = "dequant_x_f32_scalar";
     int moe_q8_k_used = 0, moe_f32_used = 0;
     uint32_t moe_gate_up_family_mask = 0u, moe_down_family_mask = 0u;

@@ -42,10 +42,10 @@ Los tipos no son homogéneos. Layers `0/1/24/47` usan respectivamente `(17,17,18
 
 - Implementado y ejercitado: layers 0–47 con residual real encadenado para un token.
 - Tipos observados `(gate, up, down)`: `(17,17,18)`, `(17,17,21)`, `(17,17,23)`, `(22,22,21)` y `(22,22,23)`.
-- Medición del probe de 48 capas, un token: ~8.50 s en la máquina de desarrollo; no es tok/s de inferencia completa.
+- Benchmark post-Q5_K del probe de 48 capas/INT8 KV: F32 `8.64031 s/token`, Q8_K `2.41209 s/token`; no es throughput sostenido.
 - Los 47 enlaces adyacentes cumplieron `residual_output_checksum[N] == residual_input_checksum[N+1]`.
 - Validado externamente: el fix de routing redujo el error de entrada de layer 1 desde max-abs aproximado `1.08` hasta `0.00589` en F32/F16; la paridad exacta restante está refutada por diferencias de contrato numérico posteriores.
 - Pendiente: golden end-to-end de todos los tipos quant multi-layer.
-- `q8_k_compat` cubre gate/up IQ2_XS y down IQ3_XXS de layer 0, y gate/up IQ2_S más down IQ4_XS de layers 1/47. Con el mismo `ffn_inp-1`, la mezcla layer 1 queda en max-abs `4.35e-5`, RMSE `9.62e-7`, cosine ≈`1`. End-to-end, una diferencia de entrada layer 1 de `7.50e-4` se amplifica hasta `28.20` en input layer 2; el siguiente gate es sensibilidad/propagación, no el vec-dot. Véanse [[moe-stage-bisect]] y [[iq2-s-iq4-xs-q8k]].
+- `q8_k_compat` cubre gate/up IQ2_XS y down IQ3_XXS de layer 0, gate/up IQ2_S más down IQ4_XS de layers 1/47 y Q5_K en atención. Con el mismo `ffn_inp-1`, la mezcla layer 1 queda en max-abs `4.35e-5`, RMSE `9.62e-7`, cosine ≈`1`. El baseline pre-Q5_K amplificaba hasta `28.20` en layer 2; post-fix queda en max-abs `0.294106`, RMSE `0.00660423`, cosine `0.999999906`. La diferencia restante se clasifica como sensibilidad cuantizada con top-8 estable y experto 68 dominante. Véase [[layer1-layer2-sensitivity]].
 
 Gates: [[numerical-correctness]]. Rendimiento: [[performance-model]].

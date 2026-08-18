@@ -35,7 +35,7 @@ Con prompt token `42`, temperatura cero y seed `7`:
 
 ```text
 input tokens: [42, 1124]
-selected tokens: [1124, 11287]
+selected tokens: [1124, 50853]
 positions: [0, 1]
 layers_run: 96
 kv_appends: 96
@@ -44,7 +44,7 @@ logits checksums: [12662891110960910958, 2895445711150549338]
 
 Las 48 capas de la posición 0 reportan `attention_context_tokens=1`; las 48 de la posición 1 reportan `attention_context_tokens=2`. El checksum del embedding usado en posición 1 coincide con una ejecución independiente iniciada directamente desde token `1124`, y no coincide con el residual final de la posición anterior.
 
-El segundo head recorre las 151936 filas. Su checksum F32 y argmax `11287` se recalculan con `dequantize_row_q6_K` oficial de llama.cpp.
+El segundo head recorre las 151936 filas. Su checksum F32 y argmax `50853` se recalculan con `dequantize_row_q6_K` oficial de llama.cpp. Tras corregir Q5_K, la secuencia completa coincide con el oracle llama F16/Q8_0 para `[42]`.
 
 ## Fail-closed
 

@@ -141,3 +141,14 @@
 - Benchmark 5 warm, 48 capas/KV INT8: F32 `8.00310 s/token`, Q8_K `2.28223 s/token`, speedup `3.50670×`; RSS difiere sólo una página.
 - F32 sigue default; metadata agrega familias realmente ejecutadas y conserva fallback explícito para tipos sin golden.
 - Review independiente detectó que el string agregado no preservaba gate/up frente a down en todas las mezclas. Se añadieron campos exactos por rol y tests RED→GREEN para layers 0–1 y fallback layer 24.
+
+## [2026-08-18] fix | Q5_K atención y sensibilidad layer 1→2
+
+- El probe same-input reprodujo una divergencia antes del MoE de layer 1 y un golden independiente confirmó un bug real en el decoder Q5_K.
+- Corregido el layout Q5_K y añadido `Q5_K × Q8_K` escalar contra ggml; metadata de atención/state-loop distingue `q5_k_q8_k`, `iq4_xs_q8_k` y combinaciones con fallback.
+- Con el mismo `attn_norm-1` y KV F16, `attn_out-1` queda en max-abs `6.33e-8`, RMSE `1.51e-8`, cosine ≈`1`.
+- Post-fix Q8_K/F32-KV: layer-2-input RMSE `0.00660423` (`94.91×` mejor), logits RMSE `0.0346769` (`42.71×` mejor), argmax `1124`.
+- El top-8 permanece `[68,114,55,90,0,9,28,73]`; experto 68 aporta `99.03%` del delta MoE. Su SwiGLU coincide con `SiLU(gate)×up`, por lo que la diferencia restante se clasifica como sensibilidad cuantizada esperada, no otro bug de layout.
+- El comparador falla cerrado si raw weights, probabilidades seleccionadas, suma o pesos normalizados se contradicen; delta real raw max-abs `0.000261843`, normalizado `0.000501402`.
+- La matriz greedy fija pasa: QX F32/INT8 `[1124,50853]` para `[42]` y `[358,1184]` para `Hello!`, igual a llama F16; checksums logits `[10967348620636053936,14548714559300682082]`.
+- Benchmark post-fix, 5 warm/48 capas/KV INT8: F32 `8.64031 s/token`, Q8_K `2.41209 s/token`, speedup `3.58208×`; RSS mediano idéntico `5,627,904 B`.

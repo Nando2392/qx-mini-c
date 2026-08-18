@@ -25,7 +25,7 @@ def require_local_moe_fixtures():
         pytest.skip("pinned llama.cpp oracle checkout is not available")
 
 
-def run_oracle(output: Path, internal_layer=0):
+def run_oracle(output: Path, internal_layer=0, kv_type="f16"):
     env = os.environ.copy()
     env["LLAMA_CPP_DIR"] = str(LLAMA_CPP_DIR)
     build = subprocess.run(
@@ -39,7 +39,7 @@ def run_oracle(output: Path, internal_layer=0):
             str(output),
             "42",
             str(internal_layer),
-            "f16",
+            kv_type,
             "internals" if internal_layer == 0 else f"internals={internal_layer}",
         ],
         cwd=ROOT,
@@ -54,8 +54,9 @@ def test_oracle_captures_layer_1_moe_internals(tmp_path):
     require_local_moe_fixtures()
     oracle_dir = tmp_path / "oracle-layer-1"
     payload = run_oracle(oracle_dir, internal_layer=1)
-    assert payload["internals_captured"] == 18
+    assert payload["internals_captured"] == 19
     for name, count in {
+        "attn_norm-1": 2048,
         "ffn_inp-1": 2048,
         "ffn_norm-1": 2048,
         "ffn_moe_logits-1": 128,
@@ -81,7 +82,7 @@ def test_moe_stage_probe_accepts_oracle_ffn_input_and_exports_stages(tmp_path):
     require_local_moe_fixtures()
     oracle_dir = tmp_path / "oracle"
     oracle = run_oracle(oracle_dir)
-    assert oracle["internals_captured"] == 18
+    assert oracle["internals_captured"] == 19
 
     qx_dir = tmp_path / "qx"
     qx_dir.mkdir()
@@ -288,6 +289,50 @@ def test_moe_stage_q8_k_closes_layer_1_iq2_s_iq4_xs_divergence(tmp_path):
     weighted = read_f32(qx_dir / "ffn_moe_weighted-1.f32")
     qx_moe = [sum(weighted[rank * 2048 + i] for rank in range(8)) for i in range(2048)]
     assert max_abs(qx_moe, read_f32(oracle_dir / "ffn_moe_out-1.f32")) <= 5e-5
+
+
+def test_attention_stage_q8_k_matches_layer_1_with_same_input(tmp_path):
+    require_local_moe_fixtures()
+    oracle_dir = tmp_path / "oracle-layer-1"
+    qx_dir = tmp_path / "qx-attention-layer-1"
+    qx_dir.mkdir()
+    run_oracle(oracle_dir, internal_layer=1, kv_type="f16")
+
+    completed = subprocess.run(
+        [
+            str(QX_EXE),
+            "attention-stage-probe",
+            "--in",
+            str(QXF),
+            "--layer",
+            "1",
+            "--layer-in",
+            str(oracle_dir / "layer-1.f32"),
+            "--out-dir",
+            str(qx_dir),
+            "--activation",
+            "q8_k_compat",
+            "--kv",
+            "f16",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["projection_kernel"] == "q5_k_q8_k"
+    assert payload["v_projection_kernel"] == "q5_k_q8_k"
+    assert payload["output_projection_kernel"] == "q5_k_q8_k"
+    assert payload["kv_format"] == "f16"
+    assert payload["single_token_softmax"] == 1.0
+    assert (qx_dir / "attn_norm-1.f32").stat().st_size == 2048 * 4
+    assert (qx_dir / "Vcur-1.f32").stat().st_size == 512 * 4
+    assert (qx_dir / "kqv_out-1.f32").stat().st_size == 4096 * 4
+    assert (qx_dir / "attn_out-1.f32").stat().st_size == 2048 * 4
+    assert (qx_dir / "ffn_inp-1.f32").stat().st_size == 2048 * 4
+    assert max_abs(read_f32(qx_dir / "Vcur-1.f32"), read_f32(oracle_dir / "Vcur-1.f32")) <= 1e-5
+    assert max_abs(read_f32(qx_dir / "kqv_out-1.f32"), read_f32(oracle_dir / "kqv_out-1.f32")) <= 1e-5
+    assert max_abs(read_f32(qx_dir / "ffn_inp-1.f32"), read_f32(oracle_dir / "ffn_inp-1.f32")) <= 1e-4
 
 
 @pytest.mark.parametrize(

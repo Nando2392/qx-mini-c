@@ -14,11 +14,11 @@ confidence: high
 
 El bisect aislado de layer 0 usa exactamente el mismo `ffn_inp-0.f32` en QX y llama.cpp. Identificó que el router, top-8, renormalización, SiLU, mezcla y layouts QX son correctos. La diferencia de `ffn_moe_out-0` procedía principalmente del contrato de activación de los expertos CPU: ggml ejecuta `IQ2_XS × Q8_K` y `IQ3_XXS × Q8_K`, mientras QX usaba pesos decodificados contra F32.
 
-`q8_k_compat` se amplió, sólo de forma opt-in, a gate/up IQ2_XS y down IQ3_XXS. F32 continúa siendo el default. Tipos distintos mantienen fallback F32 explícito y la metadata declara la ruta realmente ejecutada.
+`q8_k_compat` se amplió, sólo de forma opt-in, a gate/up IQ2_XS y down IQ3_XXS. F32 continúa siendo el default. En este milestone, tipos distintos mantenían fallback F32 explícito; [[iq2-s-iq4-xs-q8k]] y [[layer1-layer2-sensitivity]] validaron después tipos 22/23 y Q5_K.
 
 Con el `ffn_inp` exacto del oracle, todas las etapas de layer 0 quedan dentro de max_abs `1.20e-6`. En el forward end-to-end, `ffn_moe_out-0` mejora de RMSE `6.77590e-4` a `1.40910e-4` y `l_out-0` de `7.03227e-4` a `1.41082e-4` frente a llama F16.
 
-La paridad global sigue refutada: la primera divergencia material pasa a **layer 2**, causada por la salida de layer 1. Layer 1 usa expertos `(22,22,23)` y conserva fallback F32. No se persigue el argmax cambiando aritmética: esos tipos requieren otro golden independiente antes de ampliar Q8_K.
+En este baseline, la primera divergencia material pasó a **layer 2** y layer 1 `(22,22,23)` conservaba fallback F32. Los goldens posteriores validaron esos tipos y el fix Q5_K redujo layer-2 RMSE a `0.00660423`; véase [[layer1-layer2-sensitivity]].
 
 ## Fuente primaria fijada
 
@@ -116,7 +116,7 @@ Comparación de inputs de las 48 capas, QX Q8_K/KV F32 contra llama F16:
 
 Gate material usado: max_abs ≤`1e-3` y cosine ≥`0.99999`. El gate estricto `1e-5` marca layer 1, como corresponde al ruido cuantizado residual.
 
-## E2E, logits y greedy
+## Baseline histórico pre-Q5_K: E2E, logits y greedy
 
 | Activación / KV | ffn_moe_out-0 RMSE / cosine | l_out-0 RMSE / cosine | final norm RMSE / cosine | logits RMSE / cosine |
 |---|---|---|---|---|
@@ -124,7 +124,7 @@ Gate material usado: max_abs ≤`1e-3` y cosine ≥`0.99999`. El gate estricto `
 | Q8_K / F32 | **1.40910e-4 / 0.999997595** | **1.41082e-4 / 0.999998410** | 1.074959 / 0.810037 | 1.472742 / 0.875870 |
 | Q8_K / INT8 | 4.91946e-4 / 0.999971785 | 5.10055e-4 / 0.999979364 | 1.074976 / 0.810359 | 1.469973 / 0.876367 |
 
-Todos conservan argmax `1124`, pero no hay paridad greedy:
+Todos conservaban argmax `1124`, pero en este baseline no había paridad greedy:
 
 | Activación / KV | `[42]` | `Hello!` |
 |---|---|---|
@@ -132,6 +132,8 @@ Todos conservan argmax `1124`, pero no hay paridad greedy:
 | Q8_K / F32 | `[1124, 11287]` | `[50865, 31518]` |
 | Q8_K / INT8 | `[1124, 11287]` | `[50865, 28065]` |
 | llama F16 | `[1124, 50853]` | `[358, 1184]` |
+
+Post-Q5_K, QX F32/INT8 coincide con esa fila llama F16 en la matriz fija. La tabla se conserva como evidencia causal del milestone MoE.
 
 ## Rendimiento
 

@@ -1,7 +1,7 @@
 ---
 title: QX versus llama.cpp numerical parity
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-18
 type: comparison
 tags: [validation, golden, quantization, kv-cache]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -9,6 +9,8 @@ confidence: high
 ---
 
 # QX versus llama.cpp numerical parity
+
+> **Baseline histórico superseded:** esta página conserva la evidencia pre-Q5_K que abrió los bisects posteriores. El estado actual está en [[layer1-layer2-sensitivity]]: la paridad numérica exacta sigue refutada, pero QX F32/INT8 ya coincide con llama F16 en `[1124,50853]` para `[42]` y `[358,1184]` para `Hello!`.
 
 ## Pregunta
 
@@ -56,7 +58,7 @@ QX calcula IQ4_XS decodificado × activación F32. La ruta CPU ggml empareja IQ4
 
 Esto es una diferencia de contrato numérico explícita, no evidencia de que el decoder IQ4_XS QX lea mal los pesos. Los goldens independientes de filas siguen validando el decoder.
 
-## Propagación por capas después del fix
+## Baseline pre-Q5_K: propagación por capas después del fix de routing
 
 | Layer input | F32/F16 max-abs | F32/F16 RMSE | F32/F16 cosine | INT8/Q8_0 max-abs | INT8/Q8_0 RMSE | INT8/Q8_0 cosine |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -67,7 +69,7 @@ Esto es una diferencia de contrato numérico explícita, no evidencia de que el 
 
 Los valores absolutos crecen con la escala del residual. Cosine se conserva alto, pero exactitud residual no existe.
 
-## Residual final pre-head
+## Baseline pre-Q5_K: residual final pre-head
 
 `l_out-47` se captura directamente en llama.cpp y se compara contra `step-0-layer-47-output.f32` de QX:
 
@@ -78,7 +80,7 @@ Los valores absolutos crecen con la escala del residual. Cosine se conserva alto
 
 Por tanto, la similitud alta del **input** de layer 47 no puede extrapolarse a la salida final. El residual pre-head diverge materialmente y explica parte de la separación posterior de logits.
 
-## Logits completos
+## Baseline pre-Q5_K: logits completos
 
 | Modos | count | max-abs | RMSE | cosine | argmax QX | argmax llama |
 |---|---:|---:|---:|---:|---:|---:|
@@ -87,14 +89,14 @@ Por tanto, la similitud alta del **input** de layer 47 no puede extrapolarse a l
 
 Coincidencia greedy no implica paridad de logits.
 
-## Secuencias greedy
+## Baseline pre-Q5_K: secuencias greedy
 
 | Prompt | llama F16 | llama Q8_0 | QX INT8 |
 |---|---|---|---|
 | token IDs `[42]` | `[1124, 50853]` | `[1124, 50853]` | `[1124, 11287]` |
 | `Hello!` / `[9707, 0]` | `[358, 1184]` | `[358, 614]` | `[81379, 44707]` |
 
-La comparación usa un oracle secuencial llama.cpp independiente con contexto/KV persistente. Para `[42]` sólo coincide el primer token; para `Hello!` la secuencia diverge desde el primer generado. La diferencia F16/Q8_0 del segundo token de `Hello!` demuestra además que el formato KV afecta la secuencia una vez existe contexto.
+La comparación usa un oracle secuencial llama.cpp independiente con contexto/KV persistente. En este baseline, para `[42]` sólo coincidía el primer token y `Hello!` divergía desde el primero generado. La diferencia F16/Q8_0 del segundo token de `Hello!` demuestra además que el formato KV afecta la secuencia una vez existe contexto. El fix Q5_K posterior supersede únicamente los outputs QX de esta tabla.
 
 ## Reproducción
 
@@ -111,8 +113,8 @@ python scripts\compare_logits.py --qx %TEMP%\qx-f32\step-0-logits.f32 --llama %T
 
 ## Veredicto
 
-**Paridad numérica exacta: refutada.**
+**Paridad numérica exacta: refutada, tanto en este baseline como post-Q5_K.**
 
-**Primer greedy para `[42]`: coincide (`1124`); secuencias de dos tokens: divergen.**
+**Estado post-Q5_K:** la matriz de dos prompts/dos tokens pasa contra llama F16; cobertura exhaustiva sigue pendiente.
 
-El milestone corrige el bug de routing y deja la diferencia restante explicada y reproducible. La decisión siguiente en [[current-status-and-roadmap]] es implementar un modo compatible con activaciones Q8_K o conservar F32 como diseño más preciso pero no bit-compatible.
+Este milestone corrigió el bug de routing y dejó un baseline reproducible. Los milestones [[f32-vs-q8k-activation]], [[moe-stage-bisect]], [[iq2-s-iq4-xs-q8k]] y [[layer1-layer2-sensitivity]] contienen la evolución posterior.

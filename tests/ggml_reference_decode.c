@@ -92,14 +92,15 @@ int main(int argc, char **argv) {
     if (argc != 5) {
         fprintf(stderr, "usage: ggml_reference_decode q8_k_quantize <activation.f32>\n"
                         "   or: ggml_reference_decode <iq2_xs|iq3_xxs|iq2_s|iq4_xs>_q8_k_dot <file> <offset> <blocks> <activation.f32>\n"
-                        "   or: ggml_reference_decode <iq2_xs|iq3_xxs> <file> <offset> <blocks>\n"
+                        "   or: ggml_reference_decode <q5_k|iq2_xs|iq3_xxs> <file> <offset> <blocks>\n"
                         "   or: ggml_reference_decode q6_k_logits <file> <offset> <rows> <activation.f32>\n");
         return 2;
     }
     uint64_t offset = 0, blocks = 0;
     if (!parse_u64(argv[3], &offset) || !parse_u64(argv[4], &blocks) || !blocks) return 2;
     size_t block_size = 0;
-    if (strcmp(argv[1], "iq2_xs") == 0) block_size = sizeof(block_iq2_xs);
+    if (strcmp(argv[1], "q5_k") == 0) block_size = sizeof(block_q5_K);
+    else if (strcmp(argv[1], "iq2_xs") == 0) block_size = sizeof(block_iq2_xs);
     else if (strcmp(argv[1], "iq3_xxs") == 0) block_size = sizeof(block_iq3_xxs);
     else return 2;
     FILE *input = fopen(argv[2], "rb");
@@ -110,7 +111,8 @@ int main(int argc, char **argv) {
     if (!raw || !decoded) { free(raw); free(decoded); fclose(input); return 4; }
     if (fread(raw, block_size, (size_t)blocks, input) != (size_t)blocks) { free(raw); free(decoded); fclose(input); return 3; }
     fclose(input);
-    if (strcmp(argv[1], "iq2_xs") == 0) dequantize_row_iq2_xs((const block_iq2_xs *)raw, decoded, (int64_t)blocks * 256);
+    if (strcmp(argv[1], "q5_k") == 0) dequantize_row_q5_K((const block_q5_K *)raw, decoded, (int64_t)blocks * 256);
+    else if (strcmp(argv[1], "iq2_xs") == 0) dequantize_row_iq2_xs((const block_iq2_xs *)raw, decoded, (int64_t)blocks * 256);
     else dequantize_row_iq3_xxs((const block_iq3_xxs *)raw, decoded, (int64_t)blocks * 256);
     size_t count = (size_t)blocks * 256u;
     int ok = fwrite(decoded, sizeof(float), count, stdout) == count;

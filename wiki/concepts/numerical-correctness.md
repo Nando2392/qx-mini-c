@@ -37,7 +37,7 @@ Cada slice se valida antes de combinarlo:
 
 ```text
 tokens greedy multi-token idénticos
-bisect de amplificación layer 1 → layer 2 con experto dominante 68
+bisect layer 2 → logits
 Δppl KV INT8 <0.5%
 contexto 4K sin fugas
 RSS ±5%
@@ -52,26 +52,26 @@ Después del fix, token `42` conserva input layer 0 exacto y argmax `1124` en QX
 
 La causa de esa primera diferencia es un contrato de multiplicación distinto: QX usa pesos IQ4_XS decodificados × activación F32, mientras la ruta CPU ggml empareja IQ4_XS con activación temporal Q8_K. El cache también difiere: QX INT8 escala por vector y llama Q8_0 por bloques. El modo diagnóstico F32 QX separa ese efecto sin cambiar el runtime INT8 normal.
 
-La comparación de 151936 logits refuta paridad completa: F32/F16 tiene max-abs `9.09395`, RMSE `1.47826`, cosine `0.874880`; INT8/Q8_0 tiene max-abs `9.13947`, RMSE `1.48539`, cosine `0.875121`. Ambos conservan argmax `1124`. Detalle y comandos: [[llama-cpp-parity]].
+La comparación post-Q5_K de 151936 logits aún refuta igualdad exacta: F32/F32-KV frente a llama F16 tiene max-abs `1.57686`, RMSE `0.203839`, cosine `0.998247`; Q8_K/F32-KV tiene max-abs `0.171505`, RMSE `0.0346769`, cosine `0.999936486`. Ambos conservan argmax `1124`. Detalle y comandos: [[layer1-layer2-sensitivity]].
 
-El residual final pre-head también se mide directamente: F32/F16 `max_abs=1099.6502`, RMSE `32.9520`, cosine `0.439279`; INT8/Q8_0 `max_abs=1100.9628`, RMSE `33.0204`, cosine `0.440512`.
+El residual final pre-head también se mide directamente. Post-Q5_K, F32/F16 queda en `max_abs=199.862`, RMSE `6.67964`, cosine `0.997511`; Q8_K/F32-KV queda en `max_abs=1.09668`, RMSE `0.0932631`, cosine `0.999996986`.
 
-El oracle secuencial también refuta paridad greedy a dos tokens. Para `[42]`, llama produce `[1124, 50853]` y QX `[1124, 11287]`. Para `Hello!` (`[9707, 0]`), llama F16/Q8_0 produce `[358, 1184]`/`[358, 614]`, mientras QX produce `[81379, 44707]`.
+El oracle secuencial pasa paridad greedy a dos tokens para la matriz fija post-Q5_K. Para `[42]`, llama F16/Q8_0 y QX F32/INT8 producen `[1124, 50853]`. Para `Hello!` (`[9707, 0]`), QX produce `[358, 1184]`, igual a llama F16; llama Q8_0 produce `[358, 614]`.
 
-Este resultado es una refutación reproducible de paridad exacta, no un PASS numérico.
+Este resultado prueba secuencia para dos prompts y dos tokens; no prueba paridad exacta de todos los logits/residuos ni cobertura exhaustiva de prompts.
 
 ## Gate Q8_K compatible
 
-**Implementado y medido:** `q8_k_compat` reproduce el temporal CPU de ggml para proyecciones IQ4_XS y mantiene fallback F32 explícito para Q5_K/Q6_K. F32 continúa siendo el default.
+**Implementado y medido:** `q8_k_compat` reproduce el temporal CPU de ggml para proyecciones IQ4_XS y Q5_K; mantiene fallback F32 explícito para Q6_K y cualquier tipo sin golden. F32 continúa siendo el default.
 
 La serialización QX coincide byte por byte con `quantize_row_q8_K_ref` del oracle fijado para cuatro distribuciones: mixed, todo positivo, todo negativo y extremos alternos ±1. El gate cubre signo de escala, redondeo, clamp, `qs` y `bsums`; no se infiere equivalencia sólo de logits.
 
 En `Vcur-0`, el modo reduce max-abs de `0.000305031` a `7.45e-9` y RMSE de `8.316e-5` a `1.158e-9`. En `kqv_out-0`, max-abs baja de `0.000305337` a `1.486e-5`. La mejora no cierra el forward: la siguiente diferencia material aparece en `ffn_moe_out-0`; logits Q8_K/F32-KV mantienen max-abs `9.09348`, RMSE `1.47465`, cosine `0.875527` y argmax `1124`.
 
-El bisect posterior [[moe-stage-bisect]] amplió el modo opt-in a expertos IQ2_XS/IQ3_XXS. [[iq2-s-iq4-xs-q8k]] añadió goldens separados para `22=IQ2_S` y `23=IQ4_XS`. Con el mismo `ffn_inp-1`, gate/up/down y mezcla layer 1 alcanzan cosine ≈`1`; la mezcla final tiene max-abs `4.35e-5` y RMSE `9.62e-7`. La primera divergencia material sigue en input layer 2, ahora atribuida a amplificación de una perturbación previa, no a fallback ni a un vec-dot sin validar.
+El bisect posterior [[moe-stage-bisect]] amplió el modo opt-in a expertos IQ2_XS/IQ3_XXS. [[iq2-s-iq4-xs-q8k]] añadió goldens separados para `22=IQ2_S` y `23=IQ4_XS`. [[layer1-layer2-sensitivity]] encontró y corrigió el decoder Q5_K y añadió `Q5_K × Q8_K`. Con el mismo `attn_norm-1` y KV F16, `attn_out-1` alcanza max-abs `6.33e-8`; con el mismo `ffn_inp-1`, la mezcla MoE mantiene max-abs `4.35e-5`. Post-fix, layer-2-input Q8_K/F32-KV queda en max-abs `0.294106`, RMSE `0.00660423`, cosine `0.999999906`. La diferencia restante es sensibilidad cuantizada: el top-8 no cambia y el experto 68 aporta `99.03%` del delta MoE.
 
-El final norm también se captura desde la API pública de embeddings del oracle. Tras extender layer 1, Q8_K/F32-KV frente a llama F16 mantiene max-abs `9.96629`, RMSE `1.07620`, cosine `0.797838`; por tanto, la normalización final no recupera la divergencia acumulada.
+El final norm también se captura desde la API pública de embeddings del oracle. Post-Q5_K, Q8_K/F32-KV frente a llama F16 queda en max-abs `0.0659037`, RMSE `0.00731730`, cosine `0.999986548`; mejora fuertemente, pero no convierte la comparación en igualdad exacta.
 
-Las secuencias greedy siguen divergentes. La decisión, matriz completa, índices máximos y trade-offs están en [[f32-vs-q8k-activation]].
+La matriz greedy fija queda GREEN post-Q5_K. La decisión, matriz numérica, índices máximos y trade-offs están en [[layer1-layer2-sensitivity]] y [[f32-vs-q8k-activation]].
 
 La política de investigación está en [[auto-research-loop]] y el avance en [[current-status-and-roadmap]].

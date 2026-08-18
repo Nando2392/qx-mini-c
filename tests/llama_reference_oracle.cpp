@@ -75,7 +75,7 @@ struct internal_capture_state {
 
     explicit internal_capture_state(uint32_t layer) {
         static const char * names[] = {
-            "ffn_inp", "ffn_norm", "ffn_moe_logits", "ffn_moe_probs", "ffn_moe_topk",
+            "attn_norm", "ffn_inp", "ffn_norm", "ffn_moe_logits", "ffn_moe_probs", "ffn_moe_topk",
             "ffn_moe_weights", "ffn_moe_weights_sum", "ffn_moe_weights_norm", "ffn_moe_gate",
             "ffn_moe_up", "ffn_moe_swiglu", "ffn_moe_down", "ffn_moe_weighted", "ffn_moe_out",
             "l_out", "Vcur", "kqv_out",
@@ -139,7 +139,7 @@ static bool capture_internal_tensor(struct ggml_tensor * tensor, bool ask, void 
 
 int main(int argc, char ** argv) {
     if (argc < 5 || argc > 7) {
-        std::fprintf(stderr, "usage: llama_reference_oracle <model.gguf> <output-dir> <token-id> <layers-csv> [f16|q8_0] [internals|internals=N]\n");
+        std::fprintf(stderr, "usage: llama_reference_oracle <model.gguf> <output-dir> <token-id> <layers-csv> [f32|f16|q8_0] [internals|internals=N]\n");
         return 2;
     }
     const char * kv_type_name = argc >= 6 ? argv[5] : "f16";
@@ -151,7 +151,8 @@ int main(int argc, char ** argv) {
         else { std::fprintf(stderr, "unsupported capture mode\n"); return 2; }
     }
     enum ggml_type kv_type = GGML_TYPE_F16;
-    if (std::strcmp(kv_type_name, "q8_0") == 0) kv_type = GGML_TYPE_Q8_0;
+    if (std::strcmp(kv_type_name, "f32") == 0) kv_type = GGML_TYPE_F32;
+    else if (std::strcmp(kv_type_name, "q8_0") == 0) kv_type = GGML_TYPE_Q8_0;
     else if (std::strcmp(kv_type_name, "f16") != 0) {
         std::fprintf(stderr, "unsupported KV type\n");
         return 2;
