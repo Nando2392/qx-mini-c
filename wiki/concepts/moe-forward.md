@@ -46,6 +46,6 @@ Los tipos no son homogéneos. Layers `0/1/24/47` usan respectivamente `(17,17,18
 - Los 47 enlaces adyacentes cumplieron `residual_output_checksum[N] == residual_input_checksum[N+1]`.
 - Validado externamente: el fix de routing redujo el error de entrada de layer 1 desde max-abs aproximado `1.08` hasta `0.00589` en F32/F16; la paridad exacta restante está refutada por diferencias de contrato numérico posteriores.
 - Pendiente: golden end-to-end de todos los tipos quant multi-layer.
-- `q8_k_compat` cubre ahora gate/up IQ2_XS y down IQ3_XXS de layer 0. Con el mismo `ffn_inp`, todas las etapas quedan dentro de max-abs `1.20e-6`; end-to-end `ffn_moe_out-0` queda en RMSE `1.41e-4`. La primera divergencia material pasa al input de layer 2 por el fallback F32 de tipos 22/23 en layer 1. Véase [[moe-stage-bisect]].
+- `q8_k_compat` cubre gate/up IQ2_XS y down IQ3_XXS de layer 0, y gate/up IQ2_S más down IQ4_XS de layers 1/47. Con el mismo `ffn_inp-1`, la mezcla layer 1 queda en max-abs `4.35e-5`, RMSE `9.62e-7`, cosine ≈`1`. End-to-end, una diferencia de entrada layer 1 de `7.50e-4` se amplifica hasta `28.20` en input layer 2; el siguiente gate es sensibilidad/propagación, no el vec-dot. Véanse [[moe-stage-bisect]] y [[iq2-s-iq4-xs-q8k]].
 
 Gates: [[numerical-correctness]]. Rendimiento: [[performance-model]].

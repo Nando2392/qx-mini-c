@@ -381,7 +381,7 @@ def test_state_loop_supports_diagnostic_f32_kv(tmp_path):
     assert (dump_dir / "step-0-layer-0-ffn-inp.f32").stat().st_size == 2048 * 4
 
 
-def test_q8_k_compat_preserves_explicit_f32_fallback_for_non_iq4_xs_layers():
+def test_q8_k_compat_reports_combined_expert_kernel_families_for_two_layers():
     if not EXE.exists() or not MODEL.exists():
         pytest.skip("real Qwen runtime fixtures are not available")
     payload = json.loads(
@@ -392,7 +392,9 @@ def test_q8_k_compat_preserves_explicit_f32_fallback_for_non_iq4_xs_layers():
     )
     assert payload["activation_format"] == "q8_k_compat"
     assert payload["projection_kernel"] == "iq4_xs_q8_k_with_f32_fallback"
-    assert payload["moe_projection_kernel"] == "iq2_xs_iq3_xxs_q8_k_with_f32_fallback"
+    assert payload["moe_projection_kernel"] == "iq2_xs_iq3_xxs_iq2_s_iq4_xs_q8_k"
+    assert payload["moe_gate_up_projection_kernel"] == "iq2_xs_iq2_s_q8_k"
+    assert payload["moe_down_projection_kernel"] == "iq3_xxs_iq4_xs_q8_k"
     assert payload["layers_run"] == 2
     assert payload["tokens"][0]["layers"][1]["q_ggml_type"] == 13
 
@@ -418,6 +420,8 @@ def test_state_loop_exposes_explicit_q8_k_compat_activation_mode(tmp_path):
     assert payload["projection_kernel"] == "iq4_xs_q8_k"
     assert payload["activation_workspace_bytes"] == 16 * 292
     assert payload["moe_projection_kernel"] == "iq2_xs_q8_k_and_iq3_xxs_q8_k"
+    assert payload["moe_gate_up_projection_kernel"] == "iq2_xs_q8_k"
+    assert payload["moe_down_projection_kernel"] == "iq3_xxs_q8_k"
     assert payload["moe_activation_workspace_bytes"] == 8 * 292
     assert (dump_dir / "step-0-layer-0-v-cur.f32").stat().st_size == 512 * 4
 

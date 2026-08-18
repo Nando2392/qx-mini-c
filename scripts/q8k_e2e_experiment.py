@@ -16,6 +16,23 @@ from pathlib import Path
 MODES = (("f32", "f32"), ("f32", "int8"), ("q8_k_compat", "f32"), ("q8_k_compat", "int8"))
 
 
+def checkpoint_pairs(out: Path, oracle: Path) -> dict[str, tuple[Path, Path]]:
+    return {
+        "layer-0-input": (out / "step-0-layer-0-input.f32", oracle / "layer-0.f32"),
+        "v-cur-0": (out / "step-0-layer-0-v-cur.f32", oracle / "Vcur-0.f32"),
+        "kqv-out-0": (out / "step-0-layer-0-kqv-out.f32", oracle / "kqv_out-0.f32"),
+        "ffn-inp-0": (out / "step-0-layer-0-ffn-inp.f32", oracle / "ffn_inp-0.f32"),
+        "ffn-moe-out-0": (out / "step-0-layer-0-ffn-moe-out.f32", oracle / "ffn_moe_out-0.f32"),
+        "l-out-0": (out / "step-0-layer-0-output.f32", oracle / "l_out-0.f32"),
+        "layer-1-input": (out / "step-0-layer-1-input.f32", oracle / "layer-1.f32"),
+        "layer-2-input": (out / "step-0-layer-2-input.f32", oracle / "layer-2.f32"),
+        "layer-24-input": (out / "step-0-layer-24-input.f32", oracle / "layer-24.f32"),
+        "layer-47-input": (out / "step-0-layer-47-input.f32", oracle / "layer-47.f32"),
+        "l-out-47": (out / "step-0-layer-47-output.f32", oracle / "l_out-47.f32"),
+        "logits": (out / "step-0-logits.f32", oracle / "logits.f32"),
+    }
+
+
 def load_f32(path: Path) -> list[float]:
     raw = path.read_bytes()
     if not raw or len(raw) % 4:
@@ -53,20 +70,7 @@ def run(args: argparse.Namespace, activation: str, kv: str) -> dict:
     payload = json.loads(completed.stdout)
     head = payload["tokens"][0]["final_head"]
     comparisons = {}
-    pairs = {
-        "layer-0-input": (out / "step-0-layer-0-input.f32", args.oracle / "layer-0.f32"),
-        "v-cur-0": (out / "step-0-layer-0-v-cur.f32", args.oracle / "Vcur-0.f32"),
-        "kqv-out-0": (out / "step-0-layer-0-kqv-out.f32", args.oracle / "kqv_out-0.f32"),
-        "ffn-inp-0": (out / "step-0-layer-0-ffn-inp.f32", args.oracle / "ffn_inp-0.f32"),
-        "ffn-moe-out-0": (out / "step-0-layer-0-ffn-moe-out.f32", args.oracle / "ffn_moe_out-0.f32"),
-        "l-out-0": (out / "step-0-layer-0-output.f32", args.oracle / "l_out-0.f32"),
-        "layer-1-input": (out / "step-0-layer-1-input.f32", args.oracle / "layer-1.f32"),
-        "layer-24-input": (out / "step-0-layer-24-input.f32", args.oracle / "layer-24.f32"),
-        "layer-47-input": (out / "step-0-layer-47-input.f32", args.oracle / "layer-47.f32"),
-        "l-out-47": (out / "step-0-layer-47-output.f32", args.oracle / "l_out-47.f32"),
-        "logits": (out / "step-0-logits.f32", args.oracle / "logits.f32"),
-    }
-    for checkpoint, (actual, expected) in pairs.items():
+    for checkpoint, (actual, expected) in checkpoint_pairs(out, args.oracle).items():
         comparisons[checkpoint] = metrics(load_f32(actual), load_f32(expected))
     comparisons["final-norm"] = metrics(head["final_norm_raw"], load_f32(args.oracle / "result_norm.f32"))
     return {

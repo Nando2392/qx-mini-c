@@ -25,7 +25,7 @@ def require_local_moe_fixtures():
         pytest.skip("pinned llama.cpp oracle checkout is not available")
 
 
-def run_oracle(output: Path):
+def run_oracle(output: Path, internal_layer=0):
     env = os.environ.copy()
     env["LLAMA_CPP_DIR"] = str(LLAMA_CPP_DIR)
     build = subprocess.run(
@@ -33,13 +33,38 @@ def run_oracle(output: Path):
     )
     assert build.returncode == 0, build.stdout + build.stderr
     result = subprocess.run(
-        [str(LLAMA_EXE), str(GGUF), str(output), "42", "0", "f16", "internals"],
+        [
+            str(LLAMA_EXE),
+            str(GGUF),
+            str(output),
+            "42",
+            str(internal_layer),
+            "f16",
+            "internals" if internal_layer == 0 else f"internals={internal_layer}",
+        ],
         cwd=ROOT,
         text=True,
         capture_output=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
+
+
+def test_oracle_captures_layer_1_moe_internals(tmp_path):
+    require_local_moe_fixtures()
+    oracle_dir = tmp_path / "oracle-layer-1"
+    payload = run_oracle(oracle_dir, internal_layer=1)
+    assert payload["internals_captured"] == 18
+    for name, count in {
+        "ffn_inp-1": 2048,
+        "ffn_norm-1": 2048,
+        "ffn_moe_logits-1": 128,
+        "ffn_moe_gate-1": 768 * 8,
+        "ffn_moe_down-1": 2048 * 8,
+        "ffn_moe_out-1": 2048,
+        "l_out-1": 2048,
+    }.items():
+        assert (oracle_dir / f"{name}.f32").stat().st_size == count * 4
 
 
 def read_f32(path: Path):
@@ -108,18 +133,20 @@ def test_moe_stage_probe_accepts_oracle_ffn_input_and_exports_stages(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("tensor_name", "quant_name", "block_size", "rows", "activation_name", "activation_count"),
+    ("internal_layer", "tensor_name", "quant_name", "block_size", "expert", "rows", "activation_name", "activation_count"),
     [
-        ("blk.0.ffn_gate_exps.weight", "iq2_xs", 74, (0, 384, 767), "ffn_norm-0.f32", 2048),
-        ("blk.0.ffn_down_exps.weight", "iq3_xxs", 98, (0, 1024, 2047), "ffn_moe_swiglu-0.f32", 768),
+        (0, "blk.0.ffn_gate_exps.weight", "iq2_xs", 74, 49, (0, 384, 767), "ffn_norm-0.f32", 2048),
+        (0, "blk.0.ffn_down_exps.weight", "iq3_xxs", 98, 49, (0, 1024, 2047), "ffn_moe_swiglu-0.f32", 768),
+        (1, "blk.1.ffn_gate_exps.weight", "iq2_s", 82, 0, (0, 384, 767), "ffn_norm-1.f32", 2048),
+        (1, "blk.1.ffn_down_exps.weight", "iq4_xs", 136, 0, (0, 1024, 2047), "ffn_moe_swiglu-1.f32", 768),
     ],
 )
 def test_q8_k_expert_dot_matches_pinned_ggml_kernel(
-    tmp_path, tensor_name, quant_name, block_size, rows, activation_name, activation_count
+    tmp_path, internal_layer, tensor_name, quant_name, block_size, expert, rows, activation_name, activation_count
 ):
     require_local_moe_fixtures()
     oracle_dir = tmp_path / "oracle"
-    run_oracle(oracle_dir)
+    run_oracle(oracle_dir, internal_layer=internal_layer)
     env = os.environ.copy()
     env["LLAMA_CPP_DIR"] = str(LLAMA_CPP_DIR)
     built = subprocess.run(
@@ -139,7 +166,6 @@ def test_q8_k_expert_dot_matches_pinned_ggml_kernel(
         )
     )
     blocks = activation_count // 256
-    expert = 49
     expert_bytes = tensor["byte_size"] // tensor["dims"][2]
     row_bytes = blocks * block_size
     for row in rows:
@@ -223,6 +249,47 @@ def test_moe_stage_q8_k_closes_expert_kernel_divergence(tmp_path):
     assert max_abs(qx_moe, oracle_moe) <= 1e-5
 
 
+def test_moe_stage_q8_k_closes_layer_1_iq2_s_iq4_xs_divergence(tmp_path):
+    require_local_moe_fixtures()
+    oracle_dir = tmp_path / "oracle-layer-1"
+    qx_dir = tmp_path / "qx-layer-1"
+    qx_dir.mkdir()
+    run_oracle(oracle_dir, internal_layer=1)
+    completed = subprocess.run(
+        [
+            str(QX_EXE),
+            "moe-stage-probe",
+            "--in",
+            str(QXF),
+            "--layer",
+            "1",
+            "--ffn-inp",
+            str(oracle_dir / "ffn_inp-1.f32"),
+            "--out-dir",
+            str(qx_dir),
+            "--activation",
+            "q8_k_compat",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["projection_kernel"] == "iq2_s_q8_k_and_iq4_xs_q8_k"
+    assert payload["gate_up_projection_kernel"] == "iq2_s_q8_k"
+    assert payload["down_projection_kernel"] == "iq4_xs_q8_k"
+    for name, limit in {
+        "ffn_moe_gate-1": 5e-6,
+        "ffn_moe_up-1": 5e-6,
+        "ffn_moe_swiglu-1": 5e-5,
+        "ffn_moe_down-1": 1.5e-4,
+    }.items():
+        assert max_abs(read_f32(qx_dir / f"{name}.f32"), read_f32(oracle_dir / f"{name}.f32")) <= limit
+    weighted = read_f32(qx_dir / "ffn_moe_weighted-1.f32")
+    qx_moe = [sum(weighted[rank * 2048 + i] for rank in range(8)) for i in range(2048)]
+    assert max_abs(qx_moe, read_f32(oracle_dir / "ffn_moe_out-1.f32")) <= 5e-5
+
+
 @pytest.mark.parametrize(
     ("case", "values", "layer", "create_output", "expected_error"),
     [
@@ -301,15 +368,15 @@ def test_real_moe_layers_preserve_quant_types_and_expert_row_strides(
 
 
 @pytest.mark.parametrize(
-    ("layer", "expected_kernel"),
+    ("layer", "expected_kernel", "expected_gate_up_kernel", "expected_down_kernel"),
     [
-        (1, "dequant_f32"),
-        (24, "iq2_xs_iq3_xxs_q8_k_with_f32_fallback"),
-        (47, "dequant_f32"),
+        (1, "iq2_s_q8_k_and_iq4_xs_q8_k", "iq2_s_q8_k", "iq4_xs_q8_k"),
+        (24, "q8_k_expert_kernels_with_f32_fallback", "iq2_xs_q8_k", "dequant_f32"),
+        (47, "iq2_s_q8_k_and_iq4_xs_q8_k", "iq2_s_q8_k", "iq4_xs_q8_k"),
     ],
 )
 def test_moe_stage_q8_k_reports_actual_fallback_for_heterogeneous_layers(
-    tmp_path, layer, expected_kernel
+    tmp_path, layer, expected_kernel, expected_gate_up_kernel, expected_down_kernel
 ):
     require_local_moe_fixtures()
     sidecar = tmp_path / "ffn-inp.f32"
@@ -335,4 +402,7 @@ def test_moe_stage_q8_k_reports_actual_fallback_for_heterogeneous_layers(
         capture_output=True,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert json.loads(completed.stdout)["projection_kernel"] == expected_kernel
+    payload = json.loads(completed.stdout)
+    assert payload["projection_kernel"] == expected_kernel
+    assert payload["gate_up_projection_kernel"] == expected_gate_up_kernel
+    assert payload["down_projection_kernel"] == expected_down_kernel

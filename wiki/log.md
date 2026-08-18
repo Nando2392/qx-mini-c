@@ -131,3 +131,13 @@
 - Añadidos vec-dot CPU IQ2_XS×Q8_K e IQ3_XXS×Q8_K verificados contra traits públicos ggml; F32 sigue default y otros tipos conservan fallback explícito.
 - End-to-end `ffn_moe_out-0` mejora a RMSE `1.40910e-4`; primera divergencia material actual: input layer 2 por tipos 22/23 de layer 1.
 - Greedy sigue sin paridad. Benchmark 5 warm, 48 capas/KV INT8: F32 `9.24408 s/token`, Q8_K `3.88918 s/token`, speedup `2.37687×`; RSS mediano no aumenta.
+
+## [2026-08-18] update | Expertos IQ2_S/IQ4_XS × Q8_K
+
+- Corregido el alcance de tipos: en el oracle fijado `21=IQ3_S`, `22=IQ2_S`, `23=IQ4_XS`; layers 1/47 usan `(22,22,23)`.
+- Añadidos goldens por fila contra traits públicos ggml para `IQ2_S × Q8_K` e `IQ4_XS × Q8_K` y captura `internals=N` seleccionable.
+- Con el mismo `ffn_inp-1`, layer 1 pasa por etapa: mezcla final max-abs `4.35e-5`, RMSE `9.62e-7`, cosine ≈`1`.
+- End-to-end, `layer-1-input` Q8_K/F32-KV queda en max-abs `7.50e-4`, pero se amplifica a `28.20` en input layer 2; logits/greedy siguen sin paridad.
+- Benchmark 5 warm, 48 capas/KV INT8: F32 `8.00310 s/token`, Q8_K `2.28223 s/token`, speedup `3.50670×`; RSS difiere sólo una página.
+- F32 sigue default; metadata agrega familias realmente ejecutadas y conserva fallback explícito para tipos sin golden.
+- Review independiente detectó que el string agregado no preservaba gate/up frente a down en todas las mezclas. Se añadieron campos exactos por rol y tests RED→GREEN para layers 0–1 y fallback layer 24.

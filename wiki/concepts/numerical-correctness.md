@@ -29,7 +29,7 @@ Cada slice se valida antes de combinarlo:
 ## Referencias independientes
 
 - Python lee bytes QXF directamente para Q4_K e IQ4_XS.
-- Un helper enlazado con llama.cpp valida filas IQ2_XS/IQ3_XXS.
+- Un helper enlazado con llama.cpp valida filas IQ2_XS/IQ3_XXS/IQ2_S/IQ4_XS contra activaciones Q8_K.
 - El mismo helper usa `dequantize_row_q6_K` oficial para recalcular las 151936 logits y el argmax.
 - El output C nunca se reutiliza como referencia esperada.
 
@@ -37,7 +37,7 @@ Cada slice se valida antes de combinarlo:
 
 ```text
 tokens greedy multi-token idénticos
-golden Q8_K para expertos tipos 22/23 después del bisect layer 0
+bisect de amplificación layer 1 → layer 2 con experto dominante 68
 Δppl KV INT8 <0.5%
 contexto 4K sin fugas
 RSS ±5%
@@ -68,9 +68,9 @@ La serialización QX coincide byte por byte con `quantize_row_q8_K_ref` del orac
 
 En `Vcur-0`, el modo reduce max-abs de `0.000305031` a `7.45e-9` y RMSE de `8.316e-5` a `1.158e-9`. En `kqv_out-0`, max-abs baja de `0.000305337` a `1.486e-5`. La mejora no cierra el forward: la siguiente diferencia material aparece en `ffn_moe_out-0`; logits Q8_K/F32-KV mantienen max-abs `9.09348`, RMSE `1.47465`, cosine `0.875527` y argmax `1124`.
 
-El bisect posterior [[moe-stage-bisect]] amplió el modo opt-in a expertos IQ2_XS/IQ3_XXS. Con el mismo `ffn_inp`, router, top-8 y todas las etapas de layer 0 quedan dentro de max-abs `1.20e-6`. End-to-end `ffn_moe_out-0` mejora a max-abs `0.000701189`, RMSE `0.000140910`, cosine `0.999997595`. La primera divergencia material se desplaza a input layer 2 porque layer 1 usa tipos 22/23 y mantiene fallback F32.
+El bisect posterior [[moe-stage-bisect]] amplió el modo opt-in a expertos IQ2_XS/IQ3_XXS. [[iq2-s-iq4-xs-q8k]] añadió goldens separados para `22=IQ2_S` y `23=IQ4_XS`. Con el mismo `ffn_inp-1`, gate/up/down y mezcla layer 1 alcanzan cosine ≈`1`; la mezcla final tiene max-abs `4.35e-5` y RMSE `9.62e-7`. La primera divergencia material sigue en input layer 2, ahora atribuida a amplificación de una perturbación previa, no a fallback ni a un vec-dot sin validar.
 
-El final norm también se captura desde la API pública de embeddings del oracle. Tras el bisect MoE, Q8_K/F32-KV frente a llama F16 mantiene max-abs `8.65504`, RMSE `1.07496`, cosine `0.810037`; por tanto, la normalización final no recupera la divergencia acumulada.
+El final norm también se captura desde la API pública de embeddings del oracle. Tras extender layer 1, Q8_K/F32-KV frente a llama F16 mantiene max-abs `9.96629`, RMSE `1.07620`, cosine `0.797838`; por tanto, la normalización final no recupera la divergencia acumulada.
 
 Las secuencias greedy siguen divergentes. La decisión, matriz completa, índices máximos y trade-offs están en [[f32-vs-q8k-activation]].
 

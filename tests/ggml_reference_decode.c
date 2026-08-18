@@ -31,10 +31,13 @@ int main(int argc, char **argv) {
         quantize_row_q8_K_ref(activation, &block, QK_K);
         return fwrite(&block, sizeof(block), 1, stdout) == 1 ? 0 : 5;
     }
-    if (argc == 6 && (strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 || strcmp(argv[1], "iq3_xxs_q8_k_dot") == 0)) {
+    if (argc == 6 && (strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 || strcmp(argv[1], "iq3_xxs_q8_k_dot") == 0 ||
+                      strcmp(argv[1], "iq2_s_q8_k_dot") == 0 || strcmp(argv[1], "iq4_xs_q8_k_dot") == 0)) {
         uint64_t offset = 0, blocks = 0;
         if (!parse_u64(argv[3], &offset) || !parse_u64(argv[4], &blocks) || !blocks || blocks > INT32_MAX / QK_K) return 2;
-        const size_t block_size = strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 ? sizeof(block_iq2_xs) : sizeof(block_iq3_xxs);
+        const size_t block_size = strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 ? sizeof(block_iq2_xs) :
+            strcmp(argv[1], "iq3_xxs_q8_k_dot") == 0 ? sizeof(block_iq3_xxs) :
+            strcmp(argv[1], "iq2_s_q8_k_dot") == 0 ? sizeof(block_iq2_s) : sizeof(block_iq4_xs);
         if (blocks > SIZE_MAX / block_size || blocks > SIZE_MAX / sizeof(block_q8_K) || blocks > SIZE_MAX / (QK_K * sizeof(float))) return 2;
         FILE *weights_file = fopen(argv[2], "rb");
         FILE *activation_file = fopen(argv[5], "rb");
@@ -52,7 +55,9 @@ int main(int argc, char **argv) {
         if (!ok) { free(weights); free(activation); free(q8); return 3; }
         quantize_row_q8_K_ref(activation, q8, (int64_t)count);
         ggml_cpu_init();
-        enum ggml_type type = strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 ? GGML_TYPE_IQ2_XS : GGML_TYPE_IQ3_XXS;
+        enum ggml_type type = strcmp(argv[1], "iq2_xs_q8_k_dot") == 0 ? GGML_TYPE_IQ2_XS :
+            strcmp(argv[1], "iq3_xxs_q8_k_dot") == 0 ? GGML_TYPE_IQ3_XXS :
+            strcmp(argv[1], "iq2_s_q8_k_dot") == 0 ? GGML_TYPE_IQ2_S : GGML_TYPE_IQ4_XS;
         const struct ggml_type_traits_cpu *traits = ggml_get_type_traits_cpu(type);
         if (!traits || !traits->vec_dot || traits->vec_dot_type != GGML_TYPE_Q8_K) { free(weights); free(activation); free(q8); return 6; }
         float dot = 0.0f;
@@ -86,6 +91,7 @@ int main(int argc, char **argv) {
     }
     if (argc != 5) {
         fprintf(stderr, "usage: ggml_reference_decode q8_k_quantize <activation.f32>\n"
+                        "   or: ggml_reference_decode <iq2_xs|iq3_xxs|iq2_s|iq4_xs>_q8_k_dot <file> <offset> <blocks> <activation.f32>\n"
                         "   or: ggml_reference_decode <iq2_xs|iq3_xxs> <file> <offset> <blocks>\n"
                         "   or: ggml_reference_decode q6_k_logits <file> <offset> <rows> <activation.f32>\n");
         return 2;

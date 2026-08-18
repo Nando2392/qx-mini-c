@@ -64,40 +64,32 @@ static bool write_f32(const std::string & path, const float * values, size_t cou
 }
 
 struct internal_capture_record {
-    const char * name;
+    std::string name;
     std::vector<float> values;
     bool captured;
 };
 
 struct internal_capture_state {
-    internal_capture_record records[18] = {
-        {"ffn_inp-0", {}, false},
-        {"ffn_norm-0", {}, false},
-        {"ffn_moe_logits-0", {}, false},
-        {"ffn_moe_probs-0", {}, false},
-        {"ffn_moe_topk-0", {}, false},
-        {"ffn_moe_weights-0", {}, false},
-        {"ffn_moe_weights_sum-0", {}, false},
-        {"ffn_moe_weights_norm-0", {}, false},
-        {"ffn_moe_gate-0", {}, false},
-        {"ffn_moe_up-0", {}, false},
-        {"ffn_moe_swiglu-0", {}, false},
-        {"ffn_moe_down-0", {}, false},
-        {"ffn_moe_weighted-0", {}, false},
-        {"ffn_moe_out-0", {}, false},
-        {"l_out-0", {}, false},
-        {"Vcur-0", {}, false},
-        {"kqv_out-0", {}, false},
-        {"l_out-47", {}, false},
-    };
+    std::vector<internal_capture_record> records;
     bool failed = false;
+
+    explicit internal_capture_state(uint32_t layer) {
+        static const char * names[] = {
+            "ffn_inp", "ffn_norm", "ffn_moe_logits", "ffn_moe_probs", "ffn_moe_topk",
+            "ffn_moe_weights", "ffn_moe_weights_sum", "ffn_moe_weights_norm", "ffn_moe_gate",
+            "ffn_moe_up", "ffn_moe_swiglu", "ffn_moe_down", "ffn_moe_weighted", "ffn_moe_out",
+            "l_out", "Vcur", "kqv_out",
+        };
+        for (const char * name : names) records.push_back({std::string(name) + "-" + std::to_string(layer), {}, false});
+        if (layer != 47u) records.push_back({"l_out-47", {}, false});
+    }
 };
 
 static bool capture_internal_tensor(struct ggml_tensor * tensor, bool ask, void * user_data) {
     auto * state = static_cast<internal_capture_state *>(user_data);
     internal_capture_record * target = nullptr;
     for (auto & record : state->records) {
-        if (std::strcmp(tensor->name, record.name) == 0) {
+        if (record.name == tensor->name) {
             target = &record;
             break;
         }
@@ -147,14 +139,16 @@ static bool capture_internal_tensor(struct ggml_tensor * tensor, bool ask, void 
 
 int main(int argc, char ** argv) {
     if (argc < 5 || argc > 7) {
-        std::fprintf(stderr, "usage: llama_reference_oracle <model.gguf> <output-dir> <token-id> <layers-csv> [f16|q8_0] [internals]\n");
+        std::fprintf(stderr, "usage: llama_reference_oracle <model.gguf> <output-dir> <token-id> <layers-csv> [f16|q8_0] [internals|internals=N]\n");
         return 2;
     }
     const char * kv_type_name = argc >= 6 ? argv[5] : "f16";
-    const bool capture_internals = argc == 7 && std::strcmp(argv[6], "internals") == 0;
-    if (argc == 7 && !capture_internals) {
-        std::fprintf(stderr, "unsupported capture mode\n");
-        return 2;
+    bool capture_internals = false;
+    uint32_t internal_layer = 0;
+    if (argc == 7) {
+        if (std::strcmp(argv[6], "internals") == 0) capture_internals = true;
+        else if (std::strncmp(argv[6], "internals=", 10) == 0 && parse_u32(argv[6] + 10, &internal_layer)) capture_internals = true;
+        else { std::fprintf(stderr, "unsupported capture mode\n"); return 2; }
     }
     enum ggml_type kv_type = GGML_TYPE_F16;
     if (std::strcmp(kv_type_name, "q8_0") == 0) kv_type = GGML_TYPE_Q8_0;
@@ -189,6 +183,7 @@ int main(int argc, char ** argv) {
     const int32_t n_vocab = vocab ? llama_vocab_n_tokens(vocab) : 0;
     std::vector<uint32_t> layers;
     if (n_embd <= 0 || n_layer <= 0 || n_vocab <= 0 || token_id >= static_cast<uint32_t>(n_vocab) ||
+        (capture_internals && internal_layer >= static_cast<uint32_t>(n_layer)) ||
         !parse_layers(argv[4], static_cast<uint32_t>(n_layer), &layers)) {
         std::fprintf(stderr, "invalid model dimensions, token, or layers\n");
         llama_model_free(model);
@@ -206,7 +201,7 @@ int main(int argc, char ** argv) {
     ctx_params.type_v = kv_type;
     ctx_params.embeddings = true;
     ctx_params.offload_kqv = false;
-    internal_capture_state capture_state;
+    internal_capture_state capture_state(internal_layer);
     if (capture_internals) {
         ctx_params.cb_eval = capture_internal_tensor;
         ctx_params.cb_eval_user_data = &capture_state;
@@ -263,7 +258,7 @@ int main(int argc, char ** argv) {
                 result_norm_written ? "true" : "false");
     size_t internals_captured = 0;
     if (capture_internals) {
-        for (size_t i = 0; i < sizeof(capture_state.records) / sizeof(capture_state.records[0]); ++i) {
+        for (size_t i = 0; i < capture_state.records.size(); ++i) {
             auto & record = capture_state.records[i];
             const bool valid = record.captured && !record.values.empty();
             const std::string path = std::string(argv[2]) + "/" + record.name + ".f32";
@@ -272,7 +267,7 @@ int main(int argc, char ** argv) {
             if (written) ++internals_captured;
             if (i) std::printf(",");
             std::printf("{\"name\":\"%s\",\"count\":%zu,\"fnv1a64\":\"%" PRIu64 "\",\"written\":%s}",
-                        record.name, record.values.size(),
+                        record.name.c_str(), record.values.size(),
                         valid ? fnv1a64(record.values.data(), record.values.size() * sizeof(float)) : 0,
                         written ? "true" : "false");
         }

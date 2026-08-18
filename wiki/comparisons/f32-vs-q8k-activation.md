@@ -14,7 +14,7 @@ confidence: high
 
 **Implementado y medido:** F32 permanece como contrato y modo predeterminado de QX. `q8_k_compat` queda disponible como modo explícito de compatibilidad/diagnóstico CPU.
 
-`q8_k_compat` cuantiza activaciones temporales F32 a bloques Q8_K para proyecciones IQ4_XS y, tras [[moe-stage-bisect]], para expertos IQ2_XS/IQ3_XXS. Los demás tipos conservan dot F32 y el runtime declara si ejecutó ruta Q8_K, F32 o mixta. No existe fallback silencioso ni metadata que afirme una ruta distinta de la ejecutada.
+`q8_k_compat` cuantiza activaciones temporales F32 a bloques Q8_K para proyecciones IQ4_XS y, tras [[moe-stage-bisect]] y [[iq2-s-iq4-xs-q8k]], para expertos IQ2_XS/IQ3_XXS/IQ2_S/IQ4_XS. Los demás tipos conservan dot F32 y el runtime declara si ejecutó ruta Q8_K, F32 o mixta. No existe fallback silencioso ni metadata que afirme una ruta distinta de la ejecutada.
 
 La decisión no afirma paridad con llama.cpp. Q8_K corrige casi exactamente `Vcur` y reduce la salida MoE de layer 0, pero la divergencia reaparece al salir de layer 1 y continúa hasta logits y secuencia greedy. Véanse [[moe-stage-bisect]] y [[numerical-correctness]].
 
@@ -65,7 +65,7 @@ QX y llama.cpp están bajo licencia MIT. La implementación QX adapta el contrat
 - Bloques parciales, NaN/Inf, tamaños fuera de rango y overflow del parser fallan cerrados.
 - Probe sintético: `q8-k-activation-probe`.
 - Los 292 bytes completos coinciden con `quantize_row_q8_K_ref` para entradas mixed, positivas, negativas y extremos alternos ±1.
-- Metadata por ejecución distingue `not_used`, `iq4_xs_q8_k`, kernel mixto y fallback F32; workspace es cero cuando Q8_K no se usa.
+- Metadata por ejecución distingue `not_used`, `iq4_xs_q8_k`, kernel mixto y fallback F32; para MoE publica además gate/up y down por separado, por lo que una combinación heterogénea no se colapsa a una etiqueta genérica. El workspace es cero cuando Q8_K no se usa.
 
 El modelo real tiene mezcla de tipos: Q/K/V de capas 1, 2, 46 y 47 son Q5_K; varias proyecciones output son Q6_K. Añadir `GGML_TYPE_Q8_K` al contenedor QXF no es necesario: Q8_K es un temporal de activación, no un tensor persistido.
 
@@ -108,7 +108,7 @@ Token `[42]`, oracle llama F16, KV F32 en QX:
 | logits | F32 | 9.093953 | 1.478256 | 0.874880 | 87787 |
 | logits | Q8_K compat | 9.087952 | 1.472742 | 0.875870 | 87787 |
 
-**Bisect posterior:** [[moe-stage-bisect]] cerró los kernels de expertos layer 0 y desplazó la primera divergencia material al input de layer 2. Layer 1 usa tipos 22/23 y mantiene fallback F32.
+**Bisect posterior:** [[moe-stage-bisect]] cerró los kernels de expertos layer 0. [[iq2-s-iq4-xs-q8k]] cerró `IQ2_S/IQ4_XS × Q8_K` de layer 1 con input idéntico. La primera divergencia material sigue en input layer 2 por amplificación de la perturbación previa.
 
 Resumen de checkpoints finales para las cuatro combinaciones QX contra llama F16:
 
@@ -116,8 +116,8 @@ Resumen de checkpoints finales para las cuatro combinaciones QX contra llama F16
 |---|---|---|---|---|
 | F32 | F32 | 1099.6502 / 0.439279 | 8.74427 / 0.808867 | 1.478256 / 0.874880 |
 | F32 | INT8 | 1098.1270 / 0.441263 | 8.72112 / 0.809212 | 1.475123 / 0.875443 |
-| Q8_K compat | F32 | 1095.7421 / 0.444373 | 8.65504 / 0.810037 | 1.472742 / 0.875870 |
-| Q8_K compat | INT8 | 1094.4597 / 0.446203 | 8.64611 / 0.810359 | 1.469973 / 0.876367 |
+| Q8_K compat | F32 | 1132.7604 / 0.411556 | 9.96629 / 0.797838 | 1.480970 / 0.874416 |
+| Q8_K compat | INT8 | 1133.1087 / 0.411358 | 9.98870 / 0.797812 | 1.478728 / 0.874826 |
 
 ## Greedy
 
@@ -125,8 +125,8 @@ Resumen de checkpoints finales para las cuatro combinaciones QX contra llama F16
 |---|---|---|---|
 | F32 | F32 | `[1124, 11287]` | `[50865, 31518]` |
 | F32 | INT8 | `[1124, 11287]` | `[81379, 44707]` |
-| Q8_K compat | F32 | `[1124, 11287]` | `[50865, 31518]` |
-| Q8_K compat | INT8 | `[1124, 11287]` | `[50865, 28065]` |
+| Q8_K compat | F32 | `[1124, 11287]` | `[50865, 46709]` |
+| Q8_K compat | INT8 | `[1124, 19748]` | `[50865, 118860]` |
 | llama F16 | — | `[1124, 50853]` | `[358, 1184]` |
 | llama Q8_0 | — | `[1124, 50853]` | `[358, 614]` |
 
@@ -138,18 +138,18 @@ Un token, 48 capas, KV INT8. Cinco repeticiones warm; no es tok/s ni throughput 
 
 | Activación | cold | median warm | MAD | min–max | median peak RSS |
 |---|---:|---:|---:|---:|---:|
-| F32 | 11.87577 s | 9.24408 s | 0.46075 s | 8.78333–13.96411 s | 5,672,960 B median |
-| Q8_K compat | 4.25738 s | 3.88918 s | 0.04593 s | 3.80302–4.32378 s | 5,603,328 B median |
+| F32 | 8.31307 s | 8.00310 s | 0.13300 s | 7.75351–8.15110 s | 5,611,520 B median |
+| Q8_K compat | 2.36520 s | 2.28223 s | 0.01248 s | 2.25328–2.30621 s | 5,615,616 B median |
 
-**Medido tras extender MoE:** Q8_K fue `2.37687×` más rápido en mediana (`57.9279%` menos latencia) y el RSS mediano fue `1.2274%` menor. El baseline F32 mostró variabilidad alta; son segundos/token de este probe, no throughput sostenido. Workspace adicional declarado: 4672 bytes para attention y hasta 2336 bytes por activación MoE.
+**Medido tras extender MoE a IQ2_S/IQ4_XS:** Q8_K fue `3.50670×` más rápido en mediana (`71.4832%` menos latencia). El RSS mediano aumentó sólo `4096 B`, una página tratada como ruido. Son segundos/token de este probe, no throughput sostenido. Workspace adicional declarado: 4672 bytes para attention y hasta 2336 bytes por activación MoE.
 
 ## Trade-offs y riesgos
 
-- **Correctitud:** mejora radicalmente atención temprana, pero no cierra MoE/logits/greedy.
+- **Correctitud:** cierra vec-dot y etapas MoE con input idéntico, pero no cierra propagación, logits ni greedy.
 - **Memoria:** 4672 bytes de workspace reutilizable; impacto despreciable frente al modelo.
 - **CPU:** mejora medida, todavía sin SIMD ni thread pool.
-- **Complejidad:** añade un temporal y un kernel estrecho; se limita a IQ4_XS.
-- **Tipos mixtos:** Q5_K/Q6_K siguen F32 y se declaran como fallback.
+- **Complejidad:** añade un temporal y dispatchs estrechos para IQ4_XS, IQ2_XS, IQ3_XXS e IQ2_S; no generaliza por analogía a otros tipos.
+- **Tipos mixtos:** Q5_K/Q6_K/IQ3_S y cualquier tipo sin golden siguen F32 y se declaran como fallback.
 - **CUDA:** no se promoverá este temporal a contrato CUDA sin golden y benchmark del backend real.
 - **Paridad:** `q8_k_compat` significa compatibilidad de la proyección IQ4_XS CPU, no paridad global.
 
