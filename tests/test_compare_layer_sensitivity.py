@@ -97,6 +97,171 @@ def run_compare(oracle, qx, nominal, perturbed):
     )
 
 
+def make_same_input_case(tmp_path):
+    layer = 1
+    oracle = tmp_path / "oracle-same-input"
+    attention = tmp_path / "attention-same-input"
+    moe = tmp_path / "moe-same-input"
+    attention.mkdir()
+
+    write_probe(oracle, layer, experts=[68, 9], weighted=[10.0, 0.0, 0.0, 1.0])
+    write_f32(oracle / "layer-1.f32", [1.0, 2.0])
+    write_f32(oracle / "attn_norm-1.f32", [0.5, 1.0])
+    write_f32(oracle / "Vcur-1.f32", [3.0, 4.0])
+    write_f32(oracle / "kqv_out-1.f32", [5.0, 6.0])
+    write_f32(oracle / "ffn_inp-1.f32", [2.0, 4.0])
+    write_f32(oracle / "ffn_moe_out-1.f32", [10.0, 1.0])
+    write_f32(oracle / "l_out-1.f32", [12.0, 5.0])
+
+    write_f32(attention / "attn_norm-1.f32", [0.5, 1.0])
+    write_f32(attention / "Vcur-1.f32", [3.0, 4.0])
+    write_f32(attention / "kqv_out-1.f32", [5.0, 6.0])
+    write_f32(attention / "attn_out-1.f32", [1.0, 2.0])
+    write_f32(attention / "ffn_inp-1.f32", [2.0, 4.0])
+    write_probe(moe, layer, experts=[68, 9], weighted=[10.0, 0.0, 0.0, 1.0])
+    return oracle, attention, moe
+
+
+def run_same_input_compare(
+    oracle,
+    attention,
+    moe,
+    *,
+    expected_vcur_count=2,
+    expected_kqv_out_count=2,
+):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(COMPARE),
+            "--oracle-dir",
+            str(oracle),
+            "--attention-dir",
+            str(attention),
+            "--same-input-moe-dir",
+            str(moe),
+            "--expected-vcur-count",
+            str(expected_vcur_count),
+            "--expected-kqv-out-count",
+            str(expected_kqv_out_count),
+            "--layer",
+            "1",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+
+def test_compare_layer_sensitivity_reports_same_input_attention_and_moe_chain(tmp_path):
+    oracle, attention, moe = make_same_input_case(tmp_path)
+
+    completed = run_same_input_compare(oracle, attention, moe)
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["passed"] is True
+    assert payload["mode"] == "same_input"
+    assert payload["routing"] == {
+        "oracle": [68, 9],
+        "qx": [68, 9],
+        "exact": True,
+    }
+    assert payload["checkpoints"]["attention"]["ffn_input"]["max_abs"] == 0.0
+    assert payload["checkpoints"]["moe"]["weighted"]["max_abs"] == 0.0
+    assert payload["reconstruction"]["moe_output"]["max_abs"] == 0.0
+    assert payload["reconstruction"]["layer_output"]["max_abs"] == 0.0
+
+
+def test_compare_layer_sensitivity_fails_closed_for_incomplete_same_input_mode(tmp_path):
+    oracle, attention, _ = make_same_input_case(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(COMPARE),
+            "--oracle-dir",
+            str(oracle),
+            "--attention-dir",
+            str(attention),
+            "--layer",
+            "1",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 2
+    payload = json.loads(completed.stdout)
+    assert payload["passed"] is False
+    assert payload["error"] == "same-input mode requires attention and MoE directories"
+
+
+def test_compare_layer_sensitivity_fails_closed_when_comparison_modes_are_mixed(tmp_path):
+    oracle, attention, moe = make_same_input_case(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(COMPARE),
+            "--oracle-dir",
+            str(oracle),
+            "--attention-dir",
+            str(attention),
+            "--same-input-moe-dir",
+            str(moe),
+            "--qx-dir",
+            str(tmp_path / "unused-qx"),
+            "--layer",
+            "1",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 2
+    payload = json.loads(completed.stdout)
+    assert payload["passed"] is False
+    assert payload["error"] == "same-input and perturbation arguments cannot be mixed"
+
+
+def test_compare_layer_sensitivity_fails_closed_when_attention_residual_is_inconsistent(tmp_path):
+    oracle, attention, moe = make_same_input_case(tmp_path)
+    write_f32(attention / "ffn_inp-1.f32", [3.0, 4.0])
+
+    completed = run_same_input_compare(oracle, attention, moe)
+
+    assert completed.returncode == 2
+    payload = json.loads(completed.stdout)
+    assert payload["passed"] is False
+    assert payload["error"] == "ffn input contradicts layer input plus attention output"
+
+
+def test_compare_layer_sensitivity_fails_closed_for_equally_truncated_vcur_sidecars(tmp_path):
+    oracle, attention, moe = make_same_input_case(tmp_path)
+    write_f32(oracle / "Vcur-1.f32", [3.0])
+    write_f32(attention / "Vcur-1.f32", [3.0])
+
+    completed = run_same_input_compare(oracle, attention, moe)
+
+    assert completed.returncode == 2
+    payload = json.loads(completed.stdout)
+    assert payload["passed"] is False
+    assert payload["error"] == "Vcur count mismatch: 1 != 2"
+
+
+def test_compare_layer_sensitivity_fails_closed_for_equally_truncated_kqv_sidecars(tmp_path):
+    oracle, attention, moe = make_same_input_case(tmp_path)
+    write_f32(oracle / "kqv_out-1.f32", [5.0])
+    write_f32(attention / "kqv_out-1.f32", [5.0])
+
+    completed = run_same_input_compare(oracle, attention, moe)
+
+    assert completed.returncode == 2
+    payload = json.loads(completed.stdout)
+    assert payload["passed"] is False
+    assert payload["error"] == "kqv_out count mismatch: 1 != 2"
+
+
 def test_compare_layer_sensitivity_reports_routing_transition_and_dominant_expert(tmp_path):
     oracle, qx, nominal, perturbed = make_case(tmp_path)
 

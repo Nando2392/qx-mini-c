@@ -3177,3 +3177,13 @@ argmax:                1124
 The preceding global logits were max-abs `0.187882`, RMSE `0.0393805`. The improvement is real but bounded. Global `l_out-47` remains max-abs `4.68347`, RMSE `0.172092`; therefore exact parity is still refuted and the next gate moves into layer 47 with the same input.
 
 Oracle provenance: llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`; source GGUF SHA-256 `c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652`. The integrated command additionally requires QXT2 payload fingerprint `6140965799433681264`; this FNV-1a64 value is a non-cryptographic compatibility guard, not an authenticity claim.
+
+## 2026-08-18: layer 47 attention + MoE same-input classification
+
+The final transformer block now has a reproducible same-input gate. `scripts/compare_layer_sensitivity.py` accepts `--attention-dir` plus `--same-input-moe-dir`, requires explicit expected counts for `Vcur` (`512`) and `kqv_out` (`4096`), validates all routing/shape/finite sidecar contracts and the exact F32 identity `ffn_inp = layer_input + attn_out`, compares each stage and reconstructs both `ffn_moe_out-47` and `l_out-47`.
+
+With the exact oracle `layer-47.f32`, Q8_K-compatible attention and F16 KV produce `ffn_inp-47` max-abs `6.10352e-5`, RMSE `1.42349e-6`. The chained MoE selects exactly `[83,3,74,119,92,28,109,101]`; reconstructed `l_out-47` is max-abs `2.57492e-4`, RMSE `8.01077e-6`, cosine `0.999999999999996`.
+
+The remaining same-input delta is dominated by backend arithmetic in the F32 router: scalar-double QX logits differ from ggml SIMD-F32 by at most `9.53674e-7`, yielding a normalized weight delta of `2.08616e-7` that multiplies down values as large as `2188`. Using oracle weights reduces the aggregate max-abs to `2.44141e-4`. This does not justify making one CPU's SIMD reduction order part of the portable runtime contract.
+
+Honesty boundary: layer 47 closes for the exact shared input; accumulated global `l_out-47` and exact logits remain non-identical. F32 remains default and `q8_k_compat` remains CPU-only and opt-in.

@@ -171,3 +171,11 @@
 - Same-input: RMSNorm RMSE `1.17205e-7`; logits RMSE `4.91155e-7`, max-abs `2.38419e-6`, argmax `1124`.
 - End-to-end: logits mejoran de RMSE `0.0393805` a `0.0257469` y max-abs `0.187882` a `0.132130`; no se afirma paridad global.
 - La divergencia restante ya entra desde `l_out-47`; siguiente gate: layer 47 same-input por atención/MoE.
+
+## [2026-08-18] validation | Layer 47 attention + MoE same-input
+
+- `compare_layer_sensitivity.py` añade un modo same-input fail-closed que compara atención/MoE, exige counts explícitos de `Vcur`/`kqv_out`, valida routing y reconstruye `ffn_moe_out`/`l_out`.
+- Con `layer-47.f32` exacto y KV F16, atención llega a `ffn_inp-47` con max-abs `6.10e-5`; top-8 queda exacto `[83,3,74,119,92,28,109,101]`.
+- La cadena QX attention→MoE reconstruye `l_out-47` con max-abs `2.57e-4`, RMSE `8.01e-6`, cosine ≈`1`.
+- La diferencia dominante es sensibilidad de reducción F32 del router: delta de peso `2.09e-7` multiplicado por outputs down de hasta `2188`; no se replica un orden SIMD backend-specific.
+- F32 sigue default y Q8_K CPU opt-in. Exactitud global sigue refutada porque la divergencia ya entra acumulada al bloque.

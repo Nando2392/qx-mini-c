@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Measure layer-input perturbation amplification through attention residual and MoE."""
+"""Compare layer perturbations or a same-input attention and MoE chain."""
 
 from __future__ import annotations
 
@@ -77,6 +77,15 @@ def add(left: tuple[float, ...], right: tuple[float, ...]) -> tuple[float, ...]:
     if len(left) != len(right):
         raise ValueError("sidecar length mismatch in addition")
     return tuple(float(a) + float(b) for a, b in zip(left, right))
+
+
+def add_f32(left: tuple[float, ...], right: tuple[float, ...]) -> tuple[float, ...]:
+    if len(left) != len(right):
+        raise ValueError("sidecar length mismatch in F32 addition")
+    return tuple(
+        struct.unpack("<f", struct.pack("<f", float(a) + float(b)))[0]
+        for a, b in zip(left, right)
+    )
 
 
 def safe_gain(numerator: float, denominator: float, label: str) -> float:
@@ -173,6 +182,106 @@ def sum_weighted(probe: dict, hidden: int) -> tuple[float, ...]:
         sum(float(weighted[rank * hidden + index]) for rank in range(probe["experts_used"]))
         for index in range(hidden)
     )
+
+
+def compare_same_input(
+    oracle_dir: Path,
+    attention_dir: Path,
+    moe_dir: Path,
+    layer: int,
+    expected_vcur_count: int,
+    expected_kqv_out_count: int,
+) -> dict:
+    oracle_input = read_f32(oracle_dir / f"layer-{layer}.f32")
+    hidden = len(oracle_input)
+    oracle_attention = {
+        stage: read_f32(oracle_dir / f"{stage}-{layer}.f32")
+        for stage in ("attn_norm", "Vcur", "kqv_out", "ffn_inp")
+    }
+    qx_attention = {
+        stage: read_f32(attention_dir / f"{stage}-{layer}.f32")
+        for stage in ("attn_norm", "Vcur", "kqv_out", "attn_out", "ffn_inp")
+    }
+    for values in (oracle_attention["Vcur"], qx_attention["Vcur"]):
+        if len(values) != expected_vcur_count:
+            raise ValueError(f"Vcur count mismatch: {len(values)} != {expected_vcur_count}")
+    for values in (oracle_attention["kqv_out"], qx_attention["kqv_out"]):
+        if len(values) != expected_kqv_out_count:
+            raise ValueError(
+                f"kqv_out count mismatch: {len(values)} != {expected_kqv_out_count}"
+            )
+    for stage in ("attn_norm", "ffn_inp"):
+        if len(oracle_attention[stage]) != hidden or len(qx_attention[stage]) != hidden:
+            raise ValueError(f"{stage} shape mismatch")
+    for stage in ("Vcur", "kqv_out"):
+        if len(qx_attention[stage]) != len(oracle_attention[stage]):
+            raise ValueError(f"{stage} shape mismatch")
+    if len(qx_attention["attn_out"]) != hidden:
+        raise ValueError("attn_out shape mismatch")
+    if qx_attention["ffn_inp"] != add_f32(oracle_input, qx_attention["attn_out"]):
+        raise ValueError("ffn input contradicts layer input plus attention output")
+
+    oracle_probe = load_probe(oracle_dir, layer, hidden)
+    qx_probe = load_probe(moe_dir, layer, hidden)
+    if (
+        qx_probe["expert_count"] != oracle_probe["expert_count"]
+        or qx_probe["experts_used"] != oracle_probe["experts_used"]
+        or qx_probe["intermediate"] != oracle_probe["intermediate"]
+    ):
+        raise ValueError("oracle and QX MoE shape mismatch")
+
+    oracle_attention_output = subtract(oracle_attention["ffn_inp"], oracle_input)
+    attention_stages = {
+        "attn_norm": metrics(qx_attention["attn_norm"], oracle_attention["attn_norm"]),
+        "Vcur": metrics(qx_attention["Vcur"], oracle_attention["Vcur"]),
+        "kqv_out": metrics(qx_attention["kqv_out"], oracle_attention["kqv_out"]),
+        "attention_output": metrics(qx_attention["attn_out"], oracle_attention_output),
+        "ffn_input": metrics(qx_attention["ffn_inp"], oracle_attention["ffn_inp"]),
+    }
+    moe_stage_names = {
+        "ffn_norm": "ffn_norm",
+        "router_logits": "ffn_moe_logits",
+        "router_probs": "ffn_moe_probs",
+        "topk": "ffn_moe_topk",
+        "weights": "ffn_moe_weights",
+        "weight_sum": "ffn_moe_weights_sum",
+        "weights_norm": "ffn_moe_weights_norm",
+        "gate": "ffn_moe_gate",
+        "up": "ffn_moe_up",
+        "swiglu": "ffn_moe_swiglu",
+        "down": "ffn_moe_down",
+        "weighted": "ffn_moe_weighted",
+    }
+    moe_stages = {
+        label: metrics(qx_probe["values"][stage], oracle_probe["values"][stage])
+        for label, stage in moe_stage_names.items()
+    }
+    qx_moe_output = sum_weighted(qx_probe, hidden)
+    oracle_moe_output = read_f32(oracle_dir / f"ffn_moe_out-{layer}.f32")
+    oracle_layer_output = read_f32(oracle_dir / f"l_out-{layer}.f32")
+    qx_layer_output = add(qx_attention["ffn_inp"], qx_moe_output)
+
+    return {
+        "schema": 1,
+        "passed": True,
+        "mode": "same_input",
+        "layer": layer,
+        "hidden": hidden,
+        "intermediate": qx_probe["intermediate"],
+        "routing": {
+            "oracle": oracle_probe["selected"],
+            "qx": qx_probe["selected"],
+            "exact": qx_probe["selected"] == oracle_probe["selected"],
+        },
+        "checkpoints": {
+            "attention": attention_stages,
+            "moe": moe_stages,
+        },
+        "reconstruction": {
+            "moe_output": metrics(qx_moe_output, oracle_moe_output),
+            "layer_output": metrics(qx_layer_output, oracle_layer_output),
+        },
+    }
 
 
 def compare(
@@ -310,23 +419,56 @@ def compare(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--oracle-dir", type=Path, required=True)
-    parser.add_argument("--qx-dir", type=Path, required=True)
-    parser.add_argument("--nominal-moe-dir", type=Path, required=True)
-    parser.add_argument("--perturbed-moe-dir", type=Path, required=True)
+    parser.add_argument("--qx-dir", type=Path)
+    parser.add_argument("--nominal-moe-dir", type=Path)
+    parser.add_argument("--perturbed-moe-dir", type=Path)
+    parser.add_argument("--attention-dir", type=Path)
+    parser.add_argument("--same-input-moe-dir", type=Path)
+    parser.add_argument("--expected-vcur-count", type=int)
+    parser.add_argument("--expected-kqv-out-count", type=int)
     parser.add_argument("--layer", type=int, required=True)
     parser.add_argument("--step", type=int, default=0)
     args = parser.parse_args()
     try:
         if args.layer < 0 or args.step < 0:
             raise ValueError("layer and step must be non-negative")
-        report = compare(
-            args.oracle_dir,
-            args.qx_dir,
-            args.nominal_moe_dir,
-            args.perturbed_moe_dir,
-            args.layer,
-            args.step,
+        same_input = any(
+            value is not None
+            for value in (
+                args.attention_dir,
+                args.same_input_moe_dir,
+                args.expected_vcur_count,
+                args.expected_kqv_out_count,
+            )
         )
+        if same_input:
+            if args.attention_dir is None or args.same_input_moe_dir is None:
+                raise ValueError("same-input mode requires attention and MoE directories")
+            if any((args.qx_dir, args.nominal_moe_dir, args.perturbed_moe_dir)):
+                raise ValueError("same-input and perturbation arguments cannot be mixed")
+            if args.expected_vcur_count is None or args.expected_vcur_count <= 0:
+                raise ValueError("same-input mode requires a positive expected Vcur count")
+            if args.expected_kqv_out_count is None or args.expected_kqv_out_count <= 0:
+                raise ValueError("same-input mode requires a positive expected kqv_out count")
+            report = compare_same_input(
+                args.oracle_dir,
+                args.attention_dir,
+                args.same_input_moe_dir,
+                args.layer,
+                args.expected_vcur_count,
+                args.expected_kqv_out_count,
+            )
+        else:
+            if any(value is None for value in (args.qx_dir, args.nominal_moe_dir, args.perturbed_moe_dir)):
+                raise ValueError("perturbation mode requires QX, nominal MoE, and perturbed MoE directories")
+            report = compare(
+                args.oracle_dir,
+                args.qx_dir,
+                args.nominal_moe_dir,
+                args.perturbed_moe_dir,
+                args.layer,
+                args.step,
+            )
     except (OSError, ValueError, OverflowError) as exc:
         print(json.dumps({"schema": 1, "passed": False, "error": str(exc)}))
         return 2

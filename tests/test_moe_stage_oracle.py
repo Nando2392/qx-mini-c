@@ -3,6 +3,7 @@ import math
 import os
 import struct
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ LLAMA_BUILD = ROOT / "tests" / "build_llama_reference_oracle.bat"
 LLAMA_CPP_DIR = Path(os.environ.get("LLAMA_CPP_DIR", ROOT.parent / "llama.cpp-k3"))
 GGML_EXE = ROOT / "build" / "ggml_reference_decode.exe"
 GGML_BUILD = ROOT / "tests" / "build_ggml_reference.bat"
+COMPARE_LAYER = ROOT / "scripts" / "compare_layer_sensitivity.py"
 
 
 def require_local_moe_fixtures():
@@ -526,3 +528,102 @@ def test_moe_stage_q8_k_reports_actual_fallback_for_heterogeneous_layers(
     assert payload["projection_kernel"] == expected_kernel
     assert payload["gate_up_projection_kernel"] == expected_gate_up_kernel
     assert payload["down_projection_kernel"] == expected_down_kernel
+
+
+def test_layer_47_same_input_attention_and_moe_chain_closes(tmp_path):
+    require_local_moe_fixtures()
+    oracle_dir = tmp_path / "oracle-layer-47"
+    attention_dir = tmp_path / "attention-layer-47"
+    moe_dir = tmp_path / "moe-layer-47"
+    attention_dir.mkdir()
+    moe_dir.mkdir()
+    run_oracle(oracle_dir, internal_layer=47, kv_type="f16")
+
+    attention = subprocess.run(
+        [
+            str(QX_EXE),
+            "attention-stage-probe",
+            "--in",
+            str(QXF),
+            "--layer",
+            "47",
+            "--layer-in",
+            str(oracle_dir / "layer-47.f32"),
+            "--out-dir",
+            str(attention_dir),
+            "--activation",
+            "q8_k_compat",
+            "--kv",
+            "f16",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert attention.returncode == 0, attention.stdout + attention.stderr
+    attention_payload = json.loads(attention.stdout)
+    assert attention_payload["v_projection_kernel"] == "q5_k_q8_k"
+    assert attention_payload["output_projection_kernel"] == "q6_k_q8_k"
+    assert attention_payload["kv_format"] == "f16"
+
+    moe = subprocess.run(
+        [
+            str(QX_EXE),
+            "moe-stage-probe",
+            "--in",
+            str(QXF),
+            "--layer",
+            "47",
+            "--ffn-inp",
+            str(attention_dir / "ffn_inp-47.f32"),
+            "--out-dir",
+            str(moe_dir),
+            "--activation",
+            "q8_k_compat",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert moe.returncode == 0, moe.stdout + moe.stderr
+    moe_payload = json.loads(moe.stdout)
+    assert moe_payload["gate_up_projection_kernel"] == "iq2_s_q8_k"
+    assert moe_payload["down_projection_kernel"] == "iq4_xs_q8_k"
+    assert moe_payload["selected_experts"] == [83, 3, 74, 119, 92, 28, 109, 101]
+
+    compared = subprocess.run(
+        [
+            sys.executable,
+            str(COMPARE_LAYER),
+            "--oracle-dir",
+            str(oracle_dir),
+            "--attention-dir",
+            str(attention_dir),
+            "--same-input-moe-dir",
+            str(moe_dir),
+            "--expected-vcur-count",
+            "512",
+            "--expected-kqv-out-count",
+            "4096",
+            "--layer",
+            "47",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert compared.returncode == 0, compared.stdout + compared.stderr
+    payload = json.loads(compared.stdout)
+    assert payload["routing"] == {
+        "oracle": [83, 3, 74, 119, 92, 28, 109, 101],
+        "qx": [83, 3, 74, 119, 92, 28, 109, 101],
+        "exact": True,
+    }
+    assert payload["checkpoints"]["attention"]["Vcur"]["max_abs"] <= 2e-6
+    assert payload["checkpoints"]["attention"]["kqv_out"]["max_abs"] <= 1.5e-4
+    assert payload["checkpoints"]["attention"]["ffn_input"]["max_abs"] <= 1e-4
+    assert payload["checkpoints"]["moe"]["router_logits"]["max_abs"] <= 2e-6
+    assert payload["checkpoints"]["moe"]["weights_norm"]["max_abs"] <= 3e-7
+    assert payload["checkpoints"]["moe"]["down"]["max_abs"] <= 2e-4
+    assert payload["checkpoints"]["moe"]["weighted"]["max_abs"] <= 2e-4
+    assert payload["reconstruction"]["moe_output"]["max_abs"] <= 3e-4
+    assert payload["reconstruction"]["moe_output"]["rmse"] <= 1e-5
+    assert payload["reconstruction"]["layer_output"]["max_abs"] <= 3e-4
+    assert payload["reconstruction"]["layer_output"]["rmse"] <= 1e-5

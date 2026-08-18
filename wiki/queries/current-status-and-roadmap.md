@@ -43,6 +43,7 @@ sensibilidad layer 1→2 clasificada: GREEN
 Q6_K decode + Q6_K×Q8_K atención CPU opt-in: GREEN
 sweep layer 2→47 y sensibilidad layer 46 clasificada: GREEN
 final RMSNorm + lm_head Q6_K×Q8_K same-input: GREEN
+layer 47 attention + MoE same-input: GREEN
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -54,18 +55,19 @@ El gate [[f32-vs-q8k-activation]] implementó `q8_k_compat` como modo CPU explí
 
 El gate [[moe-stage-bisect]] usa el mismo `ffn_inp-0` en QX/llama.cpp y cierra router, top-8, pesos, gate/up, SwiGLU, down y mezcla de layer 0 dentro de max-abs `1.20e-6`. [[iq2-s-iq4-xs-q8k]] valida layer 1 con el mismo input: mezcla final max-abs `4.35e-5`, RMSE `9.62e-7`, cosine ≈`1`. [[layer1-layer2-sensitivity]] encontró un bug Q5_K real, añadió `Q5_K × Q8_K` y cerró atención layer 1 same-input. El sweep supersedente [[layer2-logits-sweep]] encuentra la siguiente amplificación en layer 46→47, añade `Q6_K × Q8_K` y reduce `ffn_inp-46` same-input de max-abs `0.00445557` a `1.19e-7`. End-to-end no mejora: layer-47 RMSE queda `0.0309398` y logits RMSE `0.0393805`; el bisect causal sitúa la amplificación en MoE (`3.663×`), con top-8 estable y experto 74 aportando `76.08%` del delta.
 
+[[layer47-same-input]] cierra el último bloque con el `layer-47.f32` exacto: atención llega a `ffn_inp-47` con max-abs `6.10e-5`; la cadena attention→MoE reconstruye `l_out-47` con max-abs `2.57e-4`, RMSE `8.01e-6`, cosine ≈`1`, y top-8 exacto `[83,3,74,119,92,28,109,101]`. El delta dominante restante proviene de sensibilidad de reducción F32 del router multiplicada por outputs down grandes, no de un nuevo decoder quant roto. La divergencia global entra acumulada desde capas anteriores y no queda resuelta por este gate.
+
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
 
 ## Después
 
-1. Bisect layer 47 same-input hasta `l_out-47`, separando atención y MoE sin reabrir kernels/head cerrados.
-2. Ampliar tokenizer a cobertura Unicode/chat-template exhaustiva.
-3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
-4. Medir baseline de inferencia real.
-5. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
-6. Gates 4K, RSS, calidad KV y 8 h.
+1. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
+2. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
+3. Medir baseline de inferencia real.
+4. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
+5. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 
