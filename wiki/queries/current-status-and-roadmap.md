@@ -47,6 +47,7 @@ final RMSNorm + lm_head Q6_K×Q8_K same-input: GREEN
 layer 47 attention + MoE same-input: GREEN
 layers 44–42 attention + MoE same-input: GREEN
 layer 41 IQ3_S down + bloque same-input: GREEN post-fix
+layers 40–0 attention + MoE same-input: GREEN (41/41)
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -62,13 +63,15 @@ El gate [[moe-stage-bisect]] usa el mismo `ffn_inp-0` en QX/llama.cpp y cierra r
 
 El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en layer 41 el primer fallo material observado en esa ejecución: atención, routing y SwiGLU cerraban, pero `ffn_down_exps` IQ3_S seguía en `dequant_f32`. La matriz pytest versionada regenera sidecars y fija routing/métricas exactas para layers 24, 41, 42, 43 y 44. El golden real `IQ3_S × Q8_K` y el dispatch opt-in reducen down a max-abs `9.54e-7` y reconstruyen `l_out-41` con max-abs `4.76e-5`, RMSE `1.05e-6`, routing exacto `[48,73,69,18,96,104,88,26]`. El siguiente bisect empieza antes de layer 41; no se infiere todavía el origen acumulado global.
 
+[[layers0-40-same-input]] completa ese intervalo: 41/41 bloques cierran con el residual exacto del oracle y routing exacto. Los máximos materiales son `Vcur=1.79e-7`, `kqv_out=1.91e-6`, weighted `1.83105e-4` y `l_out=2.32019e-4`/RMSE `5.12959e-6`; todos pasan. Treinta y siete capas conservan sólo warnings de router logits por encima de `2e-6`, sin cambio top-8 ni fallo downstream. La hipótesis de otro seam local material queda refutada para este input; la divergencia global requiere ahora un bisect de acumulación, no otro kernel especulativo.
+
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
 
 ## Después
 
-1. Continuar el bisect same-input hacia atrás antes de layer 41.
+1. Medir acumulación adyacente con replay híbrido/inyección de residual sobre el forward real.
 2. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
 3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 4. Medir baseline de inferencia real.

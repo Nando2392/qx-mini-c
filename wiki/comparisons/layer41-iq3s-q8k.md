@@ -114,4 +114,4 @@ C:/Users/fjmn2/Dev/hermes-agent/.venv/Scripts/python.exe -m pytest \
 - Primera divergencia interna observada en el bisect pre-fix: `ffn_moe_down-41`, causada por falta de `IQ3_S × Q8_K` en el modo opt-in.
 - Esto no demuestra paridad acumulada, exactitud global de logits ni cobertura exhaustiva de prompts.
 - F32 sigue siendo default; `q8_k_compat` sigue CPU-only y opt-in.
-- Siguiente bisect causal: continuar hacia atrás desde layer 40 con sidecars exactos; no asumir que layer 40 falla.
+- El bisect supersedente [[layers0-40-same-input]] cierra materialmente las 41 capas restantes; el siguiente gate es acumulación con inyección híbrida, no otro kernel por analogía.

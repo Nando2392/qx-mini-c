@@ -78,4 +78,6 @@ La matriz greedy fija queda GREEN post-Q5_K. La decisión, matriz numérica, ín
 
 El bisect hacia atrás posterior [[layer41-iq3s-q8k]] demuestra que layers 44, 43 y 42 cierran same-input y encuentra el primer fallo material en `ffn_moe_down-41`. El tensor down es IQ3_S (`ggml_type=21`): el fallback F32 dejaba `l_out-41` en max-abs `1.62544e-3`, RMSE `4.02635e-4`. El golden independiente y el nuevo `IQ3_S × Q8_K` dejan down en max-abs `9.53674e-7` y `l_out-41` en max-abs `4.76234e-5`, RMSE `1.05287e-6`, con routing exacto. Es cierre local, no paridad global.
 
+El replay supersedente [[layers0-40-same-input]] regenera las 41 capas anteriores con el residual exacto del oracle, F16 KV y counts explícitos. Todas cierran materialmente y mantienen top-8 exacto. Layer 2 es el peor bloque local: weighted max-abs `1.83105e-4`, `l_out` max-abs `2.32019e-4`, RMSE `5.12959e-6`. Los excesos de router logits quedan como warnings porque no cambian routing ni rompen weighted/reconstrucción. No se justifica otro kernel por analogía; el siguiente gate debe medir acumulación con inyección híbrida.
+
 La política de investigación está en [[auto-research-loop]] y el avance en [[current-status-and-roadmap]].

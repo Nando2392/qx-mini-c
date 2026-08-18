@@ -18,6 +18,60 @@ LLAMA_CPP_DIR = Path(os.environ.get("LLAMA_CPP_DIR", ROOT.parent / "llama.cpp-k3
 GGML_EXE = ROOT / "build" / "ggml_reference_decode.exe"
 GGML_BUILD = ROOT / "tests" / "build_ggml_reference.bat"
 COMPARE_LAYER = ROOT / "scripts" / "compare_layer_sensitivity.py"
+SAME_INPUT_0_40 = ROOT / "tests" / "fixtures" / "same_input_layers_0_40.tsv"
+
+
+def load_same_input_0_40_cases():
+    lines = SAME_INPUT_0_40.read_text(encoding="utf-8").splitlines()
+    expected_header = [
+        "layer", "v_kernel", "output_kernel", "gate_up_kernel", "down_kernel",
+        "routing", "router_max_abs", "down_max_abs", "weighted_max_abs",
+        "layer_output_max_abs", "layer_output_rmse",
+    ]
+    if not lines or lines[0].split("\t") != expected_header:
+        raise ValueError("invalid same-input fixture header")
+    cases = []
+    for row_number, line in enumerate(lines[1:], start=2):
+        fields = line.split("\t")
+        if len(fields) != 11:
+            raise ValueError(f"invalid same-input fixture row {row_number}")
+        cases.append((
+            int(fields[0]), fields[1], fields[2], fields[3], fields[4],
+            json.loads(fields[5]), float(fields[6]),
+            float(fields[7]) if fields[7] else None,
+            float(fields[8]), float(fields[9]), float(fields[10]),
+        ))
+    if [case[0] for case in cases] != list(range(41)):
+        raise ValueError("same-input fixture must contain layers 0 through 40 exactly once")
+    return cases
+
+
+def test_same_input_fixture_validation_survives_python_optimization(tmp_path):
+    malformed = tmp_path / "same-input-malformed.tsv"
+    malformed.write_text(
+        SAME_INPUT_0_40.read_text(encoding="utf-8").replace("layer\t", "wrong\t", 1),
+        encoding="utf-8",
+    )
+    checker = tmp_path / "check_optimized_fixture.py"
+    checker.write_text(
+        "\n".join([
+            "import runpy",
+            "from pathlib import Path",
+            f"namespace = runpy.run_path({str(Path(__file__))!r})",
+            "loader = namespace['load_same_input_0_40_cases']",
+            f"loader.__globals__['SAME_INPUT_0_40'] = Path({str(malformed)!r})",
+            "try:",
+            "    loader()",
+            "except ValueError:",
+            "    raise SystemExit(0)",
+            "raise SystemExit('optimized loader accepted malformed header')",
+        ]),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-O", str(checker)], cwd=ROOT, text=True, capture_output=True
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def require_local_moe_fixtures():
@@ -644,11 +698,7 @@ def test_layer_47_same_input_attention_and_moe_chain_closes(tmp_path):
         "layer_output_max_abs",
         "layer_output_rmse",
     ),
-    [
-        (24, "iq4_xs_q8_k", "iq4_xs_q8_k", "iq2_xs_q8_k", "iq3_s_q8_k",
-         [10, 105, 24, 111, 101, 98, 108, 113], 4.76837158203125e-06,
-         2.384185791015625e-07, 1.7881393432617188e-07,
-         4.5750217395834625e-05, 1.0114135290963168e-06),
+    load_same_input_0_40_cases() + [
         (41, "iq4_xs_q8_k", "q6_k_q8_k", "iq2_s_q8_k", "iq3_s_q8_k",
          [48, 73, 69, 18, 96, 104, 88, 26], 2.86102294921875e-06,
          9.5367431640625e-07, 8.940696716308594e-08,

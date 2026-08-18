@@ -188,3 +188,11 @@
 - Layer 41 post-fix: down max-abs `9.54e-7`; weighted `8.94e-8`; `l_out-41` max-abs `4.76e-5`, RMSE `1.05e-6`; top-8 `[48,73,69,18,96,104,88,26]` exacto.
 - Layer 24, también IQ3_S down, cierra con down max-abs `2.38e-7` y `l_out-24` max-abs `4.58e-5`.
 - Es cierre same-input local. F32 sigue default; Q8_K sigue CPU-only opt-in; el bisect continúa antes de layer 41.
+
+## [2026-08-18] validation | Layers 0–40 exact same-input replay
+
+- Regenerados oracle, atención y MoE para cada layer 40→0 con token `42`, KV F16 y counts explícitos `Vcur=512`/`kqv_out=4096`.
+- Las 41 capas cierran materialmente y mantienen routing top-8 exacto; no se implementa un fix de runtime especulativo.
+- Peor bloque local: layer 2, weighted max-abs `1.83105e-4`, `l_out` max-abs `2.32019e-4`, RMSE `5.12959e-6`.
+- Treinta y siete capas exceden sólo el umbral diagnóstico de router logits; pesos normalizados, weighted y reconstrucción permanecen dentro del gate.
+- La provenance pytest versiona routing, kernels por rol y métricas exactas sin guardar sidecars; el siguiente gate es acumulación híbrida del residual.

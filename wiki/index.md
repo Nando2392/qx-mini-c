@@ -1,7 +1,7 @@
 # QX-mini-MoE Wiki
 
 > Bóveda Obsidian y wiki compilada al estilo Karpathy. Leer primero esta página y [[current-status-and-roadmap]].
-> Última actualización: 2026-08-18 | Páginas de conocimiento: 21
+> Última actualización: 2026-08-18 | Páginas de conocimiento: 22
 
 ## Proyecto
 
@@ -29,6 +29,7 @@
 - [[final-head-q6k-q8k]] — RMSNorm/head same-input, Q6_K×Q8_K completo y causalidad hasta logits.
 - [[layer47-same-input]] — último bloque same-input, atención/MoE por etapa y sensibilidad F32 del router.
 - [[layer41-iq3s-q8k]] — bisect 44→41, primer fallo down IQ3_S y cierre con Q8_K.
+- [[layers0-40-same-input]] — replay exacto 40→0, 41/41 bloques cerrados y warnings de router separados.
 
 ## Rendimiento
 
