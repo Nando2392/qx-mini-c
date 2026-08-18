@@ -40,6 +40,8 @@ Q8_K IQ2_S/IQ4_XS expertos CPU opt-in: GREEN
 Q5_K decode + Q5_K×Q8_K atención CPU opt-in: GREEN
 atención layer 1 con mismo attn_norm/KV F16: GREEN
 sensibilidad layer 1→2 clasificada: GREEN
+Q6_K decode + Q6_K×Q8_K atención CPU opt-in: GREEN
+sweep layer 2→47 y sensibilidad layer 46 clasificada: GREEN
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -49,7 +51,7 @@ El gate [[llama-cpp-parity]] aisló layer 0, encontró y corrigió la falta de r
 
 El gate [[f32-vs-q8k-activation]] implementó `q8_k_compat` como modo CPU explícito. En `Vcur-0` reduce max-abs de `3.05e-4` a `7.45e-9`, usa 4672 bytes de workspace y, en ese baseline anterior, fue ~7.4% más rápido. Ese gate identificó `ffn_moe_out-0` como siguiente objetivo; el resultado supersedente está en [[moe-stage-bisect]].
 
-El gate [[moe-stage-bisect]] usa el mismo `ffn_inp-0` en QX/llama.cpp y cierra router, top-8, pesos, gate/up, SwiGLU, down y mezcla de layer 0 dentro de max-abs `1.20e-6`. [[iq2-s-iq4-xs-q8k]] valida layer 1 con el mismo input: mezcla final max-abs `4.35e-5`, RMSE `9.62e-7`, cosine ≈`1`. El follow-up [[layer1-layer2-sensitivity]] encontró un bug Q5_K real, añadió `Q5_K × Q8_K` y cerró atención layer 1 con el mismo `attn_norm-1`/KV F16: `attn_out` max-abs `6.33e-8`. Post-fix, layer-2 RMSE baja `94.91×` a `0.00660423` y logits RMSE baja `42.71×` a `0.0346769`. La diferencia restante es sensibilidad cuantizada: attention gain `2.541×`; MoE gain `16.907×`; el experto 68 aporta `99.03%` del delta MoE sin cambiar top-k.
+El gate [[moe-stage-bisect]] usa el mismo `ffn_inp-0` en QX/llama.cpp y cierra router, top-8, pesos, gate/up, SwiGLU, down y mezcla de layer 0 dentro de max-abs `1.20e-6`. [[iq2-s-iq4-xs-q8k]] valida layer 1 con el mismo input: mezcla final max-abs `4.35e-5`, RMSE `9.62e-7`, cosine ≈`1`. [[layer1-layer2-sensitivity]] encontró un bug Q5_K real, añadió `Q5_K × Q8_K` y cerró atención layer 1 same-input. El sweep supersedente [[layer2-logits-sweep]] encuentra la siguiente amplificación en layer 46→47, añade `Q6_K × Q8_K` y reduce `ffn_inp-46` same-input de max-abs `0.00445557` a `1.19e-7`. End-to-end no mejora: layer-47 RMSE queda `0.0309398` y logits RMSE `0.0393805`; el bisect causal sitúa la amplificación en MoE (`3.663×`), con top-8 estable y experto 74 aportando `76.08%` del delta.
 
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
@@ -57,7 +59,7 @@ La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coinc
 
 ## Después
 
-1. Continuar el bisect desde layer 2 hasta logits sin reabrir kernels cerrados con input idéntico.
+1. Bisect layer 47 → residual final → RMSNorm final → logits con input idéntico, sin reabrir kernels cerrados.
 2. Ampliar tokenizer a cobertura Unicode/chat-template exhaustiva.
 3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 4. Medir baseline de inferencia real.

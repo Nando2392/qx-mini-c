@@ -3132,6 +3132,33 @@ The same fix changes the two-token goldens: QX F32/INT8 now produces `[1124, 508
 
 Post-fix five-run warm benchmark with 48 layers and INT8 KV: F32 median `8.64031 s/token`; Q8_K median `2.41209 s/token`; speedup `3.58208x`; both report median peak RSS `5,627,904 B`.
 
-Honesty boundary: this closes Q5_K decode and one-token layer-1 attention/MoE with identical inputs. It classifies the residual layer-1→2 difference as expected quantized sensitivity and passes two fixed two-token sequences, but it does not establish exact global logits/residual parity or exhaustive prompt coverage. F32 remains the default; Q8_K remains CPU-only and opt-in.
+## 2026-08-18: layer-46 Q6_K attention and global layer sweep
+
+The 48-layer Q8_K/F32-KV sweep now reports delta L2, adjacent gain and a configurable amplification start layer. Starting after layer 2, the next material amplification is layer 46 to layer 47.
+
+`blk.46.attn_output.weight` is Q6_K (`ggml_type=14`). The opt-in path previously fell back to F32 while llama.cpp uses a Q8_K activation temporary. A scalar `Q6_K × Q8_K` kernel now matches the pinned public ggml vec-dot, and metadata reports `q5_k_q6_k_q8_k` for the layer-46 attention pair.
+
+Same-input layer-46 evidence with F16 KV:
+
+```text
+attn_norm max_abs: 2.98e-8
+Vcur max_abs:      6.41e-7
+kqv_out max_abs:   1.53e-5
+ffn_inp max_abs:   1.19e-7  (pre-fix 0.00445557; 37,376x improvement)
+```
+
+The end-to-end trajectory does not improve and is not described as parity:
+
+```text
+layer-47 input: max_abs 0.765381, RMSE 0.0309398, cosine 0.999999193349
+logits:         max_abs 0.187882, RMSE 0.0393805, cosine 0.999932288590
+argmax:         1124
+```
+
+A nominal-versus-perturbed layer-46 replay keeps the same top-8 experts. Attention attenuates the incoming delta (`0.153x`); MoE is the first material amplifier (`3.663x`), and expert 74 contributes `76.08%` of the MoE delta. This classifies the fixed-matrix residual as quantized-path sensitivity, not a new attention layout bug. F32 remains default and Q8_K remains CPU-only opt-in.
+
+Five warm 48-layer/full-MoE runs with INT8 KV measure F32 median `8.52569 s/token` and Q8_K median `2.34729 s/token`, a `3.63214x` speedup. Median peak RSS is `5,636,096 B` versus `5,640,192 B`. This probe excludes final RMSNorm, the complete lm_head and tokenization, so it is not end-to-end generation throughput.
+
+Honesty boundary: the Q5_K and Q6_K same-input paths close against the pinned oracle, and two fixed two-token sequences pass. The end-to-end Q6_K trajectory is slightly worse than the preceding Q5_K-only baseline and is reported as such. These fixed-matrix gates do not establish exact global logits/residual parity or exhaustive prompt coverage. F32 remains the default; Q8_K remains CPU-only and opt-in.
 
 Oracle provenance: llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`; source GGUF SHA-256 `c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652`. The integrated command additionally requires QXT2 payload fingerprint `6140965799433681264`; this FNV-1a64 value is a non-cryptographic compatibility guard, not an authenticity claim.

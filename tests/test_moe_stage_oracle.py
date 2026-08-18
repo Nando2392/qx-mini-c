@@ -335,6 +335,81 @@ def test_attention_stage_q8_k_matches_layer_1_with_same_input(tmp_path):
     assert max_abs(read_f32(qx_dir / "ffn_inp-1.f32"), read_f32(oracle_dir / "ffn_inp-1.f32")) <= 1e-4
 
 
+def test_attention_stage_q8_k_closes_layer_46_q6_k_output_projection(tmp_path):
+    require_local_moe_fixtures()
+    oracle_dir = tmp_path / "oracle-layer-46"
+    qx_dir = tmp_path / "qx-attention-layer-46"
+    qx_dir.mkdir()
+    run_oracle(oracle_dir, internal_layer=46, kv_type="f16")
+
+    completed = subprocess.run(
+        [
+            str(QX_EXE),
+            "attention-stage-probe",
+            "--in",
+            str(QXF),
+            "--layer",
+            "46",
+            "--layer-in",
+            str(oracle_dir / "layer-46.f32"),
+            "--out-dir",
+            str(qx_dir),
+            "--activation",
+            "q8_k_compat",
+            "--kv",
+            "f16",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["v_projection_kernel"] == "q5_k_q8_k"
+    assert payload["output_projection_kernel"] == "q6_k_q8_k"
+    assert payload["projection_kernel"] == "q5_k_q6_k_q8_k"
+
+    env = os.environ.copy()
+    env["LLAMA_CPP_DIR"] = str(LLAMA_CPP_DIR)
+    built = subprocess.run(
+        ["cmd.exe", "/c", str(GGML_BUILD)], cwd=ROOT, env=env, text=True, capture_output=True
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
+    tensor = json.loads(
+        subprocess.check_output(
+            [
+                str(QX_EXE),
+                "inspect-tensor",
+                "--in",
+                str(QXF),
+                "--name",
+                "blk.46.attn_output.weight",
+            ],
+            text=True,
+        )
+    )
+    assert tensor["ggml_type"] == 14
+    blocks = tensor["dims"][0] // 256
+    row_bytes = blocks * 210
+    qx_attention = read_f32(qx_dir / "attn_out-46.f32")
+    for row in (0, 1024, 2047):
+        reference = subprocess.run(
+            [
+                str(GGML_EXE),
+                "q6_k_q8_k_dot",
+                str(QXF),
+                str(tensor["offset"] + row * row_bytes),
+                str(blocks),
+                str(qx_dir / "kqv_out-46.f32"),
+            ],
+            capture_output=True,
+        )
+        assert reference.returncode == 0, reference.stderr.decode(errors="replace")
+        expected = struct.unpack("<f", reference.stdout)[0]
+        assert math.isclose(qx_attention[row], expected, rel_tol=2e-6, abs_tol=2e-6)
+
+    assert max_abs(read_f32(qx_dir / "ffn_inp-46.f32"), read_f32(oracle_dir / "ffn_inp-46.f32")) <= 2e-6
+
+
 @pytest.mark.parametrize(
     ("case", "values", "layer", "create_output", "expected_error"),
     [

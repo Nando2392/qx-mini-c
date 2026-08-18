@@ -67,6 +67,26 @@ def test_compare_residuals_rejects_malformed_sidecar(tmp_path):
     assert "invalid F32 sidecar size" in json.loads(result.stdout)["error"]
 
 
+def test_compare_residuals_rejects_non_ascending_layers(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPARE),
+            "--qx-dir",
+            str(tmp_path),
+            "--llama-dir",
+            str(tmp_path),
+            "--layers",
+            "1,0",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["error"] == "layers must be strictly increasing non-negative integers"
+
+
 def test_compare_residuals_maps_internal_checkpoint_names(tmp_path):
     qx_dir, llama_dir = tmp_path / "qx", tmp_path / "llama"
     qx_dir.mkdir()
@@ -103,3 +123,47 @@ def test_compare_residuals_maps_attention_checkpoint_names(tmp_path):
             capture_output=True,
         )
         assert result.returncode == 0
+
+
+def test_compare_residuals_reports_delta_l2_and_first_material_amplification(tmp_path):
+    qx_dir, llama_dir = tmp_path / "qx", tmp_path / "llama"
+    qx_dir.mkdir()
+    llama_dir.mkdir()
+    for layer, qx_values, llama_values in (
+        (0, [1.0, 2.0], [1.0, 2.0]),
+        (1, [2.0, 2.0], [1.0, 2.0]),
+        (2, [4.0, 2.0], [1.0, 2.0]),
+    ):
+        write_f32(qx_dir / f"step-0-layer-{layer}-input.f32", qx_values)
+        write_f32(llama_dir / f"layer-{layer}.f32", llama_values)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COMPARE),
+            "--qx-dir",
+            str(qx_dir),
+            "--llama-dir",
+            str(llama_dir),
+            "--layers",
+            "0,1,2",
+            "--amplification-gain",
+            "2",
+            "--amplification-start-layer",
+            "1",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["layers"][0]["delta_l2"] == 0.0
+    assert payload["layers"][0]["gain_from_previous"] is None
+    assert payload["layers"][1]["delta_l2"] == 1.0
+    assert payload["layers"][1]["gain_from_previous"] is None
+    assert payload["layers"][2]["delta_l2"] == 3.0
+    assert payload["layers"][2]["gain_from_previous"] == 3.0
+    assert payload["amplification_gain_threshold"] == 2.0
+    assert payload["amplification_start_layer"] == 1
+    assert payload["first_material_amplification_layer"] == 2

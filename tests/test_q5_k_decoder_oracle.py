@@ -115,3 +115,37 @@ def test_q5_k_decoder_matches_full_public_ggml_oracle_blocks():
         )
         assert oracle.returncode == 0, oracle.stderr.decode(errors="replace")
         assert_oracle_match(qx, oracle.stdout, tensor, block)
+
+
+def test_q6_k_decoder_matches_full_public_ggml_oracle_blocks():
+    if os.name != "nt" or not QX_EXE.exists() or not QXF.exists():
+        pytest.skip("local Windows Qwen fixtures are not available")
+    build_ggml_reference()
+
+    for tensor, block in (
+        ("blk.46.attn_output.weight", 0),
+        ("blk.46.attn_output.weight", 15),
+        ("output.weight", 0),
+        ("output.weight", 7),
+    ):
+        qx = json.loads(
+            subprocess.check_output(
+                [
+                    str(QX_EXE),
+                    "decode-block",
+                    "--in",
+                    str(QXF),
+                    "--name",
+                    tensor,
+                    "--block",
+                    str(block),
+                ],
+                text=True,
+            )
+        )
+        oracle = subprocess.run(
+            [str(GGML_EXE), "q6_k", str(QXF), str(qx["block_offset"]), "1"],
+            capture_output=True,
+        )
+        assert oracle.returncode == 0, oracle.stderr.decode(errors="replace")
+        assert_oracle_match(qx, oracle.stdout, tensor, block)

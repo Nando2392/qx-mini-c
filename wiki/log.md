@@ -152,3 +152,14 @@
 - El comparador falla cerrado si raw weights, probabilidades seleccionadas, suma o pesos normalizados se contradicen; delta real raw max-abs `0.000261843`, normalizado `0.000501402`.
 - La matriz greedy fija pasa: QX F32/INT8 `[1124,50853]` para `[42]` y `[358,1184]` para `Hello!`, igual a llama F16; checksums logits `[10967348620636053936,14548714559300682082]`.
 - Benchmark post-fix, 5 warm/48 capas/KV INT8: F32 `8.64031 s/token`, Q8_K `2.41209 s/token`, speedup `3.58208×`; RSS mediano idéntico `5,627,904 B`.
+
+## [2026-08-18] fix | Q6_K atención y sweep layer 2→logits
+
+- El sweep completo localizó la siguiente amplificación material en layer 46→47: delta L2 `0.358050 → 1.25473`, gain `3.50435×`.
+- `blk.46.attn_output.weight` es Q6_K (`ggml_type=14`) y Q8_K caía a F32. Se añadió `Q6_K × Q8_K` escalar y metadata exacta de familias.
+- Cuatro bloques Q6_K completos y tres filas Q6_K×Q8_K reales se comparan contra traits públicos ggml.
+- Same-input layer 46, `ffn_inp` mejora de max-abs `0.00445557` a `1.19e-7` (`37,376×`).
+- End-to-end no mejora: layer-47 RMSE `0.0309398`, logits RMSE `0.0393805`; argmax `1124` y secuencia `[1124,50853]` permanecen.
+- Bisect causal: atención gain `0.153×`, MoE gain `3.663×`, layer output gain `3.993×`; top-8 estable y experto 74 aporta `76.08%` del delta MoE.
+- Benchmark de probe 48 capas/MoE: F32 `8.52569 s/token`, Q8_K `2.34729 s/token`, speedup `3.63214×`; no incluye lm_head/tokenización.
+- F32 permanece default; Q8_K permanece CPU-only opt-in. Siguiente gate: layer 47→RMSNorm final→logits con input idéntico.
