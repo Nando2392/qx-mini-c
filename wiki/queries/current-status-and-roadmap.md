@@ -22,6 +22,7 @@ confidence: high
 - [[qwen3-tokenizer]] QXT2: paridad exacta para prompts fijos y prefill desde texto.
 - Hardening QXF fail-closed: manifest, ABI, directorio, dims, nombres, placement, overflow y filas exactas.
 - Golden independientes para embedding, IQ4_XS y expertos IQ2_XS/IQ3_XXS/IQ2_S representativos.
+- Golden independiente y dispatch CPU opt-in para experto down IQ3_S × Q8_K.
 - Smoke check y suite pytest.
 
 ## Gate activo
@@ -44,6 +45,8 @@ Q6_K decode + Q6_K×Q8_K atención CPU opt-in: GREEN
 sweep layer 2→47 y sensibilidad layer 46 clasificada: GREEN
 final RMSNorm + lm_head Q6_K×Q8_K same-input: GREEN
 layer 47 attention + MoE same-input: GREEN
+layers 44–42 attention + MoE same-input: GREEN
+layer 41 IQ3_S down + bloque same-input: GREEN post-fix
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -57,17 +60,20 @@ El gate [[moe-stage-bisect]] usa el mismo `ffn_inp-0` en QX/llama.cpp y cierra r
 
 [[layer47-same-input]] cierra el último bloque con el `layer-47.f32` exacto: atención llega a `ffn_inp-47` con max-abs `6.10e-5`; la cadena attention→MoE reconstruye `l_out-47` con max-abs `2.57e-4`, RMSE `8.01e-6`, cosine ≈`1`, y top-8 exacto `[83,3,74,119,92,28,109,101]`. El delta dominante restante proviene de sensibilidad de reducción F32 del router multiplicada por outputs down grandes, no de un nuevo decoder quant roto. La divergencia global entra acumulada desde capas anteriores y no queda resuelta por este gate.
 
+El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en layer 41 el primer fallo material observado en esa ejecución: atención, routing y SwiGLU cerraban, pero `ffn_down_exps` IQ3_S seguía en `dequant_f32`. La matriz pytest versionada regenera sidecars y fija routing/métricas exactas para layers 24, 41, 42, 43 y 44. El golden real `IQ3_S × Q8_K` y el dispatch opt-in reducen down a max-abs `9.54e-7` y reconstruyen `l_out-41` con max-abs `4.76e-5`, RMSE `1.05e-6`, routing exacto `[48,73,69,18,96,104,88,26]`. El siguiente bisect empieza antes de layer 41; no se infiere todavía el origen acumulado global.
+
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
 
 ## Después
 
-1. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
-2. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
-3. Medir baseline de inferencia real.
-4. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
-5. Gates 4K, RSS, calidad KV y 8 h.
+1. Continuar el bisect same-input hacia atrás antes de layer 41.
+2. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
+3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
+4. Medir baseline de inferencia real.
+5. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
+6. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 

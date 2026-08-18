@@ -142,6 +142,7 @@ def test_moe_stage_probe_accepts_oracle_ffn_input_and_exports_stages(tmp_path):
         (0, "blk.0.ffn_down_exps.weight", "iq3_xxs", 98, 49, (0, 1024, 2047), "ffn_moe_swiglu-0.f32", 768),
         (1, "blk.1.ffn_gate_exps.weight", "iq2_s", 82, 0, (0, 384, 767), "ffn_norm-1.f32", 2048),
         (1, "blk.1.ffn_down_exps.weight", "iq4_xs", 136, 0, (0, 1024, 2047), "ffn_moe_swiglu-1.f32", 768),
+        (41, "blk.41.ffn_down_exps.weight", "iq3_s", 110, 48, (0, 1024, 2047), "ffn_moe_swiglu-41.f32", 768),
     ],
 )
 def test_q8_k_expert_dot_matches_pinned_ggml_kernel(
@@ -493,7 +494,7 @@ def test_real_moe_layers_preserve_quant_types_and_expert_row_strides(
     ("layer", "expected_kernel", "expected_gate_up_kernel", "expected_down_kernel"),
     [
         (1, "iq2_s_q8_k_and_iq4_xs_q8_k", "iq2_s_q8_k", "iq4_xs_q8_k"),
-        (24, "q8_k_expert_kernels_with_f32_fallback", "iq2_xs_q8_k", "dequant_f32"),
+        (24, "iq2_xs_q8_k_and_iq3_s_q8_k", "iq2_xs_q8_k", "iq3_s_q8_k"),
         (47, "iq2_s_q8_k_and_iq4_xs_q8_k", "iq2_s_q8_k", "iq4_xs_q8_k"),
     ],
 )
@@ -627,3 +628,162 @@ def test_layer_47_same_input_attention_and_moe_chain_closes(tmp_path):
     assert payload["reconstruction"]["moe_output"]["rmse"] <= 1e-5
     assert payload["reconstruction"]["layer_output"]["max_abs"] <= 3e-4
     assert payload["reconstruction"]["layer_output"]["rmse"] <= 1e-5
+
+
+@pytest.mark.parametrize(
+    (
+        "layer",
+        "v_kernel",
+        "output_kernel",
+        "gate_up_kernel",
+        "down_kernel",
+        "routing",
+        "router_max_abs",
+        "down_max_abs",
+        "weighted_max_abs",
+        "layer_output_max_abs",
+        "layer_output_rmse",
+    ),
+    [
+        (24, "iq4_xs_q8_k", "iq4_xs_q8_k", "iq2_xs_q8_k", "iq3_s_q8_k",
+         [10, 105, 24, 111, 101, 98, 108, 113], 4.76837158203125e-06,
+         2.384185791015625e-07, 1.7881393432617188e-07,
+         4.5750217395834625e-05, 1.0114135290963168e-06),
+        (41, "iq4_xs_q8_k", "q6_k_q8_k", "iq2_s_q8_k", "iq3_s_q8_k",
+         [48, 73, 69, 18, 96, 104, 88, 26], 2.86102294921875e-06,
+         9.5367431640625e-07, 8.940696716308594e-08,
+         4.762341268360615e-05, 1.0528728896676105e-06),
+        (42, "iq4_xs_q8_k", "iq4_xs_q8_k", "iq2_s_q8_k", "iq4_xs_q8_k",
+         [110, 64, 17, 69, 21, 41, 116, 25], 3.337860107421875e-06,
+         None, 1.1920928955078125e-07, 8.474162314087152e-07, 4.0049851967789266e-08),
+        (43, "iq4_xs_q8_k", "iq4_xs_q8_k", "iq2_s_q8_k", "iq4_xs_q8_k",
+         [78, 82, 83, 63, 90, 100, 74, 28], 2.86102294921875e-06,
+         None, 3.5762786865234375e-07, 4.6805653255432844e-05, 1.0357114130980166e-06),
+        (44, "iq4_xs_q8_k", "q6_k_q8_k", "iq2_s_q8_k", "iq4_xs_q8_k",
+         [40, 113, 104, 41, 72, 83, 73, 102], 2.384185791015625e-06,
+         None, 2.9802322387695312e-08, 7.81775452196598e-06, 1.7660727227129046e-07),
+    ],
+)
+def test_backward_bisect_same_input_layers_close_with_reproducible_metrics(
+    tmp_path,
+    layer,
+    v_kernel,
+    output_kernel,
+    gate_up_kernel,
+    down_kernel,
+    routing,
+    router_max_abs,
+    down_max_abs,
+    weighted_max_abs,
+    layer_output_max_abs,
+    layer_output_rmse,
+):
+    require_local_moe_fixtures()
+    oracle_dir = tmp_path / f"oracle-layer-{layer}"
+    attention_dir = tmp_path / f"attention-layer-{layer}"
+    moe_dir = tmp_path / f"moe-layer-{layer}"
+    attention_dir.mkdir()
+    moe_dir.mkdir()
+    run_oracle(oracle_dir, internal_layer=layer, kv_type="f16")
+
+    attention = subprocess.run(
+        [
+            str(QX_EXE),
+            "attention-stage-probe",
+            "--in",
+            str(QXF),
+            "--layer",
+            str(layer),
+            "--layer-in",
+            str(oracle_dir / f"layer-{layer}.f32"),
+            "--out-dir",
+            str(attention_dir),
+            "--activation",
+            "q8_k_compat",
+            "--kv",
+            "f16",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert attention.returncode == 0, attention.stdout + attention.stderr
+    attention_payload = json.loads(attention.stdout)
+    assert attention_payload["v_projection_kernel"] == v_kernel
+    assert attention_payload["output_projection_kernel"] == output_kernel
+    assert attention_payload["kv_format"] == "f16"
+
+    moe = subprocess.run(
+        [
+            str(QX_EXE),
+            "moe-stage-probe",
+            "--in",
+            str(QXF),
+            "--layer",
+            str(layer),
+            "--ffn-inp",
+            str(attention_dir / f"ffn_inp-{layer}.f32"),
+            "--out-dir",
+            str(moe_dir),
+            "--activation",
+            "q8_k_compat",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert moe.returncode == 0, moe.stdout + moe.stderr
+    moe_payload = json.loads(moe.stdout)
+    assert moe_payload["gate_up_projection_kernel"] == gate_up_kernel
+    assert moe_payload["down_projection_kernel"] == down_kernel
+    assert moe_payload["selected_experts"] == routing
+
+    compared = subprocess.run(
+        [
+            sys.executable,
+            str(COMPARE_LAYER),
+            "--oracle-dir",
+            str(oracle_dir),
+            "--attention-dir",
+            str(attention_dir),
+            "--same-input-moe-dir",
+            str(moe_dir),
+            "--expected-vcur-count",
+            "512",
+            "--expected-kqv-out-count",
+            "4096",
+            "--layer",
+            str(layer),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert compared.returncode == 0, compared.stdout + compared.stderr
+    payload = json.loads(compared.stdout)
+    assert payload["routing"] == {
+        "oracle": routing,
+        "qx": routing,
+        "exact": True,
+    }
+    assert payload["checkpoints"]["attention"]["Vcur"]["max_abs"] <= 2e-6
+    assert payload["checkpoints"]["attention"]["kqv_out"]["max_abs"] <= 1.5e-4
+    assert payload["checkpoints"]["attention"]["ffn_input"]["max_abs"] <= 1e-4
+    assert payload["checkpoints"]["moe"]["router_logits"]["max_abs"] == pytest.approx(
+        router_max_abs, rel=0, abs=1e-12
+    )
+    assert payload["checkpoints"]["moe"]["weights_norm"]["max_abs"] <= 3e-7
+    if down_max_abs is None:
+        assert payload["checkpoints"]["moe"]["down"]["max_abs"] <= 2e-4
+    else:
+        assert payload["checkpoints"]["moe"]["down"]["max_abs"] == pytest.approx(
+            down_max_abs, rel=0, abs=1e-12
+        )
+    assert payload["checkpoints"]["moe"]["weighted"]["max_abs"] == pytest.approx(
+        weighted_max_abs, rel=0, abs=1e-12
+    )
+    assert payload["reconstruction"]["moe_output"]["max_abs"] <= 3e-4
+    assert payload["reconstruction"]["moe_output"]["rmse"] <= 1e-5
+    assert payload["reconstruction"]["layer_output"]["max_abs"] == pytest.approx(
+        layer_output_max_abs, rel=0, abs=1e-12
+    )
+    assert payload["reconstruction"]["layer_output"]["rmse"] == pytest.approx(
+        layer_output_rmse, rel=0, abs=1e-12
+    )

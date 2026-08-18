@@ -115,4 +115,4 @@ El routing pesa más que el error de down, pero el top-8 no cambia. Replicar den
 - Q5_K×Q8_K, Q6_K×Q8_K, IQ2_S×Q8_K e IQ4_XS×Q8_K: no se reabren.
 - F32 sigue default; `q8_k_compat` sigue CPU-only y opt-in.
 - La divergencia global en `l_out-47` entra acumulada desde capas anteriores; exactitud global de residuales/logits sigue refutada.
-- Siguiente trabajo: ampliar la matriz de tokenizer/prompts/greedy y optimizar sin convertir orden SIMD backend-specific en contrato público.
+- El bisect supersedente [[layer41-iq3s-q8k]] cierra layers 44–42 y corrige el primer fallo material en layer 41. El siguiente checkpoint causal está antes de layer 41.

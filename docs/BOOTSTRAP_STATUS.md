@@ -3187,3 +3187,25 @@ With the exact oracle `layer-47.f32`, Q8_K-compatible attention and F16 KV produ
 The remaining same-input delta is dominated by backend arithmetic in the F32 router: scalar-double QX logits differ from ggml SIMD-F32 by at most `9.53674e-7`, yielding a normalized weight delta of `2.08616e-7` that multiplies down values as large as `2188`. Using oracle weights reduces the aggregate max-abs to `2.44141e-4`. This does not justify making one CPU's SIMD reduction order part of the portable runtime contract.
 
 Honesty boundary: layer 47 closes for the exact shared input; accumulated global `l_out-47` and exact logits remain non-identical. F32 remains default and `q8_k_compat` remains CPU-only and opt-in.
+
+## 2026-08-18: layer 41 IQ3_S × Q8_K backward-bisect fix
+
+The same-input bisect moved backward without assuming layer 46 was causal. Layers 44, 43 and 42 closed materially. Layer 41 was the first failing block in that descending run: attention, routing and IQ2_S gate/up stayed close, while `blk.41.ffn_down_exps.weight` is IQ3_S (`ggml_type=21`) and QX reported `down_projection_kernel=dequant_f32`.
+
+In the historical pre-fix bisect, weighted experts reached max-abs `1.25454e-3`; reconstructed `l_out-41` was max-abs `1.62544e-3`, RMSE `4.02635e-4`. Those values document the old implementation and are not claimed as a post-fix executable gate. A RED golden against the pinned ggml CPU traits added real IQ3_S row coverage. The scalar C `IQ3_S × Q8_K` kernel now dispatches only in `q8_k_compat` and reports `down_projection_kernel=iq3_s_q8_k`.
+
+```text
+routing:        [48,73,69,18,96,104,88,26] exact
+Vcur:           max_abs 1.19209e-7, RMSE 7.42027e-9
+kqv_out:        exact
+ffn_moe_down:   max_abs 9.53674e-7, RMSE 1.00230e-7
+weighted:       max_abs 8.94070e-8, RMSE 3.35602e-9
+ffn_moe_out:    max_abs 1.27940e-7, RMSE 9.81110e-9
+l_out-41:       max_abs 4.76234e-5, RMSE 1.05287e-6
+```
+
+Layer 24 also carries an IQ3_S down tensor. A separate real same-input replay confirmed exact routing, down max-abs `2.38419e-7` and `l_out-24` max-abs `4.57502e-5`, replacing its historical fallback expectation with explicit kernel metadata.
+
+The versioned regression `test_backward_bisect_same_input_layers_close_with_reproducible_metrics` regenerates all temporary sidecars and asserts exact routing plus router/weighted/`l_out` metrics for layers 24, 41, 42, 43 and 44. This is the auditable release proof; experimental `.f32` and JSON outputs remain outside Git by policy.
+
+Honesty boundary: this fixes and closes the local layer-41 seam for the pinned model/input. It does not establish accumulated residual parity, exact global logits or exhaustive prompt coverage. F32 remains default; `q8_k_compat` remains CPU-only and opt-in. The next causal bisect continues before layer 41.

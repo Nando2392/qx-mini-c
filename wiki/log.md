@@ -179,3 +179,12 @@
 - La cadena QX attention→MoE reconstruye `l_out-47` con max-abs `2.57e-4`, RMSE `8.01e-6`, cosine ≈`1`.
 - La diferencia dominante es sensibilidad de reducción F32 del router: delta de peso `2.09e-7` multiplicado por outputs down de hasta `2188`; no se replica un orden SIMD backend-specific.
 - F32 sigue default y Q8_K CPU opt-in. Exactitud global sigue refutada porque la divergencia ya entra acumulada al bloque.
+
+## [2026-08-18] fix | Layer 41 IQ3_S × Q8_K same-input
+
+- El bisect descendente cerró layers 44, 43 y 42 y encontró el primer fallo material en `ffn_moe_down-41` con routing exacto.
+- `blk.41.ffn_down_exps.weight` es IQ3_S (`ggml_type=21`); la ruta opt-in caía a `dequant_f32` mientras ggml usa temporal Q8_K.
+- Golden RED contra traits CPU públicos y kernel escalar C `IQ3_S × Q8_K`; metadata ahora reporta `iq3_s_q8_k`.
+- Layer 41 post-fix: down max-abs `9.54e-7`; weighted `8.94e-8`; `l_out-41` max-abs `4.76e-5`, RMSE `1.05e-6`; top-8 `[48,73,69,18,96,104,88,26]` exacto.
+- Layer 24, también IQ3_S down, cierra con down max-abs `2.38e-7` y `l_out-24` max-abs `4.58e-5`.
+- Es cierre same-input local. F32 sigue default; Q8_K sigue CPU-only opt-in; el bisect continúa antes de layer 41.

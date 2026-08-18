@@ -3640,6 +3640,45 @@ static float qx_dot_iq3_xxs_q8_k(const unsigned char *row, const qx_projection_w
     return 0.25f * sumf;
 }
 
+static float qx_dot_iq3_s_q8_k(const unsigned char *row, const qx_projection_workspace *workspace) {
+    float sumf = 0.0f;
+    for (uint32_t block = 0; block < workspace->count; ++block) {
+        const unsigned char *raw = row + (uint64_t)block * 110u;
+        const unsigned char *qs = raw + 2u;
+        const unsigned char *qh = raw + 66u;
+        const unsigned char *signs = raw + 74u;
+        const unsigned char *scales = raw + 106u;
+        const qx_block_q8_k *activation = &workspace->blocks[block];
+        const int8_t *q8 = activation->qs;
+        int32_t bsum = 0;
+        for (uint32_t ib32 = 0; ib32 < 8u; ib32 += 2u) {
+            for (uint32_t group = 0; group < 2u; ++group) {
+                int32_t sumi = 0;
+                unsigned char high = qh[ib32 + group];
+                for (uint32_t l = 0; l < 4u; ++l) {
+                    uint32_t index1 = (uint32_t)qs[2u * l] | (((uint32_t)high << (8u - 2u * l)) & 256u);
+                    uint32_t index2 = (uint32_t)qs[2u * l + 1u] | (((uint32_t)high << (7u - 2u * l)) & 256u);
+                    uint32_t grid1 = qx_iq3s_grid[index1 & 511u];
+                    uint32_t grid2 = qx_iq3s_grid[index2 & 511u];
+                    for (uint32_t j = 0; j < 4u; ++j) {
+                        unsigned char value1 = (unsigned char)((grid1 >> (8u * j)) & 0xffu);
+                        unsigned char value2 = (unsigned char)((grid2 >> (8u * j)) & 0xffu);
+                        sumi += (int32_t)value1 * (int32_t)q8[j] * ((signs[l] & qx_kmask_iq2xs[j]) ? -1 : 1);
+                        sumi += (int32_t)value2 * (int32_t)q8[j + 4u] * ((signs[l] & qx_kmask_iq2xs[j + 4u]) ? -1 : 1);
+                    }
+                    q8 += 8;
+                }
+                uint32_t scale = group == 0u ? scales[ib32 / 2u] & 0x0fu : scales[ib32 / 2u] >> 4u;
+                bsum += sumi * (int32_t)(2u * scale + 1u);
+                qs += 8;
+                signs += 4;
+            }
+        }
+        sumf += qx_fp16_to_f32(qx_rd_le16(raw)) * activation->d * (float)bsum;
+    }
+    return sumf;
+}
+
 static int qx_projection_matvec_fill_mode(qx_file *file, const qx_tensor_dir_entry *t, unsigned char *buf, float *float_out, uint32_t rows, uint32_t dims, const float *residual, uint32_t residual_n, uint32_t token, uint32_t layer, uint32_t seed, const char *activation_format, qx_projection_workspace *workspace, double *probe_out, uint64_t *values_out, char *err, uint64_t err_len) {
     const char *decoder = NULL;
     uint64_t block_size = 0;
@@ -3831,7 +3870,11 @@ static const char *qx_moe_down_kernel_label(uint32_t family_mask, int f32_used) 
     if (family_mask == 0u) return f32_used ? "dequant_f32" : "not_used";
     if (family_mask == 2u) return f32_used ? "iq3_xxs_q8_k_with_f32_fallback" : "iq3_xxs_q8_k";
     if (family_mask == 8u) return f32_used ? "iq4_xs_q8_k_with_f32_fallback" : "iq4_xs_q8_k";
+    if (family_mask == 16u) return f32_used ? "iq3_s_q8_k_with_f32_fallback" : "iq3_s_q8_k";
     if (family_mask == 10u) return f32_used ? "iq3_xxs_iq4_xs_q8_k_with_f32_fallback" : "iq3_xxs_iq4_xs_q8_k";
+    if (family_mask == 18u) return f32_used ? "iq3_xxs_iq3_s_q8_k_with_f32_fallback" : "iq3_xxs_iq3_s_q8_k";
+    if (family_mask == 24u) return f32_used ? "iq3_s_iq4_xs_q8_k_with_f32_fallback" : "iq3_s_iq4_xs_q8_k";
+    if (family_mask == 26u) return f32_used ? "iq3_xxs_iq3_s_iq4_xs_q8_k_with_f32_fallback" : "iq3_xxs_iq3_s_iq4_xs_q8_k";
     return "invalid_down_kernel_state";
 }
 
@@ -3861,6 +3904,7 @@ static void qx_detect_moe_kernel_usage(
         if (down) {
             if (down->flags == 18u) { *q8_k_used = 1; *down_family_mask |= 2u; }
             else if (down->flags == 23u) { *q8_k_used = 1; *down_family_mask |= 8u; }
+            else if (down->flags == 21u) { *q8_k_used = 1; *down_family_mask |= 16u; }
             else { *f32_used = 1; *down_f32_used = 1; }
         }
     }
@@ -4161,7 +4205,7 @@ static int qx_packed_expert_matvec_mode(qx_file *file, const qx_tensor_dir_entry
         expert > UINT64_MAX / expert_bytes || tensor->offset > UINT64_MAX - (uint64_t)expert * expert_bytes) {
         qx_set_err(err, err_len, "packed expert tensor is truncated or overflows"); return 0;
     }
-    if (workspace && ((tensor->flags != 17u && tensor->flags != 18u && tensor->flags != 22u && tensor->flags != 23u) ||
+    if (workspace && ((tensor->flags != 17u && tensor->flags != 18u && tensor->flags != 21u && tensor->flags != 22u && tensor->flags != 23u) ||
         input_dims % QX_Q8_K_VALUES != 0u || workspace->count != blocks_per_row)) {
         qx_set_err(err, err_len, "incompatible packed expert Q8_K workspace"); return 0;
     }
@@ -4172,6 +4216,7 @@ static int qx_packed_expert_matvec_mode(qx_file *file, const qx_tensor_dir_entry
         if (workspace) {
             output[row] = tensor->flags == 17u ? qx_dot_iq2_xs_q8_k(row_data, workspace) :
                 tensor->flags == 18u ? qx_dot_iq3_xxs_q8_k(row_data, workspace) :
+                tensor->flags == 21u ? qx_dot_iq3_s_q8_k(row_data, workspace) :
                 tensor->flags == 22u ? qx_dot_iq2_s_q8_k(row_data, workspace) : qx_dot_iq4_xs_q8_k(row_data, workspace);
             if (!isfinite(output[row])) { free(slice); qx_set_err(err, err_len, "non-finite packed expert Q8_K output"); return 0; }
             continue;
@@ -4666,7 +4711,7 @@ static int qx_apply_real_moe_layer(
     for (uint32_t rank = 0; rank < 8u; ++rank) routing_weights[rank] /= selected_weight_sum;
     int gate_up_q8_k = use_q8_k && ((gate_exps->flags == 17u && up_exps->flags == 17u) ||
         (gate_exps->flags == 22u && up_exps->flags == 22u));
-    int down_q8_k = use_q8_k && (down_exps->flags == 18u || down_exps->flags == 23u);
+    int down_q8_k = use_q8_k && (down_exps->flags == 18u || down_exps->flags == 21u || down_exps->flags == 23u);
     qx_projection_workspace gate_up_workspace = {0};
     if (gate_up_q8_k && !qx_quantize_q8_k(ffn_input, hidden, &gate_up_workspace, err, err_len)) { free(buffers); return 0; }
     for (uint32_t rank = 0; rank < 8u; ++rank) {
@@ -4798,12 +4843,12 @@ int qx_dump_expert_q8_k_dot_probe_summary(const char *path, const char *tensor_n
     if (!qx_open_file(path, &file, err, err_len)) return 0;
     const qx_tensor_dir_entry *tensor = qx_find_tensor(&file, tensor_name);
     if (!tensor || tensor->rank < 3u ||
-        (tensor->flags != 17u && tensor->flags != 18u && tensor->flags != 22u && tensor->flags != 23u) ||
+        (tensor->flags != 17u && tensor->flags != 18u && tensor->flags != 21u && tensor->flags != 22u && tensor->flags != 23u) ||
         tensor->dims[0] == 0u || tensor->dims[0] > UINT32_MAX || tensor->dims[0] % QX_Q8_K_VALUES != 0u ||
         tensor->dims[1] > UINT32_MAX || tensor->dims[2] > UINT32_MAX || row >= tensor->dims[1] || expert >= tensor->dims[2]) {
         qx_close_file(&file); qx_set_err(err, err_len, "unsupported expert Q8_K dot tensor or range"); return 0;
     }
-    uint64_t block_size = tensor->flags == 17u ? 74u : tensor->flags == 18u ? 98u : tensor->flags == 22u ? 82u : 136u;
+    uint64_t block_size = tensor->flags == 17u ? 74u : tensor->flags == 18u ? 98u : tensor->flags == 21u ? 110u : tensor->flags == 22u ? 82u : 136u;
     uint64_t blocks = tensor->dims[0] / QX_Q8_K_VALUES;
     if (blocks == 0u || blocks > UINT64_MAX / block_size) { qx_close_file(&file); qx_set_err(err, err_len, "expert Q8_K row size overflow"); return 0; }
     uint64_t row_bytes = blocks * block_size;
@@ -4832,6 +4877,7 @@ int qx_dump_expert_q8_k_dot_probe_summary(const char *path, const char *tensor_n
     }
     float dot = tensor->flags == 17u ? qx_dot_iq2_xs_q8_k(row_raw, &workspace) :
         tensor->flags == 18u ? qx_dot_iq3_xxs_q8_k(row_raw, &workspace) :
+        tensor->flags == 21u ? qx_dot_iq3_s_q8_k(row_raw, &workspace) :
         tensor->flags == 22u ? qx_dot_iq2_s_q8_k(row_raw, &workspace) : qx_dot_iq4_xs_q8_k(row_raw, &workspace);
     if (!isfinite(dot)) { free(activation); free(row_raw); qx_close_file(&file); qx_set_err(err, err_len, "non-finite expert Q8_K dot"); return 0; }
     fprintf(out, "{\"probe\":\"expert_q8_k_dot\",\"tensor\":\"%s\",\"ggml_type\":%u,\"expert\":%u,\"row\":%u,\"values\":%u,\"blocks\":%u,\"dot\":%.9g}\n",
@@ -5049,13 +5095,15 @@ int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char
     for (uint32_t rank = 0; rank < 8u; ++rank) weights_norm[rank] = (float)((double)weights[rank] / weight_sum);
     int gate_up_q8_k = use_q8_k && ((gate->flags == 17u && up->flags == 17u) ||
         (gate->flags == 22u && up->flags == 22u));
-    int down_q8_k = use_q8_k && (down->flags == 18u || down->flags == 23u);
+    int down_q8_k = use_q8_k && (down->flags == 18u || down->flags == 21u || down->flags == 23u);
     int q8_k_used = gate_up_q8_k || down_q8_k;
     int f32_used = !gate_up_q8_k || !down_q8_k;
     const char *projection_kernel = "dequant_f32";
     if (q8_k_used && f32_used) projection_kernel = "q8_k_expert_kernels_with_f32_fallback";
     else if (q8_k_used && gate->flags == 17u && down->flags == 18u) projection_kernel = "iq2_xs_q8_k_and_iq3_xxs_q8_k";
     else if (q8_k_used && gate->flags == 22u && down->flags == 23u) projection_kernel = "iq2_s_q8_k_and_iq4_xs_q8_k";
+    else if (q8_k_used && gate->flags == 17u && down->flags == 21u) projection_kernel = "iq2_xs_q8_k_and_iq3_s_q8_k";
+    else if (q8_k_used && gate->flags == 22u && down->flags == 21u) projection_kernel = "iq2_s_q8_k_and_iq3_s_q8_k";
     else if (q8_k_used) projection_kernel = "q8_k_expert_kernels";
     qx_projection_workspace gate_up_workspace = {0};
     if (gate_up_q8_k && !qx_quantize_q8_k(ffn_norm, hidden, &gate_up_workspace, err, err_len)) goto fail;
@@ -5090,7 +5138,8 @@ int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char
     QX_WRITE_MOE_STAGE("ffn_moe_weighted", weighted, (uint64_t)hidden * 8u);
 #undef QX_WRITE_MOE_STAGE
     const char *gate_up_projection_kernel = gate_up_q8_k ? (gate->flags == 17u ? "iq2_xs_q8_k" : "iq2_s_q8_k") : "dequant_f32";
-    const char *down_projection_kernel = down_q8_k ? (down->flags == 18u ? "iq3_xxs_q8_k" : "iq4_xs_q8_k") : "dequant_f32";
+    const char *down_projection_kernel = down_q8_k ?
+        (down->flags == 18u ? "iq3_xxs_q8_k" : down->flags == 21u ? "iq3_s_q8_k" : "iq4_xs_q8_k") : "dequant_f32";
     fprintf(out, "{\"probe\":\"moe_stage\",\"layer\":%u,\"input_count\":%u,\"experts\":%u,\"experts_used\":8,\"intermediate\":%u,\"activation_mode\":\"%s\",\"projection_kernel\":\"%s\",\"gate_up_projection_kernel\":\"%s\",\"down_projection_kernel\":\"%s\",\"gate_ggml_type\":%u,\"up_ggml_type\":%u,\"down_ggml_type\":%u,\"selected_experts\":[",
             layer, hidden, experts, intermediate, activation_mode, projection_kernel,
             gate_up_projection_kernel, down_projection_kernel, gate->flags, up->flags, down->flags);
@@ -5195,6 +5244,9 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     else if (moe_q8_k_used && moe_family_mask == 3u) moe_projection_kernel = "iq2_xs_q8_k_and_iq3_xxs_q8_k";
     else if (moe_q8_k_used && moe_family_mask == 12u) moe_projection_kernel = "iq2_s_q8_k_and_iq4_xs_q8_k";
     else if (moe_q8_k_used && moe_family_mask == 15u) moe_projection_kernel = "iq2_xs_iq3_xxs_iq2_s_iq4_xs_q8_k";
+    else if (moe_q8_k_used && moe_family_mask == 17u) moe_projection_kernel = "iq2_xs_q8_k_and_iq3_s_q8_k";
+    else if (moe_q8_k_used && moe_family_mask == 20u) moe_projection_kernel = "iq2_s_q8_k_and_iq3_s_q8_k";
+    else if (moe_q8_k_used && moe_family_mask == 31u) moe_projection_kernel = "iq2_xs_iq3_xxs_iq3_s_iq2_s_iq4_xs_q8_k";
     else if (moe_q8_k_used) moe_projection_kernel = "q8_k_expert_kernels";
     else if (moe_f32_used) moe_projection_kernel = "dequant_f32";
     const char *moe_gate_up_projection_kernel = full_moe ?
