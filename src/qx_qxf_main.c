@@ -46,7 +46,7 @@ static void usage(const char *argv0) {
         "  %s residual-vector-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --dims 64 --seed 7\n"
         "  %s projection-matvec-probe --in model.qxf --layer 0 --token-id 42 --rows 4 --dims 64 --kv int8 --seed 7\n"
         "  qxqxf q8-k-activation-probe --values 256 [--inject zero|nan|inf]\n"
-        "  %s state-loop-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 1 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe [--final-head --top-n 5] [--dump-residuals dir] [--bench]\n"
+        "  %s state-loop-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 1 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe [--start-layer N --residual-in layer-N.f32] [--final-head --top-n 5] [--dump-residuals dir] [--bench]\n"
         "  %s rope-gqa-golden-probe --tokens 2 --q-heads-run 9 --seed 7\n"
         "  qxqxf real-qkv-golden-probe --in model.qxf --layer 0 --token-a 42 --token-b 43 --q-heads-run 9 --seed 7\n"
         "  qxqxf attention-stage-probe --in model.qxf --layer 1 --layer-in layer-1.f32 --out-dir sidecars --activation q8_k_compat --kv f16\n"
@@ -387,7 +387,7 @@ int main(int argc, char **argv) {
         free(input);
         if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, full_moe, final_head, 0, 2048u, NULL, 8u, 151936u,
-                top_n, temperature, seed, NULL, stdout, err, sizeof(err))) {
+                top_n, temperature, seed, NULL, 0u, NULL, stdout, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;
         }
         return 0;
@@ -1573,6 +1573,9 @@ int main(int argc, char **argv) {
         int final_head = 0;
         int bench = 0;
         const char *residual_dump_dir = NULL;
+        const char *residual_input_path = NULL;
+        int start_layer_set = 0;
+        uint32_t start_layer = 0u;
         const char *norm = NULL;
         uint32_t residual_dims = 64;
         uint32_t prompt_token = 0;
@@ -1606,6 +1609,15 @@ int main(int argc, char **argv) {
             else if (strcmp(argv[i], "--final-head") == 0) final_head = 1;
             else if (strcmp(argv[i], "--bench") == 0) bench = 1;
             else if (strcmp(argv[i], "--dump-residuals") == 0 && i + 1 < argc) residual_dump_dir = argv[++i];
+            else if (strcmp(argv[i], "--residual-in") == 0 && i + 1 < argc) residual_input_path = argv[++i];
+            else if (strcmp(argv[i], "--start-layer") == 0 && i + 1 < argc) {
+                char *end = NULL;
+                errno = 0;
+                unsigned long parsed = strtoul(argv[++i], &end, 10);
+                if (errno || !end || *end || parsed > UINT32_MAX) { usage(argv[0]); return 2; }
+                start_layer = (uint32_t)parsed;
+                start_layer_set = 1;
+            }
             else if (strcmp(argv[i], "--residual-dims") == 0 && i + 1 < argc) residual_dims = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--norm") == 0 && i + 1 < argc) norm = argv[++i];
             else if (strcmp(argv[i], "--top-k") == 0 && i + 1 < argc) top_k = (uint32_t)strtoul(argv[++i], NULL, 10);
@@ -1615,9 +1627,9 @@ int main(int argc, char **argv) {
             else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = (uint32_t)strtoul(argv[++i], NULL, 10);
             else { usage(argv[0]); return 2; }
         }
-        if (!in_path) { usage(argv[0]); return 2; }
+        if (!in_path || start_layer_set != (residual_input_path != NULL)) { usage(argv[0]); return 2; }
         char err[256];
-        if (!qx_dump_state_loop_probe_summary(in_path, tokens_path, prompt_token, steps, layers, ctx, kv_format, activation_format, real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector, causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm, top_k, scan, logits_top_n, temperature, seed, residual_dump_dir, stdout, err, sizeof(err))) {
+        if (!qx_dump_state_loop_probe_summary(in_path, tokens_path, prompt_token, steps, layers, ctx, kv_format, activation_format, real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector, causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm, top_k, scan, logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path, stdout, err, sizeof(err))) {
             fprintf(stderr, "state-loop-probe failed: %s\n", err);
             return 1;
         }

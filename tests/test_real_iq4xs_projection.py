@@ -9,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 EXE = ROOT / "build" / "qxqxf.exe"
+STATE_LOOP_REPLAY_API_CONTRACT = ROOT / "build" / "state_loop_replay_api_contract.exe"
 GGML_REFERENCE = ROOT / "build" / "ggml_reference_decode.exe"
 LLAMA_CPP_DIR = Path(os.environ.get("LLAMA_CPP_DIR", ROOT.parent / "llama.cpp-k3"))
 GGML_REFERENCE_DLLS = LLAMA_CPP_DIR / "build-k3-cpu" / "bin" / "Release"
@@ -18,6 +19,16 @@ IQ4_VALUES = (-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 8
 
 def f32(value):
     return struct.unpack("<f", struct.pack("<f", value))[0]
+
+
+def test_state_loop_replay_api_requires_residual_vector():
+    completed = subprocess.run(
+        [str(STATE_LOOP_REPLAY_API_CONTRACT)],
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def fnv1a64(data):
@@ -353,6 +364,149 @@ def test_state_loop_can_dump_lossless_layer_residuals(tmp_path):
             assert path.stat().st_size == count * 4
             values = struct.unpack(f"<{count}f", path.read_bytes())
             assert all(math.isfinite(value) for value in values)
+
+
+def test_state_loop_can_replay_from_an_injected_layer_residual(tmp_path):
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    baseline_dir = tmp_path / "baseline"
+    replay_dir = tmp_path / "replay"
+    baseline_dir.mkdir()
+    replay_dir.mkdir()
+    common = [
+        str(EXE), "state-loop-probe", "--in", str(MODEL),
+        "--prompt-token", "42", "--steps", "1", "--layers", "2",
+        "--ctx", "4", "--kv", "f32", "--activation", "q8_k_compat",
+        "--temperature", "0", "--seed", "7", "--full-moe",
+    ]
+    subprocess.run(
+        common + ["--dump-residuals", str(baseline_dir)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    injected = baseline_dir / "step-0-layer-1-input.f32"
+    result = subprocess.run(
+        common + [
+            "--start-layer", "1", "--residual-in", str(injected),
+            "--dump-residuals", str(replay_dir),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["start_layer"] == 1
+    assert payload["residual_source"] == "injected_f32_replay"
+    assert payload["residual_replay"] == {
+        "enabled": True,
+        "source": "f32_sidecar",
+        "values": 2048,
+    }
+    assert payload["layers_run"] == 1
+    assert payload["kv_appends"] == 1
+    assert payload["residual_dump_count"] == 6
+    assert "injected F32 residual" in payload["note"]
+    assert [layer["layer"] for layer in payload["tokens"][0]["layers"]] == [1]
+    assert not (replay_dir / "step-0-layer-0-input.f32").exists()
+    assert (
+        replay_dir / "step-0-layer-1-output.f32"
+    ).read_bytes() == (
+        baseline_dir / "step-0-layer-1-output.f32"
+    ).read_bytes()
+
+
+def test_state_loop_replay_supports_modal_f16_kv(tmp_path):
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    baseline_dir = tmp_path / "baseline-f16"
+    replay_dir = tmp_path / "replay-f16"
+    baseline_dir.mkdir()
+    replay_dir.mkdir()
+    common = [
+        str(EXE), "state-loop-probe", "--in", str(MODEL),
+        "--prompt-token", "42", "--steps", "1", "--layers", "2",
+        "--ctx", "4", "--kv", "f16", "--activation", "q8_k_compat",
+        "--temperature", "0", "--seed", "7", "--full-moe",
+    ]
+    subprocess.run(
+        common + ["--dump-residuals", str(baseline_dir)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    result = subprocess.run(
+        common + [
+            "--start-layer", "1",
+            "--residual-in", str(baseline_dir / "step-0-layer-1-input.f32"),
+            "--dump-residuals", str(replay_dir),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["kv_format"] == "f16"
+    assert payload["bytes_per_k_or_v"] == 512 * 2
+    assert payload["tokens"][0]["layers"][0]["kv_scale_source"] == "fp16_roundtrip"
+    assert (
+        replay_dir / "step-0-layer-1-output.f32"
+    ).read_bytes() == (
+        baseline_dir / "step-0-layer-1-output.f32"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize(
+    "invalid_payload",
+    [b"\x00\x00\x00", struct.pack("<2048f", *([0.0] * 2047 + [float("nan")]))],
+    ids=["wrong-size", "nan"],
+)
+def test_state_loop_replay_rejects_malformed_or_nonfinite_f32_sidecars(tmp_path, invalid_payload):
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+    residual_path = tmp_path / "invalid.f32"
+    residual_path.write_bytes(invalid_payload)
+
+    completed = subprocess.run(
+        [
+            str(EXE), "state-loop-probe", "--in", str(MODEL),
+            "--prompt-token", "42", "--steps", "1", "--layers", "2",
+            "--start-layer", "1", "--residual-in", str(residual_path),
+            "--ctx", "4", "--kv", "f16", "--activation", "q8_k_compat",
+            "--temperature", "0", "--seed", "7", "--full-moe",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode != 0
+    assert "F32 sidecar" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    "attention_flag",
+    ["--causal-attention", "--rope-gqa-attention"],
+    ids=["causal", "rope-gqa"],
+)
+def test_state_loop_rejects_packed_int4_before_scalar_attention(attention_flag):
+    if not EXE.exists() or not MODEL.exists():
+        pytest.skip("real Qwen runtime fixtures are not available")
+
+    completed = subprocess.run(
+        [
+            str(EXE), "state-loop-probe", "--in", str(MODEL),
+            "--prompt-token", "42", "--steps", "1", "--layers", "1",
+            "--ctx", "4", "--kv", "int4", attention_flag,
+            "--temperature", "0", "--seed", "7",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 1
+    assert "scalar attention requires INT8, F16, or F32 KV" in completed.stderr
 
 
 def test_state_loop_supports_diagnostic_f32_kv(tmp_path):

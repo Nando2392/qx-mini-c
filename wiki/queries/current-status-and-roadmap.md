@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-08-18
+updated: 2026-08-19
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -48,6 +48,8 @@ layer 47 attention + MoE same-input: GREEN
 layers 44–42 attention + MoE same-input: GREEN
 layer 41 IQ3_S down + bloque same-input: GREEN post-fix
 layers 40–0 attention + MoE same-input: GREEN (41/41)
+replay híbrido residual F16 layers 0–47: GREEN
+clasificación acumulación/amplificación/modalidad: GREEN
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -65,13 +67,15 @@ El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en 
 
 [[layers0-40-same-input]] completa ese intervalo: 41/41 bloques cierran con el residual exacto del oracle y routing exacto. Los máximos materiales son `Vcur=1.79e-7`, `kqv_out=1.91e-6`, weighted `1.83105e-4` y `l_out=2.32019e-4`/RMSE `5.12959e-6`; todos pasan. Treinta y siete capas conservan sólo warnings de router logits por encima de `2e-6`, sin cambio top-8 ni fallo downstream. La hipótesis de otro seam local material queda refutada para este input; la divergencia global requiere ahora un bisect de acumulación, no otro kernel especulativo.
 
+[[hybrid-residual-replay-accumulation]] completa el bisect de acumulación con KV F16 modal-equivalente. El baseline desde layer 0 termina con RMSE `9.87305e-2`; inyectar sólo el residual exacto de layer 1 reduce el final a `7.69131e-6` (`12836.6×`), aunque el error entrante original en layer 1 era apenas `1.46772e-8`. Esto prueba error acumulado/global y amplificación posterior de una discrepancia microscópica de layer 0, sin abrir otro seam local material. El control F32 no cierra (`9.05740e-2` tras replay de layer 1) y queda clasificado como efecto modal. La inyección sustituye sólo residual: el KV lo recalcula QX y no equivale a replay de KV acumulado para secuencias multi-token.
+
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
 
 ## Después
 
-1. Medir acumulación adyacente con replay híbrido/inyección de residual sobre el forward real.
+1. Medir perturbaciones escaladas alrededor de `layer-1.f32` para distinguir amplificación suave frente a cruce de umbrales de routing.
 2. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
 3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 4. Medir baseline de inferencia real.
