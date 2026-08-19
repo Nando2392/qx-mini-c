@@ -110,6 +110,6 @@ This is a material **modality effect**. It confirms the existing Q5_K attention 
 - **Classification C — modal mismatch:** confirmed for the F32 control and eliminated from the primary F16 replay.
 - **Classification D — new material local seam:** refuted for this fixed-token F16 matrix; the same-input sweep and this suffix replay agree.
 
-No runtime numerical fix is authorized by this evidence. The next narrow experiment is a scaled perturbation replay around `layer-1.f32` to measure the local Jacobian/sensitivity of the suffix and determine whether the amplification is smooth or routing-threshold driven. Multi-token conclusions require a separate accumulated KV snapshot/replay seam.
+No runtime numerical fix is authorized by this evidence. The follow-up [[scaled-layer1-residual-sensitivity]] refutes a smooth scalar response over the tested grid, finds rank-order crossings but no top-8 membership change, and still does not authorize a numerical fix. Multi-token conclusions require a separate accumulated KV snapshot/replay seam.
 
 Related evidence: [[layers0-40-same-input]], [[layer47-same-input]], and [[current-status-and-roadmap]].

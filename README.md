@@ -100,9 +100,9 @@ tests\build_ggml_reference.bat
 tests\build_llama_reference_oracle.bat
 ```
 
-The build creates standalone residual/logit and sequence llama.cpp oracles; neither is linked into the QX runtime. The residual oracle writes selected layer inputs, internal attention/MoE checkpoints and final logits as lossless F32 sidecars. The sequence oracle keeps a persistent context for token-ID prompts and multiple greedy steps. QX can write matching sidecars with `state-loop-probe --full-moe --dump-residuals <existing-dir>` and can replay a layer suffix with `--start-layer N --residual-in layer-N.f32`. `scripts/compare_residuals.py` compares accumulated checkpoints; `scripts/compare_hybrid_residual_replay.py` separates incoming accumulated error from suffix error with exact size/finite/metadata gates; `scripts/compare_layer_sensitivity.py` supports perturbation analysis and same-input chains; `scripts/compare_logits.py` compares the complete vocabulary and both argmax values. Local model paths and sidecars must remain outside Git.
+The build creates standalone residual/logit and sequence llama.cpp oracles; neither is linked into the QX runtime. The residual oracle writes selected layer inputs, internal attention/MoE checkpoints and final logits as lossless F32 sidecars. The sequence oracle keeps a persistent context for token-ID prompts and multiple greedy steps. QX can write matching sidecars with `state-loop-probe --full-moe --dump-residuals <existing-dir>` and can replay a layer suffix with `--start-layer N --residual-in layer-N.f32`. `scripts/compare_residuals.py` compares accumulated checkpoints; `scripts/compare_hybrid_residual_replay.py` separates incoming accumulated error from suffix error with exact size/finite/metadata gates; `scripts/scaled_residual_replay.py` prepares, runs and revalidates scaled suffix perturbations while separating router order from top-k membership; `scripts/compare_layer_sensitivity.py` supports perturbation analysis and same-input chains; `scripts/compare_logits.py` compares the complete vocabulary and both argmax values. Local model paths and sidecars must remain outside Git.
 
-Current fixed-token result against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: exact end-to-end numerical parity remains **refuted**. The backward same-input sweep closes every block materially, and the modal-equivalent F16 hybrid replay now supports the causal attribution: baseline `l_out-47` RMSE is `9.87305e-2`, while replacing only the layer-1 input residual reduces it to `7.69131e-6` (`12836.6×`). The incoming layer-1 discrepancy is only `1.46772e-8` RMSE. Therefore the fixed-token divergence is accumulated/global error plus strong downstream amplification of a microscopic layer-0 discrepancy, not evidence of another material local seam. F32 KV is a diagnostic control and does not satisfy this gate. The opt-in final head uses `Q6_K × Q8_K`; F32 remains the default dequantized runtime path. See [`wiki/comparisons/hybrid-residual-replay-accumulation.md`](wiki/comparisons/hybrid-residual-replay-accumulation.md), [`wiki/comparisons/layers0-40-same-input.md`](wiki/comparisons/layers0-40-same-input.md) and [`wiki/comparisons/layer47-same-input.md`](wiki/comparisons/layer47-same-input.md).
+Current fixed-token result against llama.cpp commit `768d2a481a99cb75ec9a03b95dadbd35e7acf496`: exact end-to-end numerical parity remains **refuted**. The backward same-input sweep closes every block materially, and the modal-equivalent F16 hybrid replay attributes the remaining trajectory to accumulated/global error plus strong downstream amplification of a microscopic layer-0 discrepancy. The scaled follow-up refutes a smooth scalar response: exact-direction scales `-1` and `+1` produce final deltas of `5.73359e-4` and `4.46778` from equal input L2. No tested scale changes top-8 membership; only rank-order swaps appear in layers 46 and 28, so no numerical fix is authorized. F32 KV is a diagnostic control and does not satisfy the modal-equivalent gate. The opt-in final head uses `Q6_K × Q8_K`; F32 remains the default dequantized runtime path. See [`wiki/comparisons/scaled-layer1-residual-sensitivity.md`](wiki/comparisons/scaled-layer1-residual-sensitivity.md), [`wiki/comparisons/hybrid-residual-replay-accumulation.md`](wiki/comparisons/hybrid-residual-replay-accumulation.md), and [`wiki/comparisons/layers0-40-same-input.md`](wiki/comparisons/layers0-40-same-input.md).
 
 The final pre-head residual is explicitly compared, not inferred. Post-Q6_K Q8_K/F32-KV gives max-abs `4.68347`, RMSE `0.172092`, cosine `0.999995600`. This is worse than the prior Q5_K-only global baseline despite the layer-46 same-input fix, and is documented as quantized-path sensitivity rather than claimed as a global improvement.
 
@@ -134,12 +134,13 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. Measure scaled perturbations around the layer-1 residual to classify whether the observed suffix amplification is smooth or routing-threshold driven; hybrid residual replay already closed the accumulation bisect for the fixed one-token F16 matrix.
-2. Expand tokenizer parity beyond the fixed prompt matrix and add chat-template application.
-3. Add QXF mmap and persistent scratch buffers.
-4. Add fused quant-dot, thread pool and AVX2 CPU kernels.
-5. Add a hybrid CUDA backend with dense residency and expert cache.
-6. Run context 4K, RSS, quality and sustained thermal gates.
+1. Repeat the scaled suffix matrix across more token IDs and F32/Q8_K-compatible plus F16/F32/INT8 controls; the fixed one-token F16 grid is non-smooth without a top-8 membership change.
+2. Add an accumulated KV snapshot/replay seam before making multi-token perturbation claims.
+3. Expand tokenizer parity beyond the fixed prompt matrix and add chat-template application.
+4. Add QXF mmap and persistent scratch buffers.
+5. Add fused quant-dot, thread pool and AVX2 CPU kernels.
+6. Add a hybrid CUDA backend with dense residency and expert cache.
+7. Run context 4K, RSS, quality and sustained thermal gates.
 
 ## License
 

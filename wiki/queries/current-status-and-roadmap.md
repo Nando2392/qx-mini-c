@@ -50,6 +50,7 @@ layer 41 IQ3_S down + bloque same-input: GREEN post-fix
 layers 40–0 attention + MoE same-input: GREEN (41/41)
 replay híbrido residual F16 layers 0–47: GREEN
 clasificación acumulación/amplificación/modalidad: GREEN
+perturbación escalada layer 1: GREEN; respuesta no suave, top-8 estable, cruces de orden observados
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -69,18 +70,21 @@ El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en 
 
 [[hybrid-residual-replay-accumulation]] completa el bisect de acumulación con KV F16 modal-equivalente. El baseline desde layer 0 termina con RMSE `9.87305e-2`; inyectar sólo el residual exacto de layer 1 reduce el final a `7.69131e-6` (`12836.6×`), aunque el error entrante original en layer 1 era apenas `1.46772e-8`. Esto prueba error acumulado/global y amplificación posterior de una discrepancia microscópica de layer 0, sin abrir otro seam local material. El control F32 no cierra (`9.05740e-2` tras replay de layer 1) y queda clasificado como efecto modal. La inyección sustituye sólo residual: el KV lo recalcula QX y no equivale a replay de KV acumulado para secuencias multi-token.
 
+[[scaled-layer1-residual-sensitivity]] completa la perturbación escalada sobre la dirección observada de layer 0. La respuesta no es suave: escalas exactas `-1` y `+1` tienen el mismo L2 de entrada (`6.64213e-7`) pero producen deltas finales de `5.73359e-4` y `4.46778`. Ninguna de las 15 escalas cambia la membresía top-8. Sólo aparecen cruces de orden dentro del mismo set en layers 46 y 28; están correlacionados con ramas de respuesta alta, pero no prueban causalidad. No se autoriza un fix numérico: el siguiente gate debe separar orden de acumulación, thresholds de activación y modalidad sobre más tokens.
+
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
 
 ## Después
 
-1. Medir perturbaciones escaladas alrededor de `layer-1.f32` para distinguir amplificación suave frente a cruce de umbrales de routing.
-2. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
-3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
-4. Medir baseline de inferencia real.
-5. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
-6. Gates 4K, RSS, calidad KV y 8 h.
+1. Repetir la matriz escalada con más token IDs y controles F32/Q8_K-compatible y KV F16/F32/INT8 para separar modalidad, cuantización y orden de routing.
+2. Diseñar un seam de snapshot/replay de KV acumulado antes de extrapolar a perturbaciones multi-token.
+3. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
+4. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
+5. Medir baseline de inferencia real.
+6. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
+7. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 
