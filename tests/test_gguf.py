@@ -692,6 +692,56 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert rgl0["output_projection_output_dims"] == 256
     assert abs(rgl0["softmax_sum_min"] - 1.0) < 1e-6
     assert abs(rgl0["softmax_sum_max"] - 1.0) < 1e-6
+    kv_snapshot = tmp_path / "accumulated-kv.bin"
+    replay_common = [
+        str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar),
+        "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3",
+        "--scan", "32", "--temperature", "0", "--seed", "7", "--rope-gqa-attention",
+        "--residual-dims", "1152", "--norm", "blk.0.attn_norm.weight",
+    ]
+    baseline = json.loads(subprocess.check_output(
+        replay_common + ["--prompt-token", "2", "--steps", "3"], text=True))
+    captured = json.loads(subprocess.check_output(
+        replay_common + [
+            "--prompt-token", "2", "--steps", "2", "--kv-snapshot-out", str(kv_snapshot),
+        ], text=True))
+    assert kv_snapshot.read_bytes()[:8] == b"QXKVSNP1"
+    continuation_token = captured["final_token"]
+    replayed = json.loads(subprocess.check_output(
+        replay_common + [
+            "--prompt-token", str(continuation_token), "--steps", "1",
+            "--kv-snapshot-in", str(kv_snapshot),
+        ], text=True))
+    assert replayed["position_base"] == 2
+    assert replayed["tokens"][0]["position"] == 2
+    assert replayed["tokens"][0]["input_token"] == baseline["tokens"][2]["input_token"]
+    assert replayed["tokens"][0]["layers"] == baseline["tokens"][2]["layers"]
+    assert replayed["tokens"][0]["selected_token"] == baseline["tokens"][2]["selected_token"]
+    assert replayed["final_token"] == baseline["final_token"]
+
+    snapshot_bytes = kv_snapshot.read_bytes()
+    same_length_mutation = bytearray(snapshot_bytes)
+    same_length_mutation[48] ^= 1
+    for name, corrupt in (
+        ("truncated", snapshot_bytes[:-1]),
+        ("extra", snapshot_bytes + b"x"),
+        ("bad-magic", bytes([snapshot_bytes[0] ^ 1]) + snapshot_bytes[1:]),
+        ("same-length-payload-mutation", bytes(same_length_mutation)),
+    ):
+        corrupt_path = tmp_path / f"{name}.bin"
+        corrupt_path.write_bytes(corrupt)
+        rejected = subprocess.run(
+            replay_common + [
+                "--prompt-token", str(continuation_token), "--steps", "1",
+                "--kv-snapshot-in", str(corrupt_path),
+            ], text=True, capture_output=True)
+        assert rejected.returncode != 0
+    wrong_token = subprocess.run(
+        replay_common + [
+            "--prompt-token", str(continuation_token + 1), "--steps", "1",
+            "--kv-snapshot-in", str(kv_snapshot),
+        ], text=True, capture_output=True)
+    assert wrong_token.returncode != 0
     sb = subprocess.check_output([str(exe), "state-loop-probe", "--in", str(qxf), "--tokens", str(tok_sidecar), "--prompt-token", "2", "--steps", "2", "--layers", "2", "--ctx", "16", "--kv", "int8", "--top-k", "3", "--scan", "32", "--temperature", "0", "--seed", "7", "--real-kv", "--projection-matvec", "--residual-vector", "--residual-carry", "--numeric-deltas", "--delta-vectors", "--attention-output-vector", "--bench", "--residual-dims", "96", "--norm", "blk.0.attn_norm.weight"], text=True)
     sbd = json.loads(sb)
     assert sbd["bench"]["enabled"] is True

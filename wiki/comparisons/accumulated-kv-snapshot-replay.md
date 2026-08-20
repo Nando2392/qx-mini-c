@@ -1,0 +1,77 @@
+---
+title: Accumulated KV Snapshot Replay
+created: 2026-08-20
+updated: 2026-08-20
+type: comparison
+tags: [qwen3-moe, kv, snapshot, replay, fail-closed, multi-token]
+sources: [state-loop-probe, issue-20]
+confidence: high
+---
+
+# Accumulated KV snapshot replay
+
+## Scope
+
+Issue #20 adds a reproducible snapshot/replay seam to `state-loop-probe`. It captures the persistent K/V vectors and per-vector scales after one or more positions, then restores them at the same layer/position slots before continuing with the recorded next token.
+
+This closes an instrumentation gap identified by [[hybrid-residual-replay-accumulation]] and [[scaled-residual-token-modality-matrix]]. It does **not** prove llama.cpp parity or any scientific conclusion about multi-token perturbations.
+
+## Native payload contract
+
+The binary payload starts with the fixed little-endian header `QXKVSNP1`:
+
+- version `2`;
+- layers, accumulated positions and context capacity;
+- KV heads and head dimension;
+- canonical KV format ID: INT8, F16 or F32;
+- bytes per K or V vector;
+- exact next token and seed.
+
+Records follow in deterministic `(layer, position)` order. Every record contains K bytes, V bytes, K scale and V scale. A 32-byte SHA-256 trailer authenticates the complete header and record stream. Import checks that embedded digest before accepting the caches, plus magic, version, geometry, format, seed, exact file length and finite scales. F16/F32 scales must equal `1.0`. The continuation token must equal the header token. Truncated, extended, same-length mutated or mismatched payloads fail closed.
+
+## Provenance manifest
+
+`scripts/kv_snapshot_replay.py build` derives `qx-kv-snapshot-v1` directly from a native payload. The manifest records:
+
+- QXF size and SHA-256;
+- producer binary SHA-256 and 40-character Git revision;
+- canonical runtime geometry and all accumulated input token IDs;
+- complete payload size and SHA-256;
+- exactly one K and one V entry for every `(layer, position)`, with fixed offset, byte count, SHA-256 and scale.
+
+`validate` rechecks model provenance, expected geometry, native header, payload hash, complete entry coverage, offsets, per-entry hashes and scale bytes. JSON integer fields require `type(value) is int`; booleans and integral floats are rejected. Duplicate JSON keys, NaN/Inf, path traversal, partial matrices and duplicate entries are rejected.
+
+## Runtime evidence
+
+The versioned regression runs a three-position RoPE/GQA baseline and compares its final position with a two-position capture followed by one-position replay. It requires exact equality for:
+
+- position and continuation input token;
+- every emitted layer field, including attention output checksum;
+- selected token and final token.
+
+It also mutates the payload by truncation, extension, bad magic and a same-length K/V byte flip, and checks a wrong continuation token. All five cases must return nonzero.
+
+The first replay exposed an unrelated uninitialized-tail defect: the partial output projection wrote 256 floats into a 1152-float vector. Zero-initializing the untouched tail removed nondeterministic `~1e38` L2 values and made baseline/replay exact without changing a threshold.
+
+Focused evidence on 2026-08-20:
+
+- manifest validator/builder: `17 passed`;
+- isolated MSVC runtime build: PASS;
+- synthetic baseline vs snapshot/replay: exact layer/token parity;
+- native manifest: 8 entries, 4176-byte payload, builder + validator PASS;
+- combined isolated pytest gate: `20 passed` before the native-manifest alignment increment.
+
+## Reproduction
+
+```text
+qxqxf.exe state-loop-probe ... --steps 2 --kv-snapshot-out accumulated-kv.bin
+python scripts/kv_snapshot_replay.py build --snapshot accumulated-kv.bin --model model.qxf --binary qxqxf.exe --revision <40-hex> --activation f32 --prompt-tokens 42,1124 --out accumulated-kv.json
+python scripts/kv_snapshot_replay.py validate --manifest accumulated-kv.json --model model.qxf --binary qxqxf.exe --expected-geometry expected-geometry.json
+qxqxf.exe state-loop-probe ... --prompt-token <next-token> --steps 1 --kv-snapshot-in accumulated-kv.bin
+```
+
+## Limitations and next gate
+
+The C importer independently verifies the payload's embedded SHA-256, so direct raw import rejects corruption without relying on the Python manifest. The manifest remains mandatory for model and producer provenance. Snapshot and replay must use the same model, runtime geometry, KV format, seed and continuation token.
+
+The next experiment may now compare accumulated multi-token perturbations across KV F16/INT8 and activation F32/Q8_K-compatible. It must preserve exact baseline/replay controls and must not reinterpret this seam as evidence of numerical parity.

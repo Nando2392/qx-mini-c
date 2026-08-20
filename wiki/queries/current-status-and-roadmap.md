@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-08-19
+updated: 2026-08-20
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -20,6 +20,7 @@ confidence: high
 - [[final-output-head]] completo: final RMSNorm, 151936 logits Q6_K, top-N y argmax.
 - [[autoregressive-loop]] greedy multi-token: re-embedding, posición y KV persistente por layer.
 - [[qwen3-tokenizer]] QXT2: paridad exacta para prompts fijos y prefill desde texto.
+- [[accumulated-kv-snapshot-replay]] fail-closed: captura/restaura K/V y escalas por layer/posición, con token de continuación y manifiesto SHA-256.
 - Hardening QXF fail-closed: manifest, ABI, directorio, dims, nombres, placement, overflow y filas exactas.
 - Golden independientes para embedding, IQ4_XS y expertos IQ2_XS/IQ3_XXS/IQ2_S representativos.
 - Golden independiente y dispatch CPU opt-in para experto down IQ3_S × Q8_K.
@@ -51,6 +52,7 @@ layers 40–0 attention + MoE same-input: GREEN (41/41)
 replay híbrido residual F16 layers 0–47: GREEN
 clasificación acumulación/amplificación/modalidad: GREEN
 perturbación escalada layer 1: GREEN; respuesta no suave, top-8 estable, cruces de orden observados
+snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + replay 1
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -74,13 +76,15 @@ El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en 
 
 [[scaled-residual-token-modality-matrix]] completa ese gate con 18 celdas: tokens `42,9707,0`, activaciones F32/Q8_K-compatible y KV F16/F32/INT8. Diecisiete celdas cambian orden y catorce cambian membresía en alguna escala, pero las tres celdas runtime-aligned Q8_K-compatible + F16 conservan la membresía top-8. La asimetría `-1/+1` es extrema para tokens `42` (`7792.3×`) y `0` (`105030×`) en ese slice, mientras `9707` queda en `1.54585×` sin transición. El resultado separa sensibilidad de token/modalidad; no autoriza un fix ni una conclusión multi-token.
 
+[[accumulated-kv-snapshot-replay]] cierra el seam previo al experimento multi-token. El payload nativo `QXKVSNP1` conserva K/V, escalas, geometría, posición, seed y siguiente token; el manifiesto externo fija modelo/binario/revisión, SHA-256 y cobertura exacta por `(layer,position,kind)`. El control sintético exige igualdad exacta entre baseline de tres posiciones y captura de dos + replay de una. Truncación, bytes extra, magic incorrecto y token de continuación distinto fallan cerrados. Este gate habilita experimentos posteriores; todavía no prueba paridad ni causalidad multi-token.
+
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
 
 ## Después
 
-1. Diseñar un seam de snapshot/replay de KV acumulado antes de extrapolar a perturbaciones multi-token.
+1. Usar el seam [[accumulated-kv-snapshot-replay]] para una matriz de perturbación multi-token con controles baseline/replay exactos y KV F16/INT8.
 2. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
 3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 4. Medir baseline de inferencia real.

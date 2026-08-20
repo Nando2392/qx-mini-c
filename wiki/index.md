@@ -33,6 +33,7 @@
 - [[hybrid-residual-replay-accumulation]] — replay F16 de cada frontera, error acumulado frente a error local y amplificación causal.
 - [[scaled-layer1-residual-sensitivity]] — perturbación escalada del suffix, respuesta no suave y routing order frente a membership.
 - [[scaled-residual-token-modality-matrix]] — matriz de 3 tokens × 2 activaciones × 3 KV, curvas por celda y transiciones order/membership.
+- [[accumulated-kv-snapshot-replay]] — captura/restauración fail-closed de KV acumulado, escalas y token de continuación.
 
 ## Rendimiento
 

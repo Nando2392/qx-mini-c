@@ -4544,6 +4544,7 @@ static int qx_rope_gqa_attention_partial(
     uint32_t q_dims = q_heads_run * head_dim;
     uint32_t output_dims = dims;
     if (ot->dims[1] && output_dims > ot->dims[1]) output_dims = (uint32_t)ot->dims[1];
+    memset(out_vec, 0, (size_t)dims * sizeof(float));
 
     uint32_t attend_count = step + 1u;
     unsigned char *qbuf = (unsigned char *)malloc(q_dims);
@@ -5190,13 +5191,227 @@ static int qx_write_logits_dump(const char *dir, uint32_t step, const float *val
     return ok;
 }
 
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, FILE *out, char *err, uint64_t err_len) {
+static void qx_kv_snapshot_wr_le32(unsigned char *p, uint32_t value) {
+    p[0] = (unsigned char)value;
+    p[1] = (unsigned char)(value >> 8);
+    p[2] = (unsigned char)(value >> 16);
+    p[3] = (unsigned char)(value >> 24);
+}
+
+typedef struct {
+    uint32_t state[8];
+    uint64_t bit_count;
+    unsigned char block[64];
+    size_t block_len;
+} qx_kv_sha256;
+
+static uint32_t qx_kv_sha256_rotr(uint32_t value, uint32_t bits) {
+    return (value >> bits) | (value << (32u - bits));
+}
+
+static void qx_kv_sha256_transform(qx_kv_sha256 *ctx, const unsigned char block[64]) {
+    static const uint32_t constants[64] = {
+        0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+        0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+        0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+        0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+        0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+        0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+        0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+        0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u,
+    };
+    uint32_t words[64];
+    for (uint32_t i = 0; i < 16u; ++i) {
+        words[i] = ((uint32_t)block[i * 4u] << 24u) | ((uint32_t)block[i * 4u + 1u] << 16u) |
+            ((uint32_t)block[i * 4u + 2u] << 8u) | (uint32_t)block[i * 4u + 3u];
+    }
+    for (uint32_t i = 16u; i < 64u; ++i) {
+        uint32_t s0 = qx_kv_sha256_rotr(words[i - 15u], 7u) ^ qx_kv_sha256_rotr(words[i - 15u], 18u) ^ (words[i - 15u] >> 3u);
+        uint32_t s1 = qx_kv_sha256_rotr(words[i - 2u], 17u) ^ qx_kv_sha256_rotr(words[i - 2u], 19u) ^ (words[i - 2u] >> 10u);
+        words[i] = words[i - 16u] + s0 + words[i - 7u] + s1;
+    }
+    uint32_t a = ctx->state[0], b = ctx->state[1], c = ctx->state[2], d = ctx->state[3];
+    uint32_t e = ctx->state[4], f = ctx->state[5], g = ctx->state[6], h = ctx->state[7];
+    for (uint32_t i = 0; i < 64u; ++i) {
+        uint32_t s1 = qx_kv_sha256_rotr(e, 6u) ^ qx_kv_sha256_rotr(e, 11u) ^ qx_kv_sha256_rotr(e, 25u);
+        uint32_t choice = (e & f) ^ ((~e) & g);
+        uint32_t temp1 = h + s1 + choice + constants[i] + words[i];
+        uint32_t s0 = qx_kv_sha256_rotr(a, 2u) ^ qx_kv_sha256_rotr(a, 13u) ^ qx_kv_sha256_rotr(a, 22u);
+        uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+        uint32_t temp2 = s0 + majority;
+        h = g; g = f; f = e; e = d + temp1; d = c; c = b; b = a; a = temp1 + temp2;
+    }
+    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
+    ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+}
+
+static void qx_kv_sha256_init(qx_kv_sha256 *ctx) {
+    static const uint32_t initial[8] = {
+        0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+        0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u,
+    };
+    memcpy(ctx->state, initial, sizeof(initial));
+    ctx->bit_count = 0u;
+    ctx->block_len = 0u;
+}
+
+static void qx_kv_sha256_update(qx_kv_sha256 *ctx, const unsigned char *data, size_t length) {
+    ctx->bit_count += (uint64_t)length * 8u;
+    while (length > 0u) {
+        size_t available = sizeof(ctx->block) - ctx->block_len;
+        size_t take = length < available ? length : available;
+        memcpy(ctx->block + ctx->block_len, data, take);
+        ctx->block_len += take;
+        data += take;
+        length -= take;
+        if (ctx->block_len == sizeof(ctx->block)) {
+            qx_kv_sha256_transform(ctx, ctx->block);
+            ctx->block_len = 0u;
+        }
+    }
+}
+
+static void qx_kv_sha256_final(qx_kv_sha256 *ctx, unsigned char digest[32]) {
+    uint64_t bit_count = ctx->bit_count;
+    unsigned char padding[128] = {0x80u};
+    size_t padding_len = ctx->block_len < 56u ? 56u - ctx->block_len : 120u - ctx->block_len;
+    qx_kv_sha256_update(ctx, padding, padding_len);
+    unsigned char length_bytes[8];
+    for (uint32_t i = 0; i < 8u; ++i) length_bytes[7u - i] = (unsigned char)(bit_count >> (i * 8u));
+    qx_kv_sha256_update(ctx, length_bytes, sizeof(length_bytes));
+    for (uint32_t i = 0; i < 8u; ++i) {
+        digest[i * 4u] = (unsigned char)(ctx->state[i] >> 24u);
+        digest[i * 4u + 1u] = (unsigned char)(ctx->state[i] >> 16u);
+        digest[i * 4u + 2u] = (unsigned char)(ctx->state[i] >> 8u);
+        digest[i * 4u + 3u] = (unsigned char)ctx->state[i];
+    }
+}
+
+static uint32_t qx_kv_snapshot_format_id(const char *kv_format) {
+    if (strcmp(kv_format, "int8") == 0) return 1u;
+    if (strcmp(kv_format, "f16") == 0 || strcmp(kv_format, "fp16") == 0) return 2u;
+    if (strcmp(kv_format, "f32") == 0) return 3u;
+    return 0u;
+}
+
+static int qx_write_accumulated_kv_snapshot(
+        const char *snapshot_path, uint32_t layers, uint32_t positions, uint32_t ctx_tokens,
+        uint32_t kv_heads, uint32_t head_dim, const char *kv_format, uint64_t bytes_per_k_or_v,
+        uint32_t next_token, uint32_t seed, const unsigned char *kcache, const unsigned char *vcache,
+        const float *kscales, const float *vscales, char *err, uint64_t err_len) {
+    if (!snapshot_path || !*snapshot_path || !kcache || !vcache || !kscales || !vscales ||
+            positions == 0u || positions > ctx_tokens || bytes_per_k_or_v > UINT32_MAX) {
+        qx_set_err(err, err_len, "invalid accumulated KV snapshot output"); return 0;
+    }
+    uint32_t format_id = qx_kv_snapshot_format_id(kv_format);
+    if (format_id == 0u) { qx_set_err(err, err_len, "unsupported KV snapshot format"); return 0; }
+    FILE *fp = fopen(snapshot_path, "wb");
+    if (!fp) { qx_set_err(err, err_len, "cannot open accumulated KV snapshot output"); return 0; }
+    unsigned char header[48] = {0};
+    memcpy(header, "QXKVSNP1", 8u);
+    qx_kv_snapshot_wr_le32(header + 8u, 2u);
+    qx_kv_snapshot_wr_le32(header + 12u, layers);
+    qx_kv_snapshot_wr_le32(header + 16u, positions);
+    qx_kv_snapshot_wr_le32(header + 20u, ctx_tokens);
+    qx_kv_snapshot_wr_le32(header + 24u, kv_heads);
+    qx_kv_snapshot_wr_le32(header + 28u, head_dim);
+    qx_kv_snapshot_wr_le32(header + 32u, format_id);
+    qx_kv_snapshot_wr_le32(header + 36u, (uint32_t)bytes_per_k_or_v);
+    qx_kv_snapshot_wr_le32(header + 40u, next_token);
+    qx_kv_snapshot_wr_le32(header + 44u, seed);
+    qx_kv_sha256 hash;
+    qx_kv_sha256_init(&hash);
+    qx_kv_sha256_update(&hash, header, sizeof(header));
+    int ok = fwrite(header, 1u, sizeof(header), fp) == sizeof(header);
+    for (uint32_t layer = 0; layer < layers && ok; ++layer) {
+        for (uint32_t position = 0; position < positions && ok; ++position) {
+            uint64_t slot = (uint64_t)layer * ctx_tokens + position;
+            uint32_t bits = 0u;
+            qx_kv_sha256_update(&hash, kcache + slot * bytes_per_k_or_v, (size_t)bytes_per_k_or_v);
+            qx_kv_sha256_update(&hash, vcache + slot * bytes_per_k_or_v, (size_t)bytes_per_k_or_v);
+            ok = fwrite(kcache + slot * bytes_per_k_or_v, 1u, (size_t)bytes_per_k_or_v, fp) == (size_t)bytes_per_k_or_v &&
+                fwrite(vcache + slot * bytes_per_k_or_v, 1u, (size_t)bytes_per_k_or_v, fp) == (size_t)bytes_per_k_or_v;
+            memcpy(&bits, &kscales[slot], sizeof(bits));
+            qx_kv_snapshot_wr_le32(header, bits);
+            qx_kv_sha256_update(&hash, header, 4u);
+            if (ok) ok = fwrite(header, 1u, 4u, fp) == 4u;
+            memcpy(&bits, &vscales[slot], sizeof(bits));
+            qx_kv_snapshot_wr_le32(header, bits);
+            qx_kv_sha256_update(&hash, header, 4u);
+            if (ok) ok = fwrite(header, 1u, 4u, fp) == 4u;
+        }
+    }
+    unsigned char digest[32];
+    qx_kv_sha256_final(&hash, digest);
+    if (ok) ok = fwrite(digest, 1u, sizeof(digest), fp) == sizeof(digest);
+    if (fclose(fp) != 0) ok = 0;
+    if (!ok) qx_set_err(err, err_len, "cannot write complete accumulated KV snapshot");
+    return ok;
+}
+
+static int qx_read_accumulated_kv_snapshot(
+        const char *snapshot_path, uint32_t layers, uint32_t ctx_tokens, uint32_t kv_heads,
+        uint32_t head_dim, const char *kv_format, uint64_t bytes_per_k_or_v, uint32_t seed,
+        unsigned char *kcache, unsigned char *vcache, float *kscales, float *vscales,
+        uint32_t *positions_out, uint32_t *next_token_out, char *err, uint64_t err_len) {
+    FILE *fp = fopen(snapshot_path, "rb");
+    if (!fp) { qx_set_err(err, err_len, "cannot open accumulated KV snapshot input"); return 0; }
+    unsigned char header[48];
+    int ok = fread(header, 1u, sizeof(header), fp) == sizeof(header);
+    uint32_t positions = ok ? qx_rd_le32(header + 16u) : 0u;
+    uint32_t format_id = qx_kv_snapshot_format_id(kv_format);
+    if (!ok || memcmp(header, "QXKVSNP1", 8u) != 0 || qx_rd_le32(header + 8u) != 2u ||
+            qx_rd_le32(header + 12u) != layers || positions == 0u || positions > ctx_tokens ||
+            qx_rd_le32(header + 20u) != ctx_tokens || qx_rd_le32(header + 24u) != kv_heads ||
+            qx_rd_le32(header + 28u) != head_dim || qx_rd_le32(header + 32u) != format_id ||
+            qx_rd_le32(header + 36u) != bytes_per_k_or_v || qx_rd_le32(header + 44u) != seed) {
+        fclose(fp); qx_set_err(err, err_len, "accumulated KV snapshot header mismatch"); return 0;
+    }
+    qx_kv_sha256 hash;
+    qx_kv_sha256_init(&hash);
+    qx_kv_sha256_update(&hash, header, sizeof(header));
+    for (uint32_t layer = 0; layer < layers && ok; ++layer) {
+        for (uint32_t position = 0; position < positions && ok; ++position) {
+            uint64_t slot = (uint64_t)layer * ctx_tokens + position;
+            ok = fread(kcache + slot * bytes_per_k_or_v, 1u, (size_t)bytes_per_k_or_v, fp) == (size_t)bytes_per_k_or_v &&
+                fread(vcache + slot * bytes_per_k_or_v, 1u, (size_t)bytes_per_k_or_v, fp) == (size_t)bytes_per_k_or_v;
+            if (ok) {
+                qx_kv_sha256_update(&hash, kcache + slot * bytes_per_k_or_v, (size_t)bytes_per_k_or_v);
+                qx_kv_sha256_update(&hash, vcache + slot * bytes_per_k_or_v, (size_t)bytes_per_k_or_v);
+            }
+            unsigned char scale_bytes[4];
+            if (ok) ok = fread(scale_bytes, 1u, 4u, fp) == 4u;
+            if (ok) qx_kv_sha256_update(&hash, scale_bytes, 4u);
+            if (ok) kscales[slot] = qx_rd_le_f32(scale_bytes);
+            if (ok) ok = fread(scale_bytes, 1u, 4u, fp) == 4u;
+            if (ok) qx_kv_sha256_update(&hash, scale_bytes, 4u);
+            if (ok) vscales[slot] = qx_rd_le_f32(scale_bytes);
+            if (ok && (!isfinite(kscales[slot]) || !isfinite(vscales[slot]) ||
+                    (format_id != 1u && (kscales[slot] != 1.0f || vscales[slot] != 1.0f)))) ok = 0;
+        }
+    }
+    unsigned char expected_digest[32], actual_digest[32];
+    if (ok) ok = fread(expected_digest, 1u, sizeof(expected_digest), fp) == sizeof(expected_digest);
+    if (ok) {
+        qx_kv_sha256_final(&hash, actual_digest);
+        if (memcmp(expected_digest, actual_digest, sizeof(actual_digest)) != 0) ok = 0;
+    }
+    if (ok && fgetc(fp) != EOF) ok = 0;
+    if (fclose(fp) != 0) ok = 0;
+    if (!ok) { qx_set_err(err, err_len, "accumulated KV snapshot payload mismatch"); return 0; }
+    *positions_out = positions;
+    *next_token_out = qx_rd_le32(header + 40u);
+    return 1;
+}
+
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
         qx_set_err(err, err_len, "unsupported activation format"); return 0;
     }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
+    if ((kv_snapshot_out_path || kv_snapshot_in_path) && !causal_attention) { qx_set_err(err, err_len, "KV snapshot requires causal attention"); return 0; }
     int residual_replay = residual_input_path && *residual_input_path;
     if ((start_layer != 0u && !residual_replay) ||
             (residual_replay && (!full_moe || !residual_vector || prompt_count != 1u || generation_steps != 1u))) {
@@ -5331,6 +5546,25 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     float *vscales = causal_attention ? (float *)calloc((size_t)cache_slots, sizeof(float)) : NULL;
     float *residual_vec = residual_vector ? (float *)malloc((size_t)residual_dims * (full_moe ? 2u : 1u) * sizeof(float)) : NULL;
     if (!kbuf || !vbuf || (causal_attention && (!kcache || !vcache || !kfloat || !vfloat || !kscales || !vscales)) || (residual_vector && !residual_vec)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    uint32_t position_base = 0u;
+    uint32_t snapshot_next_token = prompt_tokens[0];
+    if (kv_snapshot_in_path && *kv_snapshot_in_path) {
+        if (prompt_count != 1u || !qx_read_accumulated_kv_snapshot(kv_snapshot_in_path, layers, ctx_tokens, kv_heads,
+                head_dim, kv_format, bytes_per_k_or_v, seed, kcache, vcache, kscales, vscales,
+                &position_base, &snapshot_next_token, err, err_len)) {
+            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file);
+            if (prompt_count != 1u) qx_set_err(err, err_len, "KV snapshot replay requires exactly one continuation token");
+            return 0;
+        }
+        if (prompt_tokens[0] != snapshot_next_token) {
+            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file);
+            qx_set_err(err, err_len, "KV snapshot continuation token mismatch"); return 0;
+        }
+    }
+    if (position_base > ctx_tokens || steps > ctx_tokens - position_base || position_base > 64u || steps > 64u - position_base) {
+        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file);
+        qx_set_err(err, err_len, "KV snapshot plus replay steps exceed context"); return 0;
+    }
     uint32_t current = prompt_tokens[0];
     uint64_t kv_appends = 0;
     uint64_t layers_run = 0;
@@ -5352,6 +5586,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"layers\": %u,\n", layers);
     fprintf(out, "  \"start_layer\": %u,\n", start_layer);
     fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    fprintf(out, "  \"position_base\": %u,\n", position_base);
     fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
     fprintf(out, "  \"activation_format\": \"%s\",\n", activation_format);
     fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
@@ -5374,10 +5609,11 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"layer_stride\": %llu,\n", (unsigned long long)layer_stride);
     fprintf(out, "  \"tokens\": [");
     clock_t bench_start = clock();
-    for (uint32_t step = 0; step < steps; ++step) {
-        if (step < prompt_count) current = prompt_tokens[step];
-        int sampling_step = step + 1u >= prompt_count;
-        fprintf(out, "%s{\"step\": %u, \"position\": %u, \"phase\": \"%s\", \"input_token\": %u, \"layers\": [", step ? ", " : "", step, step, sampling_step ? "generate" : "prefill", current);
+    for (uint32_t local_step = 0; local_step < steps; ++local_step) {
+        uint32_t step = position_base + local_step;
+        if (local_step < prompt_count) current = prompt_tokens[local_step];
+        int sampling_step = local_step + 1u >= prompt_count;
+        fprintf(out, "%s{\"step\": %u, \"position\": %u, \"phase\": \"%s\", \"input_token\": %u, \"layers\": [", local_step ? ", " : "", step, step, sampling_step ? "generate" : "prefill", current);
         double residual_probe = 0.125 + ((double)(current % 997u) / 9970.0) + (double)step * 0.001;
         uint32_t residual_values = 0;
         double residual_rms = 0.0;
@@ -5731,6 +5967,11 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         fprintf(out, ", \"source\": \"%s\"}", source);
         current = sr.selected_token;
     }
+    if (kv_snapshot_out_path && *kv_snapshot_out_path && !qx_write_accumulated_kv_snapshot(
+            kv_snapshot_out_path, layers, position_base + steps, ctx_tokens, kv_heads, head_dim, kv_format,
+            bytes_per_k_or_v, current, seed, kcache, vcache, kscales, vscales, err, err_len)) {
+        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+    }
     fprintf(out, "],\n");
     fprintf(out, "  \"layers_run\": %llu,\n", (unsigned long long)layers_run);
     fprintf(out, "  \"kv_appends\": %llu,\n", (unsigned long long)kv_appends);
@@ -5778,7 +6019,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     return 1;
 }
 
-int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (final_head && (steps == 0u || steps > 64u)) {
         qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, temperature 0, and no --bench");
         return 0;
@@ -5788,7 +6029,8 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format,
         real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector,
         causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm_name, top_k, scan,
-        logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path, out, err, err_len);
+        logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path,
+        kv_snapshot_out_path, kv_snapshot_in_path, out, err, err_len);
 }
 
 int qx_dump_token_forward_probe_summary(const char *path, uint32_t token_id, uint32_t layers, uint32_t top_k, uint32_t blocks, uint32_t seed, const char *norm_name, int32_t attention_layer, int multihead_attention, uint32_t attention_heads, uint32_t attention_dims, int logits_enabled, uint32_t logits_top_n, int sample_enabled, double temperature, int decode_token, const char *tokens_path, FILE *out, char *err, uint64_t err_len) {

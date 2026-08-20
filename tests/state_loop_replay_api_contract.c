@@ -36,6 +36,8 @@ int main(void) {
         NULL,
         1u,
         "missing-residual.f32",
+        NULL,
+        NULL,
         stdout,
         err,
         sizeof(err));
