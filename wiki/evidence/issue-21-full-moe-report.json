@@ -1,0 +1,207 @@
+{
+  "schema": "qx-accumulated-kv-perturbation-report-v1",
+  "revision": "0fc21c697994782b1f393dabd198855ef5ab939f",
+  "matrix_complete": true,
+  "experiment": {
+    "prompt_token": 42,
+    "prefix_steps": 2,
+    "continuation_steps": 1,
+    "kv_formats": [
+      "f16",
+      "int8"
+    ],
+    "scales": [
+      -1.0,
+      0.0,
+      1.0
+    ],
+    "activation_format": "q8_k_compat",
+    "layers": 2,
+    "start_layer": 1,
+    "expected_count": 2048,
+    "direction_index": 1,
+    "direction_magnitude": 0.125,
+    "runtime_mode": "full_moe",
+    "ctx": 4,
+    "seed": 7
+  },
+  "provenance": {
+    "qxqxf": {
+      "sha256": "e8c0de85714864477cd64c37bb779f035d34821fd9bf61c339c0df531e5b6d3c"
+    },
+    "model": {
+      "sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840"
+    },
+    "tokens": {
+      "sha256": "6d3bab1a7c43bf5ad53cc618c1b1af6b575f98f41303e9ac225006de57f71980"
+    }
+  },
+  "claims": {
+    "replay_control": "exact",
+    "perturbation": "mechanistic_association_only"
+  },
+  "cells": [
+    {
+      "ordinal": 0,
+      "kv_format": "f16",
+      "continuation_token": 49,
+      "control_exact": true,
+      "runs": [
+        {
+          "ordinal": 0,
+          "scale": -1.0,
+          "selected_token": 56,
+          "input_delta": {
+            "max_abs": 0.12499999441206455,
+            "rmse": 0.002762135740532856,
+            "l2": 0.12499999441206455,
+            "cosine": 0.99749276334099
+          },
+          "final_delta": {
+            "max_abs": 0.12466305866837502,
+            "rmse": 0.003051522319860364,
+            "l2": 0.13809613602018359,
+            "cosine": 0.998268242260812
+          },
+          "routing_changed": false
+        },
+        {
+          "ordinal": 1,
+          "scale": 0.0,
+          "selected_token": 56,
+          "input_delta": {
+            "max_abs": 0.0,
+            "rmse": 0.0,
+            "l2": 0.0,
+            "cosine": 1.0
+          },
+          "final_delta": {
+            "max_abs": 0.0,
+            "rmse": 0.0,
+            "l2": 0.0,
+            "cosine": 1.0
+          },
+          "routing_changed": false
+        },
+        {
+          "ordinal": 2,
+          "scale": 1.0,
+          "selected_token": 56,
+          "input_delta": {
+            "max_abs": 0.12499999813735485,
+            "rmse": 0.0027621358228509195,
+            "l2": 0.12499999813735485,
+            "cosine": 0.9974874071072412
+          },
+          "final_delta": {
+            "max_abs": 0.12592649832367897,
+            "rmse": 0.0031028722390387974,
+            "l2": 0.14041996808830848,
+            "cosine": 0.9982014990682353
+          },
+          "routing_changed": true
+        }
+      ]
+    },
+    {
+      "ordinal": 1,
+      "kv_format": "int8",
+      "continuation_token": 49,
+      "control_exact": true,
+      "runs": [
+        {
+          "ordinal": 0,
+          "scale": -1.0,
+          "selected_token": 56,
+          "input_delta": {
+            "max_abs": 0.12499999813735485,
+            "rmse": 0.0027621358228509195,
+            "l2": 0.12499999813735485,
+            "cosine": 0.9975195886807373
+          },
+          "final_delta": {
+            "max_abs": 0.1250505829229951,
+            "rmse": 0.0030800211462438847,
+            "l2": 0.13938584567724888,
+            "cosine": 0.9982465259510762
+          },
+          "routing_changed": false
+        },
+        {
+          "ordinal": 1,
+          "scale": 0.0,
+          "selected_token": 56,
+          "input_delta": {
+            "max_abs": 0.0,
+            "rmse": 0.0,
+            "l2": 0.0,
+            "cosine": 1.0
+          },
+          "final_delta": {
+            "max_abs": 0.0,
+            "rmse": 0.0,
+            "l2": 0.0,
+            "cosine": 1.0
+          },
+          "routing_changed": false
+        },
+        {
+          "ordinal": 2,
+          "scale": 1.0,
+          "selected_token": 56,
+          "input_delta": {
+            "max_abs": 0.12500000186264515,
+            "rmse": 0.002762135905168983,
+            "l2": 0.12500000186264515,
+            "cosine": 0.9975136496297468
+          },
+          "final_delta": {
+            "max_abs": 0.12504862155765295,
+            "rmse": 0.00310837353161266,
+            "l2": 0.1406689281705017,
+            "cosine": 0.9982033536454863
+          },
+          "routing_changed": false
+        }
+      ]
+    }
+  ],
+  "cross_mode": {
+    "formats": [
+      "f16",
+      "int8"
+    ],
+    "runs": [
+      {
+        "ordinal": 0,
+        "scale": -1.0,
+        "selected_token_parity": true,
+        "routing_change_agreement": true,
+        "final_l2": {
+          "f16": 0.13809613602018359,
+          "int8": 0.13938584567724888
+        }
+      },
+      {
+        "ordinal": 1,
+        "scale": 0.0,
+        "selected_token_parity": true,
+        "routing_change_agreement": true,
+        "final_l2": {
+          "f16": 0.0,
+          "int8": 0.0
+        }
+      },
+      {
+        "ordinal": 2,
+        "scale": 1.0,
+        "selected_token_parity": true,
+        "routing_change_agreement": false,
+        "final_l2": {
+          "f16": 0.14041996808830848,
+          "int8": 0.1406689281705017
+        }
+      }
+    ]
+  }
+}

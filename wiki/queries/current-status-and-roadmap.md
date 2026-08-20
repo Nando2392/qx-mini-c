@@ -76,7 +76,9 @@ El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en 
 
 [[scaled-residual-token-modality-matrix]] completa ese gate con 18 celdas: tokens `42,9707,0`, activaciones F32/Q8_K-compatible y KV F16/F32/INT8. Diecisiete celdas cambian orden y catorce cambian membresía en alguna escala, pero las tres celdas runtime-aligned Q8_K-compatible + F16 conservan la membresía top-8. La asimetría `-1/+1` es extrema para tokens `42` (`7792.3×`) y `0` (`105030×`) en ese slice, mientras `9707` queda en `1.54585×` sin transición. El resultado separa sensibilidad de token/modalidad; no autoriza un fix ni una conclusión multi-token.
 
-[[accumulated-kv-snapshot-replay]] cierra el seam previo al experimento multi-token. El payload nativo `QXKVSNP1` conserva K/V, escalas, geometría, posición, seed y siguiente token; el manifiesto externo fija modelo/binario/revisión, SHA-256 y cobertura exacta por `(layer,position,kind)`. El control sintético exige igualdad exacta entre baseline de tres posiciones y captura de dos + replay de una. Truncación, bytes extra, magic incorrecto y token de continuación distinto fallan cerrados. Este gate habilita experimentos posteriores; todavía no prueba paridad ni causalidad multi-token.
+[[accumulated-kv-snapshot-replay]] cierra el seam previo al experimento multi-token. El payload nativo `QXKVSNP1` v2 conserva K/V, escalas, geometría, posición, seed y siguiente token, y el importador C verifica su trailer SHA-256 antes de consumir el cache. El manifiesto externo fija modelo/binario/revisión, SHA-256 y cobertura exacta por `(layer,position,kind)`. El control sintético exige igualdad exacta entre baseline de tres posiciones y captura de dos + replay de una. Truncación, bytes extra, magic incorrecto, mutación K/V de igual longitud y token de continuación distinto fallan cerrados. El gate se publicó en `0fc21c697994782b1f393dabd198855ef5ab939f` con CI `32370138054` SUCCESS; habilita experimentos posteriores, pero todavía no prueba paridad ni causalidad multi-token.
+
+[[accumulated-kv-multi-token-perturbation-matrix]] usa ese seam sobre un QXF real y separa por KV F16/INT8 una dirección sintética F32 controlada en la continuación tras dos posiciones acumuladas. Baseline/replay y escala cero cierran exactamente en ambos modos. Las seis corridas conservan token `56`; F16 `+1` cambia orden de routing y las otras tres perturbaciones firmadas no. El resultado prueba mecánica reproducible en el slice registrado, no causalidad semántica ni equivalencia modal. Issue #21 permanece en gate de publicación.
 
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
@@ -84,7 +86,7 @@ La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coinc
 
 ## Después
 
-1. Usar el seam [[accumulated-kv-snapshot-replay]] para una matriz de perturbación multi-token con controles baseline/replay exactos y KV F16/INT8.
+1. Publicar y cerrar [[accumulated-kv-multi-token-perturbation-matrix]] tras digest, revisiones y CI.
 2. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
 3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 4. Medir baseline de inferencia real.

@@ -1,7 +1,7 @@
 # QX-mini-MoE Wiki
 
 > Bóveda Obsidian y wiki compilada al estilo Karpathy. Leer primero esta página y [[current-status-and-roadmap]].
-> Última actualización: 2026-08-19 | Páginas de conocimiento: 23
+> Última actualización: 2026-08-20 | Páginas de conocimiento: 26
 
 ## Proyecto
 
@@ -34,6 +34,7 @@
 - [[scaled-layer1-residual-sensitivity]] — perturbación escalada del suffix, respuesta no suave y routing order frente a membership.
 - [[scaled-residual-token-modality-matrix]] — matriz de 3 tokens × 2 activaciones × 3 KV, curvas por celda y transiciones order/membership.
 - [[accumulated-kv-snapshot-replay]] — captura/restauración fail-closed de KV acumulado, escalas y token de continuación.
+- [[accumulated-kv-multi-token-perturbation-matrix]] — perturbación causal sobre prefijo acumulado fijo, controles exactos y matriz F16/INT8.
 
 ## Rendimiento
 
