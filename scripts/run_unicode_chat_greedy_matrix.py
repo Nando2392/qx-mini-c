@@ -205,8 +205,10 @@ def run_contract(contract: dict[str, Any], root: Path, work: Path, run_greedy: b
     validate_contract(contract)
     root = root.resolve()
     work.mkdir(parents=True, exist_ok=True)
-    exe = _require_artifact(root, "build/qxqxf.exe", (root / "build/qxqxf.exe").stat().st_size)
-    qxt = _require_artifact(root, "models/Qwen3-30B-A3B.qxt", (root / "models/Qwen3-30B-A3B.qxt").stat().st_size)
+    exe_path = root / "build/qxqxf.exe"
+    qxt_path = root / "models/Qwen3-30B-A3B.qxt"
+    exe = _require_artifact(root, "build/qxqxf.exe", exe_path.stat().st_size if exe_path.is_file() else -1)
+    qxt = _require_artifact(root, "models/Qwen3-30B-A3B.qxt", qxt_path.stat().st_size if qxt_path.is_file() else -1)
 
     tokenizer_results = []
     for index, case in enumerate(contract["tokenizer_cases"]):

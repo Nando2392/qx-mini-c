@@ -9,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 EXE = ROOT / "build" / "qxqxf.exe"
+QXT = ROOT / "models" / "Qwen3-30B-A3B.qxt"
 MATRIX_PATH = ROOT / "scripts" / "run_unicode_chat_greedy_matrix.py"
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "qwen3-unicode-chat-greedy-matrix.json"
 
@@ -105,6 +106,8 @@ def test_matrix_fixture_is_strict_and_separates_claims():
 
 
 def test_matrix_runner_executes_exact_tokenizer_and_chat_claims(tmp_path):
+    if not EXE.exists() or not QXT.exists():
+        pytest.skip("real QX tokenizer fixtures are not available")
     matrix = load_matrix_module()
     fixture = matrix.load_contract(FIXTURE_PATH)
     report = matrix.run_contract(fixture, ROOT, tmp_path)
@@ -113,6 +116,17 @@ def test_matrix_runner_executes_exact_tokenizer_and_chat_claims(tmp_path):
     assert report["chat_template"]["passed"] == len(fixture["chat_cases"])
     assert report["greedy"]["status"] in {"passed", "not_run"}
     assert report["overall_status"] in {"passed", "partial_environmental"}
+
+
+def test_matrix_runner_reports_missing_artifacts_fail_closed(tmp_path):
+    matrix = load_matrix_module()
+    fixture = matrix.load_contract(FIXTURE_PATH)
+    root = tmp_path / "root"
+    (root / "build").mkdir(parents=True)
+    (root / "build" / "qxqxf.exe").write_bytes(b"not executed")
+
+    with pytest.raises(ValueError, match="Qwen3-30B-A3B.qxt"):
+        matrix.run_contract(fixture, root, tmp_path / "work")
 
 
 @pytest.mark.parametrize("mutation,match", [
