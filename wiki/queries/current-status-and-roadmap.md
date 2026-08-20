@@ -72,19 +72,20 @@ El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en 
 
 [[scaled-layer1-residual-sensitivity]] completa la perturbación escalada sobre la dirección observada de layer 0. La respuesta no es suave: escalas exactas `-1` y `+1` tienen el mismo L2 de entrada (`6.64213e-7`) pero producen deltas finales de `5.73359e-4` y `4.46778`. Ninguna de las 15 escalas cambia la membresía top-8. Sólo aparecen cruces de orden dentro del mismo set en layers 46 y 28; están correlacionados con ramas de respuesta alta, pero no prueban causalidad. No se autoriza un fix numérico: el siguiente gate debe separar orden de acumulación, thresholds de activación y modalidad sobre más tokens.
 
+[[scaled-residual-token-modality-matrix]] completa ese gate con 18 celdas: tokens `42,9707,0`, activaciones F32/Q8_K-compatible y KV F16/F32/INT8. Diecisiete celdas cambian orden y catorce cambian membresía en alguna escala, pero las tres celdas runtime-aligned Q8_K-compatible + F16 conservan la membresía top-8. La asimetría `-1/+1` es extrema para tokens `42` (`7792.3×`) y `0` (`105030×`) en ese slice, mientras `9707` queda en `1.54585×` sin transición. El resultado separa sensibilidad de token/modalidad; no autoriza un fix ni una conclusión multi-token.
+
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
 
 ## Después
 
-1. Repetir la matriz escalada con más token IDs y controles F32/Q8_K-compatible y KV F16/F32/INT8 para separar modalidad, cuantización y orden de routing.
-2. Diseñar un seam de snapshot/replay de KV acumulado antes de extrapolar a perturbaciones multi-token.
-3. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
-4. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
-5. Medir baseline de inferencia real.
-6. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
-7. Gates 4K, RSS, calidad KV y 8 h.
+1. Diseñar un seam de snapshot/replay de KV acumulado antes de extrapolar a perturbaciones multi-token.
+2. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
+3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
+4. Medir baseline de inferencia real.
+5. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
+6. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 

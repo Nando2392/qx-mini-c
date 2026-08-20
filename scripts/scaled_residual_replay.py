@@ -96,6 +96,14 @@ def validate_execution_values(prompt_token: int, ctx: int, seed: int) -> None:
         raise ValueError("prompt-token and seed must be non-negative; ctx must be positive")
 
 
+def json_int_equals(value: object, expected: int) -> bool:
+    return type(value) is int and value == expected
+
+
+def is_json_number(value: object) -> bool:
+    return type(value) in (int, float)
+
+
 def prepare_experiment(args: argparse.Namespace) -> dict[str, object]:
     validate_matrix(args.layers, args.start_layer, args.expected_count)
     validate_execution_values(args.prompt_token, args.ctx, args.seed)
@@ -204,7 +212,7 @@ def load_routing(
     if not isinstance(data, dict):
         raise ValueError(f"{path}: result root must be a JSON object")
     replay = data.get("residual_replay")
-    if data.get("start_layer") != start_layer:
+    if not json_int_equals(data.get("start_layer"), start_layer):
         raise ValueError(f"{path}: expected start_layer {start_layer}")
     if data.get("kv_format") != kv_format:
         raise ValueError(f"{path}: expected kv_format {kv_format}")
@@ -214,23 +222,28 @@ def load_routing(
         raise ValueError(f"{path}: expected residual_source injected_f32_replay")
     if not isinstance(replay, dict) or replay.get("enabled") is not True:
         raise ValueError(f"{path}: residual replay metadata is not enabled")
-    if replay.get("source") != "f32_sidecar" or replay.get("values") != expected_count:
+    if replay.get("source") != "f32_sidecar" or not json_int_equals(
+        replay.get("values"), expected_count
+    ):
         raise ValueError(f"{path}: residual replay source or value count is invalid")
     suffix_layers = layers - start_layer
+    prompt_token_ids = data.get("prompt_token_ids")
     if (
         data.get("probe") != "state_loop"
-        or data.get("prompt_token") != prompt_token
-        or data.get("prompt_token_count") != 1
-        or data.get("prompt_token_ids") != [prompt_token]
-        or data.get("generation_steps") != 1
-        or data.get("steps") != 1
-        or data.get("layers") != layers
-        or data.get("ctx_tokens") != ctx
+        or not json_int_equals(data.get("prompt_token"), prompt_token)
+        or not json_int_equals(data.get("prompt_token_count"), 1)
+        or not isinstance(prompt_token_ids, list)
+        or len(prompt_token_ids) != 1
+        or not json_int_equals(prompt_token_ids[0], prompt_token)
+        or not json_int_equals(data.get("generation_steps"), 1)
+        or not json_int_equals(data.get("steps"), 1)
+        or not json_int_equals(data.get("layers"), layers)
+        or not json_int_equals(data.get("ctx_tokens"), ctx)
         or data.get("residual_dump") is not True
-        or data.get("residual_dump_count") != suffix_layers * 6
+        or not json_int_equals(data.get("residual_dump_count"), suffix_layers * 6)
         or data.get("delta_source") != "real_attention_moe"
-        or data.get("layers_run") != suffix_layers
-        or data.get("kv_appends") != suffix_layers
+        or not json_int_equals(data.get("layers_run"), suffix_layers)
+        or not json_int_equals(data.get("kv_appends"), suffix_layers)
         or data.get("cache_readback_ok") is not True
     ):
         raise ValueError(f"{path}: expected fixed one-token full-MoE replay matrix")
@@ -238,9 +251,9 @@ def load_routing(
     if not isinstance(tokens, list) or len(tokens) != 1 or not isinstance(tokens[0], dict):
         raise ValueError(f"{path}: expected exactly one token trace")
     if (
-        tokens[0].get("step") != 0
-        or tokens[0].get("position") != 0
-        or tokens[0].get("input_token") != prompt_token
+        not json_int_equals(tokens[0].get("step"), 0)
+        or not json_int_equals(tokens[0].get("position"), 0)
+        or not json_int_equals(tokens[0].get("input_token"), prompt_token)
     ):
         raise ValueError(f"{path}: token trace does not match the fixed input")
     layer_rows = tokens[0].get("layers")
@@ -249,22 +262,24 @@ def load_routing(
 
     routing: dict[int, dict[str, object]] = {}
     for row in layer_rows:
-        if not isinstance(row, dict) or not isinstance(row.get("layer"), int):
+        if not isinstance(row, dict) or type(row.get("layer")) is not int:
             raise ValueError(f"{path}: invalid layer trace row")
         layer = row["layer"]
         experts = row.get("selected_experts")
         weights = row.get("routing_weights")
-        if row.get("full_moe") is not True or row.get("experts_run") != 8:
+        if row.get("full_moe") is not True or not json_int_equals(
+            row.get("experts_run"), 8
+        ):
             raise ValueError(f"{path}: expected full MoE top-8 trace at layer {layer}")
         if (
             not isinstance(experts, list)
             or len(experts) != 8
-            or any(not isinstance(expert, int) or expert < 0 or expert >= 128 for expert in experts)
+            or any(type(expert) is not int or expert < 0 or expert >= 128 for expert in experts)
             or len(set(experts)) != len(experts)
             or not isinstance(weights, list)
             or len(weights) != len(experts)
             or any(
-                not isinstance(weight, (int, float))
+                not is_json_number(weight)
                 or not math.isfinite(float(weight))
                 or float(weight) <= 0.0
                 for weight in weights
@@ -304,13 +319,13 @@ def load_manifest(args: argparse.Namespace) -> dict[str, object]:
     start_layer = matrix.get("start_layer")
     layers = matrix.get("layers")
     expected_count = matrix.get("expected_count")
-    if not all(isinstance(value, int) for value in (start_layer, layers, expected_count)):
+    if not all(type(value) is int for value in (start_layer, layers, expected_count)):
         raise ValueError(f"{path}: invalid matrix dimensions")
     validate_matrix(layers, start_layer, expected_count)
     prompt_token = matrix.get("prompt_token")
     ctx = matrix.get("ctx")
     seed = matrix.get("seed")
-    if not all(isinstance(value, int) for value in (prompt_token, ctx, seed)):
+    if not all(type(value) is int for value in (prompt_token, ctx, seed)):
         raise ValueError(f"{path}: invalid execution matrix")
     validate_execution_values(prompt_token, ctx, seed)
     if not isinstance(matrix.get("kv_format"), str) or not matrix["kv_format"]:
@@ -365,7 +380,7 @@ def analyze_experiment(args: argparse.Namespace) -> dict[str, object]:
     loaded: list[dict[str, object]] = []
     seen_scales: set[float] = set()
     for item in runs:
-        if not isinstance(item, dict) or not isinstance(item.get("scale"), (int, float)):
+        if not isinstance(item, dict) or not is_json_number(item.get("scale")):
             raise ValueError("manifest run is invalid")
         scale = float(item["scale"])
         if not math.isfinite(scale) or scale in seen_scales:

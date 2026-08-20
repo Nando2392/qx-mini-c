@@ -136,6 +136,13 @@ def analyze(oracle: Path, baseline: Path, experiment: Path) -> subprocess.Comple
     )
 
 
+def set_nested(payload: dict, path: tuple[object, ...], value: object) -> None:
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+
 def test_prepare_and_analyze_report_effective_gain_and_routing_transition(tmp_path):
     oracle, baseline, experiment = prepare_fixture(tmp_path)
     manifest = json.loads((experiment / "manifest.json").read_text(encoding="utf-8"))
@@ -190,6 +197,89 @@ def test_analyze_fails_closed_for_metadata_mismatch(tmp_path):
 
     assert completed.returncode != 0
     assert "expected kv_format f16" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("path", "bad_value", "expected_error"),
+    [
+        (("matrix", "layers"), True, "invalid matrix dimensions"),
+        (("matrix", "start_layer"), 1.0, "invalid matrix dimensions"),
+        (("matrix", "expected_count"), True, "invalid matrix dimensions"),
+        (("matrix", "prompt_token"), True, "invalid execution matrix"),
+        (("matrix", "ctx"), 4.0, "invalid execution matrix"),
+        (("matrix", "seed"), False, "invalid execution matrix"),
+    ],
+)
+def test_analyze_rejects_non_integer_manifest_metadata(
+    tmp_path, path, bad_value, expected_error
+):
+    oracle, baseline, experiment = prepare_fixture(tmp_path)
+    manifest_path = experiment / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    populate_runs(experiment, manifest)
+    set_nested(manifest, path, bad_value)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    completed = analyze(oracle, baseline, experiment)
+
+    assert completed.returncode != 0
+    assert expected_error in completed.stderr
+
+
+def test_analyze_rejects_boolean_manifest_scale(tmp_path):
+    oracle, baseline, experiment = prepare_fixture(tmp_path)
+    manifest_path = experiment / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    populate_runs(experiment, manifest)
+    manifest["runs"][2]["scale"] = True
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    completed = analyze(oracle, baseline, experiment)
+
+    assert completed.returncode != 0
+    assert "manifest run is invalid" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("path", "bad_value", "expected_error"),
+    [
+        (("start_layer",), True, "expected start_layer"),
+        (("residual_replay", "values"), 2.0, "source or value count is invalid"),
+        (("prompt_token",), True, "fixed one-token full-MoE replay matrix"),
+        (("prompt_token_count",), 1.0, "fixed one-token full-MoE replay matrix"),
+        (("prompt_token_ids", 0), True, "fixed one-token full-MoE replay matrix"),
+        (("generation_steps",), True, "fixed one-token full-MoE replay matrix"),
+        (("steps",), 1.0, "fixed one-token full-MoE replay matrix"),
+        (("layers",), 3.0, "fixed one-token full-MoE replay matrix"),
+        (("ctx_tokens",), 4.0, "fixed one-token full-MoE replay matrix"),
+        (("residual_dump_count",), 12.0, "fixed one-token full-MoE replay matrix"),
+        (("layers_run",), 2.0, "fixed one-token full-MoE replay matrix"),
+        (("kv_appends",), 2.0, "fixed one-token full-MoE replay matrix"),
+        (("tokens", 0, "step"), False, "token trace does not match"),
+        (("tokens", 0, "position"), 0.0, "token trace does not match"),
+        (("tokens", 0, "input_token"), True, "token trace does not match"),
+        (("tokens", 0, "layers", 0, "layer"), True, "invalid layer trace row"),
+        (("tokens", 0, "layers", 0, "experts_run"), 8.0, "expected full MoE top-8"),
+        (("tokens", 0, "layers", 0, "selected_experts", 0), True, "invalid routing trace"),
+        (("tokens", 0, "layers", 0, "selected_experts", 0), 1.0, "invalid routing trace"),
+        (("tokens", 0, "layers", 0, "routing_weights", 0), True, "invalid routing trace"),
+    ],
+)
+def test_analyze_rejects_non_integer_or_boolean_routing_metadata(
+    tmp_path, path, bad_value, expected_error
+):
+    oracle, baseline, experiment = prepare_fixture(tmp_path)
+    manifest = json.loads((experiment / "manifest.json").read_text(encoding="utf-8"))
+    populate_runs(experiment, manifest)
+    result_path = experiment / manifest["runs"][1]["directory"] / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    set_nested(result, path, bad_value)
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+
+    completed = analyze(oracle, baseline, experiment)
+
+    assert completed.returncode != 0
+    assert expected_error in completed.stderr
 
 
 def test_analyze_fails_closed_when_trace_is_not_full_moe(tmp_path):

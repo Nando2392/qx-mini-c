@@ -106,6 +106,6 @@ No run changes top-8 membership. The only router changes are rank-order swaps in
 - **Router rank-order threshold:** observed and correlated with high-response branches, but not proven causal. The selected expert set is unchanged, so rank crossing must not be promoted to an expert-membership claim.
 - **Numerical runtime fix:** not authorized. The evidence does not isolate whether the discontinuity comes from routing-order-dependent F32 accumulation, activation quantization thresholds, or a downstream interaction.
 
-The next safe gate is to repeat this matrix across additional token IDs and F32/Q8_K-compatible activation and KV modes. Multi-token conclusions still require an accumulated KV snapshot/replay seam.
+[[scaled-residual-token-modality-matrix]] completes the additional-token and modality gate. It preserves top-8 membership across the three `q8_k_compat` + F16 cells, but shows token-dependent response magnitudes and membership changes in broader modal controls. Multi-token conclusions still require an accumulated KV snapshot/replay seam.
 
 Related evidence: [[hybrid-residual-replay-accumulation]], [[layers0-40-same-input]], and [[current-status-and-roadmap]].
