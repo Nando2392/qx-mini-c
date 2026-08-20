@@ -1,7 +1,7 @@
 # QX-mini-MoE Wiki
 
 > Bóveda Obsidian y wiki compilada al estilo Karpathy. Leer primero esta página y [[current-status-and-roadmap]].
-> Última actualización: 2026-08-20 | Páginas de conocimiento: 26
+> Última actualización: 2026-08-20 | Páginas de conocimiento: 27
 
 ## Proyecto
 
@@ -40,6 +40,7 @@
 
 - [[performance-model]] — bytes activos, techo físico y mediciones reales.
 - [[optimization-priorities]] — orden de optimización CPU/CUDA.
+- [[cpu-inference-baseline]] — baseline A/B fail-closed con startup, prefill, decode, total, RSS y outputs por modo.
 
 ## Estado
 

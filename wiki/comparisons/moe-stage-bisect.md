@@ -157,7 +157,7 @@ python -m pytest tests/test_compare_moe_stages.py -q
 python -m pytest tests/test_q8k_activation.py tests/test_real_iq4xs_projection.py -q
 python scripts/q8k_e2e_experiment.py --qx-exe build/qxqxf.exe --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --oracle <oracle> --out <temp>
 python scripts/q8k_greedy_experiment.py --qx-exe build/qxqxf.exe --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt
-python scripts/q8k_perf_experiment.py --qx-exe build/qxqxf.exe --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --kv int8 --repetitions 5
+python scripts/q8k_perf_experiment.py --qx-exe build/qxqxf.exe --source-model models/Qwen3-30B-A3B-UD-IQ2_M.gguf --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt --prompt-file tests/fixtures/q8k_perf_prompt.txt --output <report.json> --kv int8 --repetitions 5
 ```
 
 Modelos, tokenizers, ejecutables, sidecars y JSON de resultados permanecen fuera de Git.

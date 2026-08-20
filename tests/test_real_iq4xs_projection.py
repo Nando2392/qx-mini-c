@@ -659,13 +659,17 @@ def test_state_loop_applies_real_final_norm_and_complete_lm_head(tmp_path):
     assert head["argmax_logit"] == head["top_tokens"][0]["logit"]
     assert all(head["top_tokens"][index]["logit"] >= head["top_tokens"][index + 1]["logit"] for index in range(4))
     base = [str(EXE), "state-loop-probe", "--in", str(MODEL), "--prompt-token", "42", "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8", "--temperature", "0", "--seed", "7", "--full-moe", "--final-head"]
+    benchmarked = json.loads(subprocess.check_output(base + ["--bench"], text=True))
+    assert benchmarked["bench"]["enabled"] is True
+    assert benchmarked["bench"]["phases"]["prefill"]["tokens"] == 0
+    assert benchmarked["bench"]["phases"]["decode"]["tokens"] == 1
+    assert benchmarked["bench"]["phases"]["decode"]["elapsed_sec"] > 0
     invalid_commands = [
         base + ["--layers", "47"],
         base + ["--layers", "49"],
         base + ["--steps", "0"],
         base + ["--steps", "65"],
         base + ["--temperature", "0.1"],
-        base + ["--bench"],
         [arg for arg in base if arg != "--full-moe"],
     ]
     for command in invalid_commands:
@@ -675,7 +679,7 @@ def test_state_loop_applies_real_final_norm_and_complete_lm_head(tmp_path):
             capture_output=True,
         )
         assert invalid.returncode != 0
-        assert "--final-head requires --full-moe, 1..64 steps, all manifest layers, temperature 0, and no --bench" in invalid.stderr
+        assert "--final-head requires --full-moe, 1..64 steps, all manifest layers, and temperature 0" in invalid.stderr
     oversized_ctx = subprocess.run(base + ["--ctx", "4097"], text=True, capture_output=True)
     assert oversized_ctx.returncode != 0
     assert "state loop context must be between 1 and 4096" in oversized_ctx.stderr

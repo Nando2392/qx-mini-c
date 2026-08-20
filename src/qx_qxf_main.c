@@ -41,7 +41,7 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
         "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
-        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe --final-head [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
+        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe --final-head [--bench] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
         "  %s generate-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --top-k 5 --scan 64 --temperature 0 --seed 7\n"
         "  %s residual-vector-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --dims 64 --seed 7\n"
@@ -397,6 +397,7 @@ chat_fail:
         int parse_special = 0;
         int full_moe = 0;
         int final_head = 0;
+        int bench = 0;
         for (int i = 2; i < argc; ++i) {
             if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
             else if (strcmp(argv[i], "--tokenizer") == 0 && i + 1 < argc) tokenizer_path = argv[++i];
@@ -413,6 +414,7 @@ chat_fail:
             else if (strcmp(argv[i], "--parse-special") == 0) parse_special = 1;
             else if (strcmp(argv[i], "--full-moe") == 0) full_moe = 1;
             else if (strcmp(argv[i], "--final-head") == 0) final_head = 1;
+            else if (strcmp(argv[i], "--bench") == 0) bench = 1;
             else { usage(argv[0]); return 2; }
         }
         if (!in_path || !tokenizer_path || !text_path || !full_moe || !final_head) { usage(argv[0]); return 2; }
@@ -441,7 +443,7 @@ chat_fail:
         qx_tokenizer_free(&tokenizer);
         free(input);
         if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format,
-                1, 1, 1, 1, 1, 1, 1, 1, 1, full_moe, final_head, 0, 2048u, NULL, 8u, 151936u,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, full_moe, final_head, bench, 2048u, NULL, 8u, 151936u,
                 top_n, temperature, seed, NULL, 0u, NULL, kv_snapshot_out_path, NULL, stdout, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;
         }

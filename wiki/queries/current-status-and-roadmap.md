@@ -20,7 +20,8 @@ confidence: high
 - [[final-output-head]] completo: final RMSNorm, 151936 logits Q6_K, top-N y argmax.
 - [[autoregressive-loop]] greedy multi-token: re-embedding, posición y KV persistente por layer.
 - [[qwen3-tokenizer]] QXT2: paridad exacta para prompts fijos y prefill desde texto.
-- Issue #22 en validación: matriz separada de Unicode, render Qwen3 chat-template y secuencias greedy para prompts múltiples; no implica paridad global de logits/modelo.
+- Issue #22 COMPLETED: matriz separada de Unicode, render Qwen3 chat-template y secuencias greedy para prompts múltiples, publicada en `f8facc600e4df708af22b5ea0e230dc1cf783ad1` con fix CI `333ee3df1b71a07b2912475ab423bc4bad12836f`; GitHub Actions `32409146859` terminó SUCCESS. La paridad demostrada sigue limitada a los casos y modalidades registrados; no implica paridad global de logits/modelo.
+- [[cpu-inference-baseline]] fail-closed: A/B F32/Q8_K con startup/model-load, prefill, decode, total, peak RSS, provenance SHA-256 y outputs deterministas por modo.
 - [[accumulated-kv-snapshot-replay]] fail-closed: captura/restaura K/V y escalas por layer/posición, con token de continuación y manifiesto SHA-256.
 - Hardening QXF fail-closed: manifest, ABI, directorio, dims, nombres, placement, overflow y filas exactas.
 - Golden independientes para embedding, IQ4_XS y expertos IQ2_XS/IQ3_XXS/IQ2_S representativos.
@@ -54,6 +55,7 @@ replay híbrido residual F16 layers 0–47: GREEN
 clasificación acumulación/amplificación/modalidad: GREEN
 perturbación escalada layer 1: GREEN; respuesta no suave, top-8 estable, cruces de orden observados
 snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + replay 1
+baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -79,7 +81,7 @@ El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en 
 
 [[accumulated-kv-snapshot-replay]] cierra el seam previo al experimento multi-token. El payload nativo `QXKVSNP1` v2 conserva K/V, escalas, geometría, posición, seed y siguiente token, y el importador C verifica su trailer SHA-256 antes de consumir el cache. El manifiesto externo fija modelo/binario/revisión, SHA-256 y cobertura exacta por `(layer,position,kind)`. El control sintético exige igualdad exacta entre baseline de tres posiciones y captura de dos + replay de una. Truncación, bytes extra, magic incorrecto, mutación K/V de igual longitud y token de continuación distinto fallan cerrados. El gate se publicó en `0fc21c697994782b1f393dabd198855ef5ab939f` con CI `32370138054` SUCCESS; habilita experimentos posteriores, pero todavía no prueba paridad ni causalidad multi-token.
 
-[[accumulated-kv-multi-token-perturbation-matrix]] usa ese seam sobre un QXF real y separa por KV F16/INT8 una dirección sintética F32 controlada en la continuación tras dos posiciones acumuladas. Baseline/replay y escala cero cierran exactamente en ambos modos. Las seis corridas conservan token `56`; F16 `+1` cambia orden de routing y las otras tres perturbaciones firmadas no. El resultado prueba mecánica reproducible en el slice registrado, no causalidad semántica ni equivalencia modal. Issue #21 permanece en gate de publicación.
+[[accumulated-kv-multi-token-perturbation-matrix]] usa ese seam sobre un QXF real y separa por KV F16/INT8 una dirección sintética F32 controlada en la continuación tras dos posiciones acumuladas. Baseline/replay y escala cero cierran exactamente en ambos modos. Las seis corridas conservan token `56`; F16 `+1` cambia orden de routing y las otras tres perturbaciones firmadas no. El resultado prueba mecánica reproducible en el slice registrado, no causalidad semántica ni equivalencia modal. Issue #21 fue publicado/completado en `4066538e88ccc0a18fafa213b606e9e619a3f9b5`; GitHub Actions `32390221256` terminó SUCCESS.
 
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
@@ -87,11 +89,9 @@ La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coinc
 
 ## Después
 
-1. Completar Issue #22 (Unicode/chat-template/prompts múltiples) tras digest, revisiones y CI.
-2. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
-3. Medir baseline de inferencia real.
-4. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
-5. Gates 4K, RSS, calidad KV y 8 h.
+1. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
+2. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
+3. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 

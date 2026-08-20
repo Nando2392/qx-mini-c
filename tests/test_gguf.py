@@ -749,6 +749,11 @@ def test_create_qxf_tensor_copy_from_synthetic_gguf_if_built(tmp_path):
     assert sbd["bench"]["ms_per_token"] > 0
     assert sbd["bench"]["layer_steps_per_second"] > 0
     assert sbd["bench"]["layer_steps"] == 4
+    assert sbd["bench"]["phases"]["prefill"]["tokens"] == 0
+    assert sbd["bench"]["phases"]["prefill"]["elapsed_sec"] == 0
+    assert sbd["bench"]["phases"]["decode"]["tokens"] == 2
+    assert sbd["bench"]["phases"]["decode"]["elapsed_sec"] > 0
+    assert sbd["bench"]["phases"]["decode"]["tokens_per_second"] > 0
     assert tf["layers_run"] == 2
     assert tf["top_k"] == 2
     assert tf["embedding_probe"] != 0

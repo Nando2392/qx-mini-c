@@ -5498,9 +5498,9 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         qx_set_err(err, err_len, "invalid attention dimensions");
         return 0;
     }
-    if (final_head && (!full_moe || requested_layers != manifest_layers || temperature != 0.0 || bench)) {
+    if (final_head && (!full_moe || requested_layers != manifest_layers || temperature != 0.0)) {
         qx_close_file(&file);
-        qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, temperature 0, and no --bench");
+        qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, and temperature 0");
         return 0;
     }
     if (final_head && (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE || manifest_layers != 48u || file.header.manifest.hidden != 2048u || file.header.manifest.vocab != 151936u || q_heads != 32u || kv_heads != 4u || head_dim != 128u)) {
@@ -5609,10 +5609,15 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"layer_stride\": %llu,\n", (unsigned long long)layer_stride);
     fprintf(out, "  \"tokens\": [");
     clock_t bench_start = clock();
+    double prefill_elapsed = 0.0;
+    double decode_elapsed = 0.0;
+    uint32_t prefill_tokens = 0u;
+    uint32_t decode_tokens = 0u;
     for (uint32_t local_step = 0; local_step < steps; ++local_step) {
         uint32_t step = position_base + local_step;
         if (local_step < prompt_count) current = prompt_tokens[local_step];
         int sampling_step = local_step + 1u >= prompt_count;
+        clock_t phase_start = clock();
         fprintf(out, "%s{\"step\": %u, \"position\": %u, \"phase\": \"%s\", \"input_token\": %u, \"layers\": [", local_step ? ", " : "", step, step, sampling_step ? "generate" : "prefill", current);
         double residual_probe = 0.125 + ((double)(current % 997u) / 9970.0) + (double)step * 0.001;
         uint32_t residual_values = 0;
@@ -5899,6 +5904,10 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                 fprintf(out, ", \"residual_checksum_after\": %llu", (unsigned long long)after);
             }
             fprintf(out, ", \"selected_token\": null, \"source\": \"fixed_prompt\"}");
+            double phase_elapsed = (double)(clock() - phase_start) / (double)CLOCKS_PER_SEC;
+            if (phase_elapsed <= 0.0) phase_elapsed = 0.000001;
+            prefill_elapsed += phase_elapsed;
+            ++prefill_tokens;
             current = prompt_tokens[step + 1u];
             continue;
         }
@@ -5965,6 +5974,10 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         fprintf(out, ", \"selected_token\": %u, \"piece\": ", sr.selected_token);
         qx_json_print_escaped(out, piece);
         fprintf(out, ", \"source\": \"%s\"}", source);
+        double phase_elapsed = (double)(clock() - phase_start) / (double)CLOCKS_PER_SEC;
+        if (phase_elapsed <= 0.0) phase_elapsed = 0.000001;
+        decode_elapsed += phase_elapsed;
+        ++decode_tokens;
         current = sr.selected_token;
     }
     if (kv_snapshot_out_path && *kv_snapshot_out_path && !qx_write_accumulated_kv_snapshot(
@@ -5986,7 +5999,11 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         double tps = (double)steps / elapsed;
         double mspt = 1000.0 / tps;
         double lps = (double)layers_run / elapsed;
-        fprintf(out, "  \"bench\": {\"enabled\": true, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g, \"ms_per_token\": %.9g, \"layer_steps\": %llu, \"layer_steps_per_second\": %.9g},\n", elapsed, tps, mspt, (unsigned long long)layers_run, lps);
+        double prefill_tps = prefill_tokens ? (double)prefill_tokens / prefill_elapsed : 0.0;
+        double decode_tps = decode_tokens ? (double)decode_tokens / decode_elapsed : 0.0;
+        fprintf(out, "  \"bench\": {\"enabled\": true, \"timer\": \"process_clock\", \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g, \"ms_per_token\": %.9g, \"layer_steps\": %llu, \"layer_steps_per_second\": %.9g, \"phases\": {\"prefill\": {\"tokens\": %u, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g}, \"decode\": {\"tokens\": %u, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g}}},\n",
+            elapsed, tps, mspt, (unsigned long long)layers_run, lps,
+            prefill_tokens, prefill_elapsed, prefill_tps, decode_tokens, decode_elapsed, decode_tps);
     }
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
@@ -6021,7 +6038,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
 
 int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (final_head && (steps == 0u || steps > 64u)) {
-        qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, temperature 0, and no --bench");
+        qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, and temperature 0");
         return 0;
     }
     if (steps == 0u) steps = 1u;

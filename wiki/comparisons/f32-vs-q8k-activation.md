@@ -77,7 +77,7 @@ python -m pip install -r scripts/requirements-q8k-perf.txt
 python scripts/q8k_activation_spike.py --qx-exe build/qxqxf.exe --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --oracle-vcur <oracle>/Vcur-0.f32 --token 42 --repetitions 5
 python scripts/q8k_e2e_experiment.py --qx-exe build/qxqxf.exe --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --oracle <oracle> --out <temp-output>
 python scripts/q8k_greedy_experiment.py --qx-exe build/qxqxf.exe --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt
-python scripts/q8k_perf_experiment.py --qx-exe build/qxqxf.exe --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --kv int8 --repetitions 5
+python scripts/q8k_perf_experiment.py --qx-exe build/qxqxf.exe --source-model models/Qwen3-30B-A3B-UD-IQ2_M.gguf --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt --prompt-file tests/fixtures/q8k_perf_prompt.txt --output <report.json> --kv int8 --repetitions 5
 python -m pytest tests/test_q8k_activation.py -q
 ```
 
