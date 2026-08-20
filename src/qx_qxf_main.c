@@ -40,6 +40,7 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-inspect --tokenizer model.qxt\n"
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
+        "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
         "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe --final-head [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
         "  %s generate-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --top-k 5 --scan 64 --temperature 0 --seed 7\n"
@@ -292,6 +293,58 @@ int main(int argc, char **argv) {
         qx_tokenizer_free(&tokenizer);
         free(input);
         return 0;
+    }
+
+    if (strcmp(argv[1], "chat-template-render") == 0) {
+        qx_chat_message messages[QX_CHAT_MAX_MESSAGES];
+        unsigned char *contents[QX_CHAT_MAX_MESSAGES] = {0};
+        uint32_t message_count = 0u;
+        int add_generation_prompt = 0;
+        char err[256];
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--message") == 0 && i + 1 < argc) {
+                const char *spec = argv[++i];
+                const char *separator = strchr(spec, ':');
+                if (!separator || separator == spec || message_count == QX_CHAT_MAX_MESSAGES) {
+                    fprintf(stderr, "chat-template-render failed: invalid --message\n"); goto chat_usage_fail;
+                }
+                size_t role_length = (size_t)(separator - spec);
+                const char *role = NULL;
+                if (role_length == 6u && memcmp(spec, "system", 6u) == 0) role = "system";
+                else if (role_length == 4u && memcmp(spec, "user", 4u) == 0) role = "user";
+                else if (role_length == 9u && memcmp(spec, "assistant", 9u) == 0) role = "assistant";
+                else { fprintf(stderr, "chat-template-render failed: unsupported chat role\n"); goto chat_fail; }
+                uint32_t content_length = 0u;
+                if (!qx_cli_read_prompt(separator + 1, &contents[message_count], &content_length, err, sizeof(err))) {
+                    fprintf(stderr, "chat-template-render failed: %s\n", err); goto chat_fail;
+                }
+                messages[message_count].role = role;
+                messages[message_count].content = contents[message_count];
+                messages[message_count].content_length = content_length;
+                ++message_count;
+            } else if (strcmp(argv[i], "--add-generation-prompt") == 0) {
+                add_generation_prompt = 1;
+            } else { usage(argv[0]); goto chat_usage_fail; }
+        }
+        if (message_count == 0u) { usage(argv[0]); goto chat_usage_fail; }
+        unsigned char *output = (unsigned char *)malloc(QX_CHAT_MAX_OUTPUT);
+        uint32_t output_length = 0u;
+        if (!output) { fprintf(stderr, "chat-template-render failed: out of memory\n"); goto chat_fail; }
+        if (!qx_tokenizer_render_qwen3_chat(messages, message_count, add_generation_prompt, output, QX_CHAT_MAX_OUTPUT, &output_length, err, sizeof(err))) {
+            free(output); fprintf(stderr, "chat-template-render failed: %s\n", err); goto chat_fail;
+        }
+        printf("{\n  \"template\": \"qwen3-chatml-subset-v1\",\n  \"message_count\": %u,\n  \"add_generation_prompt\": %s,\n  \"utf8_bytes\": %u,\n  \"text\": ", message_count, add_generation_prompt ? "true" : "false", output_length);
+        qx_cli_json_string(output, output_length);
+        printf("\n}\n");
+        free(output);
+        for (uint32_t i = 0u; i < message_count; ++i) free(contents[i]);
+        return 0;
+chat_usage_fail:
+        for (uint32_t i = 0u; i < message_count; ++i) free(contents[i]);
+        return 2;
+chat_fail:
+        for (uint32_t i = 0u; i < message_count; ++i) free(contents[i]);
+        return 1;
     }
 
     if (strcmp(argv[1], "tokenizer-decode") == 0) {

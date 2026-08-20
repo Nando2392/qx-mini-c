@@ -363,11 +363,74 @@ static int qx_tok_valid_utf8(const unsigned char *text, uint32_t length) {
     return 1;
 }
 
+static int qx_tok_append(
+    unsigned char *output,
+    uint32_t output_capacity,
+    uint32_t *offset,
+    const unsigned char *data,
+    uint32_t length) {
+    if (*offset > output_capacity || length > output_capacity - *offset) return 0;
+    if (length != 0u) memcpy(output + *offset, data, length);
+    *offset += length;
+    return 1;
+}
+
+int qx_tokenizer_render_qwen3_chat(
+    const qx_chat_message *messages,
+    uint32_t message_count,
+    int add_generation_prompt,
+    unsigned char *output,
+    uint32_t output_capacity,
+    uint32_t *output_length,
+    char *err,
+    uint64_t err_len) {
+    static const unsigned char start[] = "<|im_start|>";
+    static const unsigned char end[] = "<|im_end|>\n";
+    static const unsigned char assistant[] = "<|im_start|>assistant\n";
+    if (!messages || !output || !output_length || message_count == 0u || message_count > QX_CHAT_MAX_MESSAGES) {
+        qx_tok_set_err(err, err_len, "invalid chat message array"); return 0;
+    }
+    if (output_capacity > QX_CHAT_MAX_OUTPUT) output_capacity = QX_CHAT_MAX_OUTPUT;
+    uint32_t offset = 0u;
+    for (uint32_t i = 0u; i < message_count; ++i) {
+        const qx_chat_message *message = &messages[i];
+        uint32_t role_length = 0u;
+        if (!message->role || !message->content) {
+            qx_tok_set_err(err, err_len, "invalid chat message"); return 0;
+        }
+        if (strcmp(message->role, "system") == 0) role_length = 6u;
+        else if (strcmp(message->role, "user") == 0) role_length = 4u;
+        else if (strcmp(message->role, "assistant") == 0) role_length = 9u;
+        else { qx_tok_set_err(err, err_len, "unsupported chat role"); return 0; }
+        if (!qx_tok_valid_utf8(message->content, message->content_length)) {
+            qx_tok_set_err(err, err_len, "chat content is not valid UTF-8"); return 0;
+        }
+        if (!qx_tok_append(output, output_capacity, &offset, start, (uint32_t)sizeof(start) - 1u) ||
+            !qx_tok_append(output, output_capacity, &offset, (const unsigned char *)message->role, role_length) ||
+            !qx_tok_append(output, output_capacity, &offset, (const unsigned char *)"\n", 1u) ||
+            !qx_tok_append(output, output_capacity, &offset, message->content, message->content_length) ||
+            !qx_tok_append(output, output_capacity, &offset, end, (uint32_t)sizeof(end) - 1u)) {
+            qx_tok_set_err(err, err_len, "rendered chat exceeds output limit"); return 0;
+        }
+    }
+    if (add_generation_prompt &&
+        !qx_tok_append(output, output_capacity, &offset, assistant, (uint32_t)sizeof(assistant) - 1u)) {
+        qx_tok_set_err(err, err_len, "rendered chat exceeds output limit"); return 0;
+    }
+    *output_length = offset;
+    return 1;
+}
+
 static enum qx_tok_class qx_tok_classify(uint32_t cp) {
     if (cp == '\r' || cp == '\n') return QX_TOK_NEWLINE;
     if (cp == ' ' || cp == '\t' || cp == '\v' || cp == '\f') return QX_TOK_SPACE;
     if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
         (cp >= 0x00C0u && cp <= 0x02AFu) || (cp >= 0x0370u && cp <= 0x052Fu) ||
+        (cp >= 0x0620u && cp <= 0x065Fu) ||
+        (cp >= 0x066Eu && cp <= 0x06D3u) ||
+        (cp >= 0x06D5u && cp <= 0x06DCu) ||
+        (cp >= 0x06DFu && cp <= 0x06E8u) ||
+        (cp >= 0x06EAu && cp <= 0x06EDu) ||
         (cp >= 0x3040u && cp <= 0x30FFu) || (cp >= 0x3400u && cp <= 0x4DBFu) ||
         (cp >= 0x4E00u && cp <= 0x9FFFu) || (cp >= 0xAC00u && cp <= 0xD7AFu) ||
         (cp >= 0xF900u && cp <= 0xFAFFu)) return QX_TOK_LETTER;
@@ -375,8 +438,15 @@ static enum qx_tok_class qx_tok_classify(uint32_t cp) {
         (cp >= 0x06F0u && cp <= 0x06F9u) || (cp >= 0x0966u && cp <= 0x096Fu) ||
         (cp >= 0xFF10u && cp <= 0xFF19u)) return QX_TOK_NUMBER;
     if ((cp >= 0x21u && cp <= 0x7Eu) || (cp >= 0x00A1u && cp <= 0x00BFu) ||
+        (cp >= 0x0300u && cp <= 0x036Fu) || (cp >= 0x1AB0u && cp <= 0x1AFFu) ||
+        (cp >= 0x1DC0u && cp <= 0x1DFFu) || (cp >= 0x20D0u && cp <= 0x20FFu) ||
+        (cp >= 0xFE20u && cp <= 0xFE2Fu) ||
         (cp >= 0x2000u && cp <= 0x206Fu) || (cp >= 0x20A0u && cp <= 0x20CFu) ||
+        (cp >= 0x0600u && cp <= 0x061Fu) || (cp >= 0x066Au && cp <= 0x066Du) ||
+        cp == 0x06D4u || cp == 0x06DDu || cp == 0x06DEu ||
         (cp >= 0x2190u && cp <= 0x2BFFu) || (cp >= 0x3000u && cp <= 0x303Fu) ||
+        (cp >= 0xFF01u && cp <= 0xFF0Fu) || (cp >= 0xFF1Au && cp <= 0xFF20u) ||
+        (cp >= 0xFF3Bu && cp <= 0xFF40u) || (cp >= 0xFF5Bu && cp <= 0xFF65u) ||
         (cp >= 0x1F000u && cp <= 0x1FAFFu)) return QX_TOK_OTHER;
     return QX_TOK_UNSUPPORTED;
 }
@@ -573,6 +643,25 @@ static int qx_tok_match_special(const qx_tokenizer *tokenizer, const unsigned ch
     return *matched != 0u;
 }
 
+static uint32_t qx_tok_next_special_offset(
+    const qx_tokenizer *tokenizer,
+    const unsigned char *input,
+    uint32_t input_length,
+    uint32_t offset) {
+    uint32_t earliest = input_length;
+    for (uint32_t id = 0; id < tokenizer->vocab_count; ++id) {
+        const qx_token_entry *token = &tokenizer->tokens[id];
+        if ((token->type != 3u && token->type != 4u) || token->length == 0u || token->length > input_length - offset) continue;
+        for (uint32_t candidate = offset; candidate + token->length <= earliest; ++candidate) {
+            if (memcmp(input + candidate, token->text, token->length) == 0) {
+                earliest = candidate;
+                break;
+            }
+        }
+    }
+    return earliest;
+}
+
 int qx_tokenizer_encode(
     const qx_tokenizer *tokenizer,
     const unsigned char *input,
@@ -613,7 +702,8 @@ int qx_tokenizer_encode(
             continue;
         }
         uint32_t chunk_length = 0u;
-        if (!qx_tok_pretoken_length(input, input_length, offset, &chunk_length, err, err_len) || chunk_length == 0u) goto fail;
+        uint32_t segment_end = parse_special ? qx_tok_next_special_offset(tokenizer, input, input_length, offset + 1u) : input_length;
+        if (!qx_tok_pretoken_length(input, segment_end, offset, &chunk_length, err, err_len) || chunk_length == 0u) goto fail;
         if (!qx_tok_bpe_chunk(tokenizer, &token_index, &merge_index, input + offset, chunk_length, token_ids, token_capacity, token_count, err, err_len)) goto fail;
         offset += chunk_length;
     }

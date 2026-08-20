@@ -1,0 +1,51 @@
+{
+  "schema": "qx-unicode-chat-greedy-matrix-v1",
+  "issue": 22,
+  "source": {
+    "model_path": "models/Qwen3-30B-A3B-UD-IQ2_M.gguf",
+    "model_sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+    "model_size": 10865578560,
+    "qxf_path": "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+    "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+    "qxf_size": 10860081152,
+    "llama_cpp_commit": "768d2a481a99cb75ec9a03b95dadbd35e7acf496",
+    "oracle_revision": "llama.cpp@768d2a481a99cb75ec9a03b95dadbd35e7acf496",
+    "oracle_args": [
+      {"component": "tokenizer", "args": ["-m", "<model>", "-p", "<text>", "--ids", "--no-bos", "--no-escape", "--no-parse-special"]},
+      {"component": "chat_template", "args": ["llama_chat_apply_template", "source_gguf_template"]},
+      {"component": "greedy", "args": ["prompt_token_ids=<case>", "steps=2", "temperature=0", "modes=f16,q8_0"]}
+    ],
+    "runtime": {
+      "tokenizer": "cpu/vocab_only",
+      "chat_template": "cpu/vocab_only",
+      "llama_greedy": ["f16_cpu", "q8_0_cpu"],
+      "qx_greedy": "int8_kv_f32_activation_cpu"
+    }
+  },
+  "tokenizer_cases": [
+    {"name": "ascii-control", "text": "Hello!", "parse_special": false, "expected_token_ids": [9707, 0], "expected_decode_text": "Hello!", "oracle_origin": "llama-tokenize", "mode": "vocab_only_cpu"},
+    {"name": "latin1", "text": "café déjà vu — naïve", "parse_special": false, "expected_token_ids": [924, 58858, 45839, 32514, 1959, 94880, 586], "expected_decode_text": "café déjà vu — naïve", "oracle_origin": "llama-tokenize", "mode": "vocab_only_cpu"},
+    {"name": "combining", "text": "mañana élite", "parse_special": false, "expected_token_ids": [1515, 136, 225, 3362, 384, 53839, 68078], "expected_decode_text": "mañana élite", "oracle_origin": "llama-tokenize", "mode": "vocab_only_cpu"},
+    {"name": "cjk", "text": "你好，世界！", "parse_special": false, "expected_token_ids": [108386, 3837, 99489, 6313], "expected_decode_text": "你好，世界！", "oracle_origin": "llama-tokenize", "mode": "vocab_only_cpu"},
+    {"name": "arabic", "text": "مرحبا بالعالم", "parse_special": false, "expected_token_ids": [124122, 29825, 124671, 124476, 129634], "expected_decode_text": "مرحبا بالعالم", "oracle_origin": "llama-tokenize", "mode": "vocab_only_cpu"},
+    {"name": "emoji", "text": "🧪🚀✨", "parse_special": false, "expected_token_ids": [149958, 145836, 144232], "expected_decode_text": "🧪🚀✨", "oracle_origin": "llama-tokenize", "mode": "vocab_only_cpu"},
+    {"name": "mixed", "text": "東京 🧪 naïve", "parse_special": false, "expected_token_ids": [102356, 46553, 11162, 100, 103, 94880, 586], "expected_decode_text": "東京 🧪 naïve", "oracle_origin": "llama-tokenize", "mode": "vocab_only_cpu"}
+  ],
+  "chat_cases": [
+    {"name": "system-user-generation", "messages": [{"role": "system", "content": "Responde en español."}, {"role": "user", "content": "¿Qué significa café ☕?"}], "add_generation_prompt": true, "expected_text": "<|im_start|>system\nResponde en español.<|im_end|>\n<|im_start|>user\n¿Qué significa café ☕?<|im_end|>\n<|im_start|>assistant\n", "expected_token_ids": [151644, 8948, 198, 1061, 75049, 662, 69888, 13, 151645, 198, 151644, 872, 198, 30182, 65706, 67732, 51950, 25125, 243, 30, 151645, 198, 151644, 77091, 198], "oracle_origin": "llama_chat_apply_template", "mode": "vocab_only_cpu"},
+    {"name": "user-assistant-no-generation", "messages": [{"role": "user", "content": "Hola 🌍"}, {"role": "assistant", "content": "¡Hola!"}], "add_generation_prompt": false, "expected_text": "<|im_start|>user\nHola 🌍<|im_end|>\n<|im_start|>assistant\n¡Hola!<|im_end|>\n", "expected_token_ids": [151644, 872, 198, 68012, 11162, 234, 235, 151645, 198, 151644, 77091, 198, 39832, 68012, 0, 151645, 198], "oracle_origin": "llama_chat_apply_template", "mode": "vocab_only_cpu"}
+  ],
+  "greedy_cases": [
+    {"name": "token-42", "prompt_token_ids": [42], "generation_steps": 2, "expected_llama_f16_tokens": [1124, 50853], "expected_llama_q8_0_tokens": [1124, 50853], "expected_qx_tokens": [1124, 50853], "oracle_origin": "llama_sequence_oracle", "mode": "llama.cpp:f16_cpu+q8_0_cpu vs qx:int8_kv+f32_activation_cpu"},
+    {"name": "token-56", "prompt_token_ids": [56], "generation_steps": 2, "expected_llama_f16_tokens": [1124, 8], "expected_llama_q8_0_tokens": [1124, 8], "expected_qx_tokens": [1124, 8], "oracle_origin": "llama_sequence_oracle", "mode": "llama.cpp:f16_cpu+q8_0_cpu vs qx:int8_kv+f32_activation_cpu"},
+    {"name": "token-1000", "prompt_token_ids": [1000], "generation_steps": 2, "expected_llama_f16_tokens": [1124, 67075], "expected_llama_q8_0_tokens": [1124, 67075], "expected_qx_tokens": [1124, 67075], "oracle_origin": "llama_sequence_oracle", "mode": "llama.cpp:f16_cpu+q8_0_cpu vs qx:int8_kv+f32_activation_cpu"}
+  ],
+  "claims": {
+    "tokenizer_parity": "case_local",
+    "chat_template_render": "case_local",
+    "greedy_sequence": "case_and_modality_local",
+    "logit_parity": "not_claimed",
+    "semantic_equivalence": "not_claimed",
+    "global_modality_equivalence": "not_claimed"
+  }
+}

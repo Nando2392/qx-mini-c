@@ -20,6 +20,7 @@ confidence: high
 - [[final-output-head]] completo: final RMSNorm, 151936 logits Q6_K, top-N y argmax.
 - [[autoregressive-loop]] greedy multi-token: re-embedding, posición y KV persistente por layer.
 - [[qwen3-tokenizer]] QXT2: paridad exacta para prompts fijos y prefill desde texto.
+- Issue #22 en validación: matriz separada de Unicode, render Qwen3 chat-template y secuencias greedy para prompts múltiples; no implica paridad global de logits/modelo.
 - [[accumulated-kv-snapshot-replay]] fail-closed: captura/restaura K/V y escalas por layer/posición, con token de continuación y manifiesto SHA-256.
 - Hardening QXF fail-closed: manifest, ABI, directorio, dims, nombres, placement, overflow y filas exactas.
 - Golden independientes para embedding, IQ4_XS y expertos IQ2_XS/IQ3_XXS/IQ2_S representativos.
@@ -86,12 +87,11 @@ La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coinc
 
 ## Después
 
-1. Publicar y cerrar [[accumulated-kv-multi-token-perturbation-matrix]] tras digest, revisiones y CI.
-2. Ampliar tokenizer y matriz greedy a cobertura Unicode/chat-template y prompts múltiples.
-3. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
-4. Medir baseline de inferencia real.
-5. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
-6. Gates 4K, RSS, calidad KV y 8 h.
+1. Completar Issue #22 (Unicode/chat-template/prompts múltiples) tras digest, revisiones y CI.
+2. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
+3. Medir baseline de inferencia real.
+4. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
+5. Gates 4K, RSS, calidad KV y 8 h.
 
 ## Riesgos
 

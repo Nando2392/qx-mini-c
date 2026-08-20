@@ -11,6 +11,14 @@ extern "C" {
 #define QX_TOKENIZER_MAX_ITEMS 1000000u
 #define QX_TOKENIZER_MAX_PAYLOAD (256u * 1024u * 1024u)
 #define QX_TOKENIZER_MAX_INPUT 4096u
+#define QX_CHAT_MAX_MESSAGES 64u
+#define QX_CHAT_MAX_OUTPUT (64u * 1024u)
+
+typedef struct qx_chat_message {
+    const char *role;
+    const unsigned char *content;
+    uint32_t content_length;
+} qx_chat_message;
 
 typedef struct qx_token_entry {
     const unsigned char *text;
@@ -61,6 +69,15 @@ int qx_tokenizer_decode(
     const uint32_t *token_ids,
     uint32_t token_count,
     int render_special,
+    unsigned char *output,
+    uint32_t output_capacity,
+    uint32_t *output_length,
+    char *err,
+    uint64_t err_len);
+int qx_tokenizer_render_qwen3_chat(
+    const qx_chat_message *messages,
+    uint32_t message_count,
+    int add_generation_prompt,
     unsigned char *output,
     uint32_t output_capacity,
     uint32_t *output_length,
