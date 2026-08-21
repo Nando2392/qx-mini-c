@@ -6,7 +6,34 @@
 #include <string.h>
 #include <time.h>
 
+#if defined(_WIN32)
+#include <io.h>
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
+
 #include "qx_iq2xs_tables.inc"
+
+static qx_io_backend qx_requested_io_backend = QX_IO_BUFFERED;
+static void qx_set_err(char *err, uint64_t err_len, const char *msg);
+
+int qx_set_io_backend(const char *backend, char *err, uint64_t err_len) {
+    if (!backend || strcmp(backend, "buffered") == 0) {
+        qx_requested_io_backend = QX_IO_BUFFERED;
+        return 1;
+    }
+    if (strcmp(backend, "mmap") == 0) {
+        qx_requested_io_backend = QX_IO_MMAP;
+        return 1;
+    }
+    qx_set_err(err, err_len, "invalid QXF I/O backend");
+    return 0;
+}
+
+const char *qx_io_backend_name(qx_io_backend backend) {
+    return backend == QX_IO_MMAP ? "mmap" : "buffered";
+}
 
 static void qx_set_err(char *err, uint64_t err_len, const char *msg) {
     if (err && err_len > 0) {
@@ -633,14 +660,87 @@ int qx_open_file(const char *path, qx_file *out, char *err, uint64_t err_len) {
         }
         free(spans);
     }
+    out->io_backend = qx_requested_io_backend;
+    if (out->io_backend == QX_IO_MMAP) {
+        if (out->header.file_size > (uint64_t)SIZE_MAX ||
+                out->header.file_size > (uint64_t)PTRDIFF_MAX) {
+            qx_set_err(err, err_len, "QXF file too large to map"); qx_close_file(out); return 0;
+        }
+#if defined(_WIN32)
+        intptr_t native_file = _get_osfhandle(_fileno(out->fp));
+        if (native_file == -1) {
+            qx_set_err(err, err_len, "cannot obtain QXF file handle for mapping"); qx_close_file(out); return 0;
+        }
+        HANDLE mapping = CreateFileMappingW((HANDLE)native_file, NULL, PAGE_READONLY, 0, 0, NULL);
+        if (!mapping) {
+            qx_set_err(err, err_len, "QXF file mapping failed"); qx_close_file(out); return 0;
+        }
+        out->mapping_handle = mapping;
+        out->mapped_view = (const unsigned char *)MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+        if (!out->mapped_view) {
+            qx_set_err(err, err_len, "QXF mapped view failed"); qx_close_file(out); return 0;
+        }
+#else
+        void *view = mmap(NULL, (size_t)out->header.file_size, PROT_READ, MAP_PRIVATE, fileno(out->fp), 0);
+        if (view == MAP_FAILED) {
+            qx_set_err(err, err_len, "QXF file mapping failed"); qx_close_file(out); return 0;
+        }
+        out->mapped_view = (const unsigned char *)view;
+#endif
+    }
     return 1;
 }
 
 void qx_close_file(qx_file *file) {
     if (!file) return;
+#if defined(_WIN32)
+    if (file->mapped_view) UnmapViewOfFile(file->mapped_view);
+    if (file->mapping_handle) CloseHandle((HANDLE)file->mapping_handle);
+#else
+    if (file->mapped_view && file->header.file_size <= (uint64_t)SIZE_MAX) {
+        munmap((void *)file->mapped_view, (size_t)file->header.file_size);
+    }
+#endif
     if (file->fp) fclose(file->fp);
     free(file->directory);
     memset(file, 0, sizeof(*file));
+}
+
+int qx_acquire_span(qx_file *file, uint64_t offset, uint64_t size, qx_span *out, char *err, uint64_t err_len) {
+    if (!file || !file->fp || !out) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    memset(out, 0, sizeof(*out));
+    if (size == 0) { qx_set_err(err, err_len, "empty QXF span"); return 0; }
+    if (offset > file->header.file_size || size > file->header.file_size - offset) {
+        qx_set_err(err, err_len, "QXF span outside file"); return 0;
+    }
+    if (file->io_backend == QX_IO_MMAP) {
+        if (!file->mapped_view) { qx_set_err(err, err_len, "QXF mapped view unavailable"); return 0; }
+        out->data = file->mapped_view + offset;
+        out->size = size;
+        return 1;
+    }
+    if (size > (uint64_t)SIZE_MAX) { qx_set_err(err, err_len, "QXF span too large"); return 0; }
+    out->owned_data = (unsigned char *)malloc((size_t)size);
+    if (!out->owned_data) { qx_set_err(err, err_len, "out of memory"); return 0; }
+#if defined(_WIN32)
+    if (_fseeki64(file->fp, (int64_t)offset, SEEK_SET) != 0) {
+#else
+    if (fseeko(file->fp, (off_t)offset, SEEK_SET) != 0) {
+#endif
+        qx_release_span(out); qx_set_err(err, err_len, "seek failed"); return 0;
+    }
+    if (fread(out->owned_data, 1, (size_t)size, file->fp) != (size_t)size) {
+        qx_release_span(out); qx_set_err(err, err_len, "short read"); return 0;
+    }
+    out->data = out->owned_data;
+    out->size = size;
+    return 1;
+}
+
+void qx_release_span(qx_span *span) {
+    if (!span) return;
+    free(span->owned_data);
+    memset(span, 0, sizeof(*span));
 }
 
 const qx_tensor_dir_entry *qx_find_tensor(const qx_file *file, const char *name) {
@@ -655,6 +755,14 @@ int qx_verify_tensor_checksum(qx_file *file, const qx_tensor_dir_entry *tensor, 
     if (!file || !file->fp || !tensor) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (tensor->offset > file->header.file_size || tensor->byte_size > file->header.file_size - tensor->offset) {
         qx_set_err(err, err_len, "tensor range outside file"); return 0;
+    }
+    if (file->io_backend == QX_IO_MMAP) {
+        qx_span span;
+        if (!qx_acquire_span(file, tensor->offset, tensor->byte_size, &span, err, err_len)) return 0;
+        uint64_t h = qx_fnv1a64(span.data, span.size);
+        qx_release_span(&span);
+        if (h != tensor->checksum) { qx_set_err(err, err_len, "tensor checksum mismatch"); return 0; }
+        return 1;
     }
     unsigned char *buf = (unsigned char *)malloc(64 * 1024);
     if (!buf) { qx_set_err(err, err_len, "out of memory"); return 0; }
@@ -696,6 +804,7 @@ int qx_dump_tensor_summary(const char *path, const char *name, FILE *out, char *
     fprintf(out, "],\n");
     fprintf(out, "  \"offset\": %llu,\n", (unsigned long long)t->offset);
     fprintf(out, "  \"byte_size\": %llu,\n", (unsigned long long)t->byte_size);
+    fprintf(out, "  \"io_backend\": \"%s\",\n", qx_io_backend_name(file.io_backend));
     fprintf(out, "  \"checksum\": %llu\n", (unsigned long long)t->checksum);
     fprintf(out, "}\n");
     qx_close_file(&file);
@@ -1497,34 +1606,29 @@ static uint64_t qx_quant_probe_block_size(const qx_tensor_dir_entry *t) {
 }
 
 static int qx_read_raw_span(qx_file *file, uint64_t offset, uint64_t size, unsigned char **data, char *err, uint64_t err_len) {
-    unsigned char *buf = (unsigned char *)malloc((size_t)size);
-    if (!buf) { qx_set_err(err, err_len, "out of memory"); return 0; }
-#if defined(_WIN32)
-    if (_fseeki64(file->fp, (int64_t)offset, SEEK_SET) != 0) {
-#else
-    if (fseeko(file->fp, (off_t)offset, SEEK_SET) != 0) {
-#endif
-        free(buf); qx_set_err(err, err_len, "seek failed"); return 0;
+    if (!data) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    *data = NULL;
+    qx_span span;
+    if (!qx_acquire_span(file, offset, size, &span, err, err_len)) return 0;
+    if (span.owned_data) {
+        *data = span.owned_data;
+        span.owned_data = NULL;
+    } else {
+        if (size > (uint64_t)SIZE_MAX) { qx_release_span(&span); qx_set_err(err, err_len, "QXF span too large"); return 0; }
+        *data = (unsigned char *)malloc((size_t)size);
+        if (!*data) { qx_release_span(&span); qx_set_err(err, err_len, "out of memory"); return 0; }
+        memcpy(*data, span.data, (size_t)size);
     }
-    if (fread(buf, 1, (size_t)size, file->fp) != (size_t)size) {
-        free(buf); qx_set_err(err, err_len, "short read"); return 0;
-    }
-    *data = buf;
+    qx_release_span(&span);
     return 1;
 }
 
 static int qx_read_raw_span_into(qx_file *file, uint64_t offset, uint64_t size, unsigned char *buf, char *err, uint64_t err_len) {
-    if (!file || !buf) { qx_set_err(err, err_len, "invalid argument"); return 0; }
-#if defined(_WIN32)
-    if (_fseeki64(file->fp, (int64_t)offset, SEEK_SET) != 0) {
-#else
-    if (fseeko(file->fp, (off_t)offset, SEEK_SET) != 0) {
-#endif
-        qx_set_err(err, err_len, "seek failed"); return 0;
-    }
-    if (fread(buf, 1, (size_t)size, file->fp) != (size_t)size) {
-        qx_set_err(err, err_len, "short read"); return 0;
-    }
+    if (!buf) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    qx_span span;
+    if (!qx_acquire_span(file, offset, size, &span, err, err_len)) return 0;
+    memcpy(buf, span.data, (size_t)size);
+    qx_release_span(&span);
     return 1;
 }
 
@@ -3702,8 +3806,12 @@ static int qx_projection_matvec_fill_mode(qx_file *file, const qx_tensor_dir_ent
     uint64_t window_capacity = rows < 16u ? rows : 16u;
     if (window_capacity > output_rows) window_capacity = output_rows;
     if (window_capacity == 0) window_capacity = 1;
-    unsigned char *window = (unsigned char *)malloc((size_t)(window_capacity * row_bytes));
-    if (!window) { qx_set_err(err, err_len, "out of memory"); return 0; }
+    unsigned char *window = NULL;
+    if (file->io_backend == QX_IO_BUFFERED) {
+        window = (unsigned char *)malloc((size_t)(window_capacity * row_bytes));
+        if (!window) { qx_set_err(err, err_len, "out of memory"); return 0; }
+    }
+    qx_span mapped_window = {0};
     uint64_t window_start = UINT64_MAX;
     uint64_t window_count = 0;
     for (uint32_t r = 0; r < rows; ++r) {
@@ -3718,9 +3826,15 @@ static int qx_projection_matvec_fill_mode(qx_file *file, const qx_tensor_dir_ent
             window_start = r;
             window_count = output_rows - r;
             if (window_count > window_capacity) window_count = window_capacity;
-            if (!qx_read_raw_span_into(file, t->offset + window_start * row_bytes, window_count * row_bytes, window, err, err_len)) { free(window); return 0; }
+            uint64_t window_offset = t->offset + window_start * row_bytes;
+            uint64_t window_bytes = window_count * row_bytes;
+            if (file->io_backend == QX_IO_MMAP) {
+                qx_release_span(&mapped_window);
+                if (!qx_acquire_span(file, window_offset, window_bytes, &mapped_window, err, err_len)) { free(window); return 0; }
+            } else if (!qx_read_raw_span_into(file, window_offset, window_bytes, window, err, err_len)) { free(window); return 0; }
         }
-        const unsigned char *row_raw = window + ((uint64_t)r - window_start) * row_bytes;
+        const unsigned char *window_data = file->io_backend == QX_IO_MMAP ? mapped_window.data : window;
+        const unsigned char *row_raw = window_data + ((uint64_t)r - window_start) * row_bytes;
         if (q8_k_projection) {
             dot = t->flags == 13u ? (double)qx_dot_q5_k_q8_k(row_raw, workspace) :
                   t->flags == 14u ? (double)qx_dot_q6_k_q8_k(row_raw, workspace) :
@@ -3737,7 +3851,7 @@ static int qx_projection_matvec_fill_mode(qx_file *file, const qx_tensor_dir_ent
                 dot += qx_dot_iq4_xs_prefix(raw, take, segment, take, &st);
             } else {
                 float vals[256];
-                if (!qx_decode_supported_block(t->flags, raw, vals)) { free(window); qx_set_err(err, err_len, "projection block decode failed"); return 0; }
+                if (!qx_decode_supported_block(t->flags, raw, vals)) { qx_release_span(&mapped_window); free(window); qx_set_err(err, err_len, "projection block decode failed"); return 0; }
                 for (uint32_t d = 0; d < take; ++d) {
                     double x = (residual && residual_n) ? (double)residual[(consumed + d) % residual_n] : (double)qx_deterministic_input(&st);
                     dot += (double)vals[d] * x;
@@ -3754,6 +3868,7 @@ qx_projection_store_row:
         buf[r] = (unsigned char)(q & 0xff);
         probe += dot;
     }
+    qx_release_span(&mapped_window);
     free(window);
     if (probe_out) *probe_out = probe;
     if (values_out) *values_out = rows;
@@ -5589,6 +5704,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"position_base\": %u,\n", position_base);
     fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
     fprintf(out, "  \"activation_format\": \"%s\",\n", activation_format);
+    fprintf(out, "  \"io_backend\": \"%s\",\n", qx_io_backend_name(file.io_backend));
     fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
     fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
     fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);

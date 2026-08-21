@@ -81,10 +81,24 @@ typedef struct qx_tensor_dir_entry {
     uint8_t reserved[32];
 } qx_tensor_dir_entry;
 
+typedef enum qx_io_backend {
+    QX_IO_BUFFERED = 0,
+    QX_IO_MMAP = 1
+} qx_io_backend;
+
+typedef struct qx_span {
+    const unsigned char *data;
+    unsigned char *owned_data;
+    uint64_t size;
+} qx_span;
+
 typedef struct qx_file {
     FILE *fp;
     qx_header header;
     qx_tensor_dir_entry *directory;
+    qx_io_backend io_backend;
+    const unsigned char *mapped_view;
+    void *mapping_handle;
 } qx_file;
 
 uint64_t qx_align_u64(uint64_t value, uint64_t alignment);
@@ -98,9 +112,13 @@ uint32_t qx_moe_tensor_count(uint32_t layers, uint32_t experts);
 int qx_write_metadata_only(const char *path, const qx_model_manifest *manifest, char *err, uint64_t err_len);
 int qx_write_tensor_copy_from_gguf(const char *out_path, const char *gguf_path, const qx_model_manifest *manifest, const qx_gguf_tensor_table *table, char *err, uint64_t err_len);
 int qx_read_header(FILE *f, qx_header *out, char *err, uint64_t err_len);
+int qx_set_io_backend(const char *backend, char *err, uint64_t err_len);
+const char *qx_io_backend_name(qx_io_backend backend);
 int qx_dump_summary(const char *path, FILE *out, char *err, uint64_t err_len);
 int qx_open_file(const char *path, qx_file *out, char *err, uint64_t err_len);
 void qx_close_file(qx_file *file);
+int qx_acquire_span(qx_file *file, uint64_t offset, uint64_t size, qx_span *out, char *err, uint64_t err_len);
+void qx_release_span(qx_span *span);
 const qx_tensor_dir_entry *qx_find_tensor(const qx_file *file, const char *name);
 int qx_verify_tensor_checksum(qx_file *file, const qx_tensor_dir_entry *tensor, char *err, uint64_t err_len);
 int qx_dump_tensor_summary(const char *path, const char *name, FILE *out, char *err, uint64_t err_len);

@@ -41,6 +41,7 @@
 - [[performance-model]] — bytes activos, techo físico y mediciones reales.
 - [[optimization-priorities]] — orden de optimización CPU/CUDA.
 - [[cpu-inference-baseline]] — baseline A/B fail-closed con startup, prefill, decode, total, RSS y outputs por modo.
+- [[qxf-mmap-io]] — backend QXF read-only opt-in y gate buffered/mmap 2x2.
 
 ## Estado
 

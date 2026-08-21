@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import math
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -14,7 +16,10 @@ PERF = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PERF)
 
 
-def native_payload(*, activation: str, selected: tuple[int, ...], checksum_bias: int = 0) -> dict:
+def native_payload(
+    *, activation: str, selected: tuple[int, ...], checksum_bias: int = 0,
+    io_backend: str = "buffered",
+) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
         {
@@ -48,6 +53,7 @@ def native_payload(*, activation: str, selected: tuple[int, ...], checksum_bias:
         "ctx_tokens": 16,
         "kv_format": "int8",
         "activation_format": activation,
+        "io_backend": io_backend,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -77,11 +83,28 @@ def test_summarize_is_fail_closed_and_reports_dispersion():
         "median": 2.0,
         "max": 3.0,
         "mad": 1.0,
+        "stdev": 1.0,
         "pstdev": pytest.approx(math.sqrt(2.0 / 3.0)),
     }
     for invalid in ([], [0.0, 1.0, 2.0], [1.0, float("nan"), 2.0]):
         with pytest.raises(ValueError):
             PERF.summarize(invalid)
+
+
+def test_source_state_records_dirty_diff_digest(monkeypatch):
+    revision = "a" * 40
+    diff = b"binary diff\x00payload"
+    results = iter([
+        SimpleNamespace(stdout=revision + "\n"),
+        SimpleNamespace(stdout=diff),
+    ])
+    monkeypatch.setattr(PERF.subprocess, "run", lambda *args, **kwargs: next(results))
+
+    assert PERF.source_state() == {
+        "revision": revision,
+        "working_tree_dirty": True,
+        "working_tree_diff_sha256": hashlib.sha256(diff).hexdigest(),
+    }
 
 
 def test_extract_output_signature_requires_complete_final_head_evidence():
@@ -102,6 +125,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
     signature = PERF.validate_native_payload(
         payload,
         activation="q8_k_compat",
+        io_backend="buffered",
         kv="int8",
         layers=48,
         ctx=16,
@@ -114,6 +138,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
         PERF.validate_native_payload(
             payload,
             activation="q8_k_compat",
+            io_backend="buffered",
             kv="int8",
             layers=48,
             ctx=16,
@@ -126,6 +151,20 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
         PERF.validate_native_payload(
             wrong_prefill,
             activation="q8_k_compat",
+            io_backend="buffered",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+    wrong_backend = native_payload(activation="q8_k_compat", selected=(358, 1184))
+    wrong_backend["io_backend"] = "mmap"
+    with pytest.raises(ValueError, match="io_backend"):
+        PERF.validate_native_payload(
+            wrong_backend,
+            activation="q8_k_compat",
+            io_backend="buffered",
             kv="int8",
             layers=48,
             ctx=16,
@@ -138,6 +177,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
         PERF.validate_native_payload(
             missing_selected,
             activation="q8_k_compat",
+            io_backend="buffered",
             kv="int8",
             layers=48,
             ctx=16,
@@ -145,28 +185,33 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
         )
 
 
-def test_output_gate_allows_documented_cross_mode_drift_but_requires_per_mode_determinism():
+def test_output_gate_requires_buffered_mmap_equivalence_within_each_activation():
     f32 = PERF.extract_output_signature(native_payload(activation="f32", selected=(358, 1184)))
+    f32_mmap = PERF.extract_output_signature(
+        native_payload(activation="f32", selected=(358, 1184), io_backend="mmap")
+    )
     q8k = PERF.extract_output_signature(
         native_payload(activation="q8_k_compat", selected=(358, 1184), checksum_bias=10)
     )
-    gate = PERF.validate_output_contract({"f32": [f32, f32], "q8_k_compat": [q8k, q8k]})
+    q8k_mmap = PERF.extract_output_signature(
+        native_payload(activation="q8_k_compat", selected=(358, 1184), checksum_bias=10, io_backend="mmap")
+    )
+    cells = {
+        "buffered:f32": [f32, f32], "mmap:f32": [f32_mmap, f32_mmap],
+        "buffered:q8_k_compat": [q8k, q8k], "mmap:q8_k_compat": [q8k_mmap, q8k_mmap],
+    }
+    gate = PERF.validate_output_contract(cells)
     assert gate["status"] == "pass"
-    assert gate["selected_tokens"] == [358, 1184]
-    assert gate["numeric_checksums_equal_across_modes"] is False
+    assert gate["io_equivalence"] == {"f32": True, "q8_k_compat": True}
+    assert gate["activation_numeric_checksums_equal"] is False
 
     changed = PERF.extract_output_signature(
         native_payload(activation="q8_k_compat", selected=(358, 999), checksum_bias=20)
     )
-    cross_mode = PERF.validate_output_contract({"f32": [f32], "q8_k_compat": [changed]})
-    assert cross_mode["selected_tokens_equal_across_modes"] is False
-    assert cross_mode["selected_tokens_by_mode"] == {
-        "f32": [358, 1184],
-        "q8_k_compat": [358, 999],
-    }
-
     with pytest.raises(ValueError, match="not deterministic"):
-        PERF.validate_output_contract({"f32": [f32], "q8_k_compat": [q8k, changed]})
+        PERF.validate_output_contract({**cells, "buffered:q8_k_compat": [q8k, changed]})
+    with pytest.raises(ValueError, match="buffered/mmap output mismatch"):
+        PERF.validate_output_contract({**cells, "mmap:f32": [changed]})
 
 
 def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path):
@@ -181,12 +226,14 @@ def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path)
         ctx=16,
         generation_steps=2,
         seed=7,
+        io_backend="mmap",
     )
     assert command[1] == "prompt-state-loop-probe"
     assert "--full-moe" in command
     assert "--final-head" in command
     assert "--bench" in command
     assert command[command.index("--temperature") + 1] == "0"
+    assert command[command.index("--io-backend") + 1] == "mmap"
 
 
 def test_build_artifact_provenance_pins_source_model_and_runtime_inputs(tmp_path):

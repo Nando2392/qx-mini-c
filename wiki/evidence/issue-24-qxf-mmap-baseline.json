@@ -1,0 +1,1150 @@
+{
+  "cells": [
+    {
+      "activation_format": "f32",
+      "command": [
+        "build-wsl/qxqxf",
+        "prompt-state-loop-probe",
+        "--in",
+        "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models/Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests/fixtures/q8k_perf_prompt.txt",
+        "--generate",
+        "2",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "f32",
+        "--io-backend",
+        "buffered",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "buffered",
+      "measured": [
+        {
+          "decode_latency_seconds": 15.363761,
+          "decode_tokens_per_second": 0.130176459,
+          "native_process_seconds": 22.203715,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011,
+              9949925874261891909
+            ],
+            "final_residual_checksums": [
+              11401753417758216440,
+              8398350083457453084
+            ],
+            "final_token": 1184,
+            "k_cache_checksum": 5755984095027971439,
+            "logits_checksums": [
+              13347842135191822952,
+              6249376751730758761
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              1184
+            ],
+            "v_cache_checksum": 4182780466438449951
+          },
+          "peak_rss_bytes": 16977920,
+          "prefill_latency_seconds": 6.83995,
+          "prefill_tokens_per_second": 0.146199899,
+          "total_latency_seconds": 55.26267462999999
+        },
+        {
+          "decode_latency_seconds": 15.191619,
+          "decode_tokens_per_second": 0.131651538,
+          "native_process_seconds": 22.003472,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011,
+              9949925874261891909
+            ],
+            "final_residual_checksums": [
+              11401753417758216440,
+              8398350083457453084
+            ],
+            "final_token": 1184,
+            "k_cache_checksum": 5755984095027971439,
+            "logits_checksums": [
+              13347842135191822952,
+              6249376751730758761
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              1184
+            ],
+            "v_cache_checksum": 4182780466438449951
+          },
+          "peak_rss_bytes": 18661376,
+          "prefill_latency_seconds": 6.811849,
+          "prefill_tokens_per_second": 0.146803019,
+          "total_latency_seconds": 64.46274106599992
+        },
+        {
+          "decode_latency_seconds": 15.174246,
+          "decode_tokens_per_second": 0.131802265,
+          "native_process_seconds": 22.091964,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011,
+              9949925874261891909
+            ],
+            "final_residual_checksums": [
+              11401753417758216440,
+              8398350083457453084
+            ],
+            "final_token": 1184,
+            "k_cache_checksum": 5755984095027971439,
+            "logits_checksums": [
+              13347842135191822952,
+              6249376751730758761
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              1184
+            ],
+            "v_cache_checksum": 4182780466438449951
+          },
+          "peak_rss_bytes": 18739200,
+          "prefill_latency_seconds": 6.917715,
+          "prefill_tokens_per_second": 0.144556403,
+          "total_latency_seconds": 73.849264135
+        }
+      ],
+      "summary": {
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.017372999999999195,
+          "max": 15.363761,
+          "median": 15.191619,
+          "min": 15.174246,
+          "pstdev": 0.08553792175144069,
+          "stdev": 0.10476213097457204
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0001507269999999894,
+          "max": 0.131802265,
+          "median": 0.131651538,
+          "min": 0.130176459,
+          "pstdev": 0.0007334713381059257,
+          "stdev": 0.0008983152596579587
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.08849200000000224,
+          "max": 22.203715,
+          "median": 22.091964,
+          "min": 22.003472,
+          "pstdev": 0.08193247837498072,
+          "stdev": 0.1003463826901599
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 77824.0,
+          "max": 18739200.0,
+          "median": 18661376.0,
+          "min": 16977920.0,
+          "pstdev": 812553.4455797696,
+          "stdev": 995170.6652053874
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.028101000000000376,
+          "max": 6.917715,
+          "median": 6.83995,
+          "min": 6.811849,
+          "pstdev": 0.04477681863295909,
+          "stdev": 0.05484017897794799
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0006031200000000125,
+          "max": 0.146803019,
+          "median": 0.146199899,
+          "min": 0.144556403,
+          "pstdev": 0.0009493925711780153,
+          "stdev": 0.0011627636824875485
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 9.20006643599993,
+          "max": 73.849264135,
+          "median": 64.46274106599992,
+          "min": 55.26267462999999,
+          "pstdev": 7.588070660795722,
+          "stdev": 9.293450625566546
+        }
+      },
+      "warmups": [
+        {
+          "decode_latency_seconds": 15.634574,
+          "decode_tokens_per_second": 0.127921618,
+          "native_process_seconds": 22.733239,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011,
+              9949925874261891909
+            ],
+            "final_residual_checksums": [
+              11401753417758216440,
+              8398350083457453084
+            ],
+            "final_token": 1184,
+            "k_cache_checksum": 5755984095027971439,
+            "logits_checksums": [
+              13347842135191822952,
+              6249376751730758761
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              1184
+            ],
+            "v_cache_checksum": 4182780466438449951
+          },
+          "peak_rss_bytes": 18698240,
+          "prefill_latency_seconds": 7.09866,
+          "prefill_tokens_per_second": 0.140871657,
+          "total_latency_seconds": 84.61204673099996
+        }
+      ]
+    },
+    {
+      "activation_format": "q8_k_compat",
+      "command": [
+        "build-wsl/qxqxf",
+        "prompt-state-loop-probe",
+        "--in",
+        "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models/Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests/fixtures/q8k_perf_prompt.txt",
+        "--generate",
+        "2",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "q8_k_compat",
+        "--io-backend",
+        "buffered",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "buffered",
+      "measured": [
+        {
+          "decode_latency_seconds": 5.636187,
+          "decode_tokens_per_second": 0.35484983,
+          "native_process_seconds": 7.88686,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368,
+              5386094919285711255
+            ],
+            "final_residual_checksums": [
+              16184155507198772844,
+              9272884777896558476
+            ],
+            "final_token": 614,
+            "k_cache_checksum": 4259133069431821824,
+            "logits_checksums": [
+              9727720709648537766,
+              11704086103802875876
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              614
+            ],
+            "v_cache_checksum": 14385669352106633183
+          },
+          "peak_rss_bytes": 16683008,
+          "prefill_latency_seconds": 2.250669,
+          "prefill_tokens_per_second": 0.444312336,
+          "total_latency_seconds": 35.461402053999905
+        },
+        {
+          "decode_latency_seconds": 5.917289,
+          "decode_tokens_per_second": 0.337992618,
+          "native_process_seconds": 8.192042,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368,
+              5386094919285711255
+            ],
+            "final_residual_checksums": [
+              16184155507198772844,
+              9272884777896558476
+            ],
+            "final_token": 614,
+            "k_cache_checksum": 4259133069431821824,
+            "logits_checksums": [
+              9727720709648537766,
+              11704086103802875876
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              614
+            ],
+            "v_cache_checksum": 14385669352106633183
+          },
+          "peak_rss_bytes": 16637952,
+          "prefill_latency_seconds": 2.274748,
+          "prefill_tokens_per_second": 0.439609135,
+          "total_latency_seconds": 33.360995968
+        },
+        {
+          "decode_latency_seconds": 5.564776,
+          "decode_tokens_per_second": 0.359403505,
+          "native_process_seconds": 7.923332,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368,
+              5386094919285711255
+            ],
+            "final_residual_checksums": [
+              16184155507198772844,
+              9272884777896558476
+            ],
+            "final_token": 614,
+            "k_cache_checksum": 4259133069431821824,
+            "logits_checksums": [
+              9727720709648537766,
+              11704086103802875876
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              614
+            ],
+            "v_cache_checksum": 14385669352106633183
+          },
+          "peak_rss_bytes": 17977344,
+          "prefill_latency_seconds": 2.358551,
+          "prefill_tokens_per_second": 0.423989136,
+          "total_latency_seconds": 23.42889289300001
+        }
+      ],
+      "summary": {
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.07141099999999945,
+          "max": 5.917289,
+          "median": 5.636187,
+          "min": 5.564776,
+          "pstdev": 0.15216339189393321,
+          "stdev": 0.1863613338356432
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.004553675000000035,
+          "max": 0.359403505,
+          "median": 0.35484983,
+          "min": 0.337992618,
+          "pstdev": 0.009209461526937853,
+          "stdev": 0.011279240773395288
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.03647199999999984,
+          "max": 8.192042,
+          "median": 7.923332,
+          "min": 7.88686,
+          "pstdev": 0.13608466482630927,
+          "stdev": 0.16666899532106563
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 45056.0,
+          "max": 17977344.0,
+          "median": 16683008.0,
+          "min": 16637952.0,
+          "pstdev": 621048.0974123949,
+          "stdev": 760625.4721933347
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.024079000000000406,
+          "max": 2.358551,
+          "median": 2.274748,
+          "min": 2.250669,
+          "pstdev": 0.046237631347925495,
+          "stdev": 0.05662930185866672
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.00470320099999999,
+          "max": 0.444312336,
+          "median": 0.439609135,
+          "min": 0.423989136,
+          "pstdev": 0.008686751896783217,
+          "stdev": 0.010639054834636402
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 2.100406085999907,
+          "max": 35.461402053999905,
+          "median": 33.360995968,
+          "min": 23.42889289300001,
+          "pstdev": 5.247641310659654,
+          "stdev": 6.427021782133049
+        }
+      },
+      "warmups": [
+        {
+          "decode_latency_seconds": 5.770871,
+          "decode_tokens_per_second": 0.346568135,
+          "native_process_seconds": 8.07818,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368,
+              5386094919285711255
+            ],
+            "final_residual_checksums": [
+              16184155507198772844,
+              9272884777896558476
+            ],
+            "final_token": 614,
+            "k_cache_checksum": 4259133069431821824,
+            "logits_checksums": [
+              9727720709648537766,
+              11704086103802875876
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              614
+            ],
+            "v_cache_checksum": 14385669352106633183
+          },
+          "peak_rss_bytes": 16625664,
+          "prefill_latency_seconds": 2.307304,
+          "prefill_tokens_per_second": 0.433406261,
+          "total_latency_seconds": 56.05030758500004
+        }
+      ]
+    },
+    {
+      "activation_format": "f32",
+      "command": [
+        "build-wsl/qxqxf",
+        "prompt-state-loop-probe",
+        "--in",
+        "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models/Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests/fixtures/q8k_perf_prompt.txt",
+        "--generate",
+        "2",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "f32",
+        "--io-backend",
+        "mmap",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "mmap",
+      "measured": [
+        {
+          "decode_latency_seconds": 15.131581,
+          "decode_tokens_per_second": 0.132173895,
+          "native_process_seconds": 22.869038,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011,
+              9949925874261891909
+            ],
+            "final_residual_checksums": [
+              11401753417758216440,
+              8398350083457453084
+            ],
+            "final_token": 1184,
+            "k_cache_checksum": 5755984095027971439,
+            "logits_checksums": [
+              13347842135191822952,
+              6249376751730758761
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              1184
+            ],
+            "v_cache_checksum": 4182780466438449951
+          },
+          "peak_rss_bytes": 2362753024,
+          "prefill_latency_seconds": 7.737453,
+          "prefill_tokens_per_second": 0.129241496,
+          "total_latency_seconds": 30.328530147000038
+        },
+        {
+          "decode_latency_seconds": 15.225413,
+          "decode_tokens_per_second": 0.131359327,
+          "native_process_seconds": 22.90164,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011,
+              9949925874261891909
+            ],
+            "final_residual_checksums": [
+              11401753417758216440,
+              8398350083457453084
+            ],
+            "final_token": 1184,
+            "k_cache_checksum": 5755984095027971439,
+            "logits_checksums": [
+              13347842135191822952,
+              6249376751730758761
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              1184
+            ],
+            "v_cache_checksum": 4182780466438449951
+          },
+          "peak_rss_bytes": 2363555840,
+          "prefill_latency_seconds": 7.676223,
+          "prefill_tokens_per_second": 0.130272401,
+          "total_latency_seconds": 30.04045342400002
+        },
+        {
+          "decode_latency_seconds": 15.8299,
+          "decode_tokens_per_second": 0.126343186,
+          "native_process_seconds": 24.094346,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011,
+              9949925874261891909
+            ],
+            "final_residual_checksums": [
+              11401753417758216440,
+              8398350083457453084
+            ],
+            "final_token": 1184,
+            "k_cache_checksum": 5755984095027971439,
+            "logits_checksums": [
+              13347842135191822952,
+              6249376751730758761
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              1184
+            ],
+            "v_cache_checksum": 4182780466438449951
+          },
+          "peak_rss_bytes": 2366242816,
+          "prefill_latency_seconds": 8.264441,
+          "prefill_tokens_per_second": 0.121000319,
+          "total_latency_seconds": 32.982491505999974
+        }
+      ],
+      "summary": {
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.09383199999999903,
+          "max": 15.8299,
+          "median": 15.225413,
+          "min": 15.131581,
+          "pstdev": 0.30945443088585584,
+          "stdev": 0.37900272715685485
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0008145680000000155,
+          "max": 0.132173895,
+          "median": 0.131359327,
+          "min": 0.126343186,
+          "pstdev": 0.002578163838453558,
+          "stdev": 0.003157592938753248
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.032602000000000686,
+          "max": 24.094346,
+          "median": 22.90164,
+          "min": 22.869038,
+          "pstdev": 0.5700867563317795,
+          "stdev": 0.6982108310656134
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 802816.0,
+          "max": 2366242816.0,
+          "median": 2363555840.0,
+          "min": 2362753024.0,
+          "pstdev": 1492313.7053915828,
+          "stdev": 1827703.5571857197
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.06123000000000012,
+          "max": 8.264441,
+          "median": 7.737453,
+          "min": 7.676223,
+          "pstdev": 0.26404247986682383,
+          "stdev": 0.3233846730464094
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0010309049999999986,
+          "max": 0.130272401,
+          "median": 0.129241496,
+          "min": 0.121000319,
+          "pstdev": 0.0041493141076980496,
+          "stdev": 0.005081851173195953
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.2880767230000174,
+          "max": 32.982491505999974,
+          "median": 30.328530147000038,
+          "min": 30.04045342400002,
+          "pstdev": 1.3242225043539566,
+          "stdev": 1.6218347207888346
+        }
+      },
+      "warmups": [
+        {
+          "decode_latency_seconds": 14.910655,
+          "decode_tokens_per_second": 0.13413227,
+          "native_process_seconds": 22.394314,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011,
+              9949925874261891909
+            ],
+            "final_residual_checksums": [
+              11401753417758216440,
+              8398350083457453084
+            ],
+            "final_token": 1184,
+            "k_cache_checksum": 5755984095027971439,
+            "logits_checksums": [
+              13347842135191822952,
+              6249376751730758761
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              1184
+            ],
+            "v_cache_checksum": 4182780466438449951
+          },
+          "peak_rss_bytes": 2367328256,
+          "prefill_latency_seconds": 7.483653,
+          "prefill_tokens_per_second": 0.133624581,
+          "total_latency_seconds": 33.87887459500007
+        }
+      ]
+    },
+    {
+      "activation_format": "q8_k_compat",
+      "command": [
+        "build-wsl/qxqxf",
+        "prompt-state-loop-probe",
+        "--in",
+        "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models/Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests/fixtures/q8k_perf_prompt.txt",
+        "--generate",
+        "2",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "q8_k_compat",
+        "--io-backend",
+        "mmap",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "mmap",
+      "measured": [
+        {
+          "decode_latency_seconds": 5.885496,
+          "decode_tokens_per_second": 0.339818428,
+          "native_process_seconds": 8.946717,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368,
+              5386094919285711255
+            ],
+            "final_residual_checksums": [
+              16184155507198772844,
+              9272884777896558476
+            ],
+            "final_token": 614,
+            "k_cache_checksum": 4259133069431821824,
+            "logits_checksums": [
+              9727720709648537766,
+              11704086103802875876
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              614
+            ],
+            "v_cache_checksum": 14385669352106633183
+          },
+          "peak_rss_bytes": 2362990592,
+          "prefill_latency_seconds": 3.061216,
+          "prefill_tokens_per_second": 0.326667573,
+          "total_latency_seconds": 16.981383575999985
+        },
+        {
+          "decode_latency_seconds": 5.836115,
+          "decode_tokens_per_second": 0.342693727,
+          "native_process_seconds": 8.838414,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368,
+              5386094919285711255
+            ],
+            "final_residual_checksums": [
+              16184155507198772844,
+              9272884777896558476
+            ],
+            "final_token": 614,
+            "k_cache_checksum": 4259133069431821824,
+            "logits_checksums": [
+              9727720709648537766,
+              11704086103802875876
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              614
+            ],
+            "v_cache_checksum": 14385669352106633183
+          },
+          "peak_rss_bytes": 2363314176,
+          "prefill_latency_seconds": 3.002293,
+          "prefill_tokens_per_second": 0.33307875,
+          "total_latency_seconds": 16.516266388999952
+        },
+        {
+          "decode_latency_seconds": 6.10552,
+          "decode_tokens_per_second": 0.327572426,
+          "native_process_seconds": 9.132048,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368,
+              5386094919285711255
+            ],
+            "final_residual_checksums": [
+              16184155507198772844,
+              9272884777896558476
+            ],
+            "final_token": 614,
+            "k_cache_checksum": 4259133069431821824,
+            "logits_checksums": [
+              9727720709648537766,
+              11704086103802875876
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              614
+            ],
+            "v_cache_checksum": 14385669352106633183
+          },
+          "peak_rss_bytes": 2364215296,
+          "prefill_latency_seconds": 3.026524,
+          "prefill_tokens_per_second": 0.33041205,
+          "total_latency_seconds": 18.603070559999992
+        }
+      ],
+      "summary": {
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.04938099999999945,
+          "max": 6.10552,
+          "median": 5.885496,
+          "min": 5.836115,
+          "pstdev": 0.11710778404814377,
+          "stdev": 0.14342715791299782
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.002875298999999998,
+          "max": 0.342693727,
+          "median": 0.339818428,
+          "min": 0.327572426,
+          "pstdev": 0.00655646969078808,
+          "stdev": 0.008030002628227098
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.10830299999999937,
+          "max": 9.132048,
+          "median": 8.946717,
+          "min": 8.838414,
+          "pstdev": 0.12124266086654446,
+          "stdev": 0.14849132709017004
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 323584.0,
+          "max": 2364215296.0,
+          "median": 2363314176.0,
+          "min": 2362990592.0,
+          "pstdev": 518183.12368762714,
+          "stdev": 634642.1231780947
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.024231000000000336,
+          "max": 3.061216,
+          "median": 3.026524,
+          "min": 3.002293,
+          "pstdev": 0.024181251125613836,
+          "stdev": 0.029615863299927637
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0026666999999999663,
+          "max": 0.33307875,
+          "median": 0.33041205,
+          "min": 0.326667573,
+          "pstdev": 0.0026296511686461355,
+          "stdev": 0.003220651782348253
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.4651171870000326,
+          "max": 18.603070559999992,
+          "median": 16.981383575999985,
+          "min": 16.516266388999952,
+          "pstdev": 0.8944864647023283,
+          "stdev": 1.0955177101733702
+        }
+      },
+      "warmups": [
+        {
+          "decode_latency_seconds": 6.111621,
+          "decode_tokens_per_second": 0.327245423,
+          "native_process_seconds": 9.448325,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368,
+              5386094919285711255
+            ],
+            "final_residual_checksums": [
+              16184155507198772844,
+              9272884777896558476
+            ],
+            "final_token": 614,
+            "k_cache_checksum": 4259133069431821824,
+            "logits_checksums": [
+              9727720709648537766,
+              11704086103802875876
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358,
+              614
+            ],
+            "v_cache_checksum": 14385669352106633183
+          },
+          "peak_rss_bytes": 2363215872,
+          "prefill_latency_seconds": 3.336699,
+          "prefill_tokens_per_second": 0.299697396,
+          "total_latency_seconds": 18.486170850999997
+        }
+      ]
+    }
+  ],
+  "claim_scope": "Pinned CPU, model, QXF, tokenizer, prompt, revision and arguments only; not global throughput or model/logit parity.",
+  "comparisons": {
+    "f32": {
+      "decode_latency_seconds_speedup_buffered_over_mmap": 0.9977804214572045,
+      "peak_rss_median_delta_bytes_mmap_minus_buffered": 2344894464.0,
+      "prefill_latency_seconds_speedup_buffered_over_mmap": 0.8840053697256707,
+      "total_latency_seconds_speedup_buffered_over_mmap": 2.1254818731258656
+    },
+    "q8_k_compat": {
+      "decode_latency_seconds_speedup_buffered_over_mmap": 0.9576401037397697,
+      "peak_rss_median_delta_bytes_mmap_minus_buffered": 2346631168.0,
+      "prefill_latency_seconds_speedup_buffered_over_mmap": 0.7516041505040105,
+      "total_latency_seconds_speedup_buffered_over_mmap": 1.9645628884533022
+    }
+  },
+  "measurement": "qxf-io-backend-2x2-baseline",
+  "output_contract": {
+    "activation_numeric_checksums_equal": false,
+    "allowed_cross_activation_differences": [
+      "selected-token sequence because q8_k_compat is an opt-in numerical mode without global greedy parity",
+      "final residual, final norm, logits, and KV cache checksums"
+    ],
+    "io_equivalence": {
+      "f32": true,
+      "q8_k_compat": true
+    },
+    "prompt_token_ids": [
+      9707,
+      0
+    ],
+    "selected_tokens_by_mode": {
+      "f32": [
+        358,
+        1184
+      ],
+      "q8_k_compat": [
+        358,
+        614
+      ]
+    },
+    "selected_tokens_equal_across_activations": false,
+    "status": "pass"
+  },
+  "phase_definitions": {
+    "decode": "Native C clock() elapsed sum for generation positions including the complete final head and per-position JSON emission.",
+    "peak_rss": "Maximum process resident set sampled by psutil at 5 ms intervals.",
+    "prefill": "Native C clock() elapsed sum for fixed prompt positions before the first generation output, including per-position JSON emission.",
+    "startup_model_load": "Wall-clock qxqxf inspect process for the same QXF; reported separately and not subtracted from inference.",
+    "total": "Wall-clock prompt-state-loop process including tokenizer/model open, allocation, prefill, decode, JSON emission and teardown."
+  },
+  "provenance": {
+    "artifacts": {
+      "benchmark_script": {
+        "path": "/mnt/c/Users/fjmn2/Dev/qx-mini-c/scripts/q8k_perf_experiment.py",
+        "sha256": "c6adad9b7f441372febc5b7f79290f62fc016cd70ef00f7c500ba9ab56080b49",
+        "size": 25730
+      },
+      "model_qxf": {
+        "path": "/mnt/c/Users/fjmn2/Dev/qx-mini-c/models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+        "size": 10860081152
+      },
+      "prompt": {
+        "path": "/mnt/c/Users/fjmn2/Dev/qx-mini-c/tests/fixtures/q8k_perf_prompt.txt",
+        "sha256": "334d016f755cd6dc58c53a86e183882f8ec14f52fb05345887c8a5edd42c87b7",
+        "size": 6
+      },
+      "qx_exe": {
+        "path": "/mnt/c/Users/fjmn2/Dev/qx-mini-c/build-wsl/qxqxf",
+        "sha256": "b007e082901a5ebe02e43ea048f188c2f66b6aed3315b9352fc6f33df1565a7a",
+        "size": 371040
+      },
+      "source_model_gguf": {
+        "path": "/mnt/c/Users/fjmn2/Dev/qx-mini-c/models/Qwen3-30B-A3B-UD-IQ2_M.gguf",
+        "sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+        "size": 10865578560
+      },
+      "tokenizer_qxt": {
+        "path": "/mnt/c/Users/fjmn2/Dev/qx-mini-c/models/Qwen3-30B-A3B.qxt",
+        "sha256": "8ec26e5ae058b271c0e17ee28aea3cf4d2b9ae9a4cd8f68f7aac81e9380761c6",
+        "size": 5168466
+      }
+    },
+    "fixed_arguments": {
+      "activation_modes": [
+        "f32",
+        "q8_k_compat"
+      ],
+      "ctx": 16,
+      "generation_steps": 2,
+      "io_backends": [
+        "buffered",
+        "mmap"
+      ],
+      "kv": "int8",
+      "layers": 48,
+      "repetitions": 3,
+      "seed": 7,
+      "temperature": 0,
+      "warmups": 1
+    },
+    "platform": {
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "python": "3.12.3",
+      "release": "6.18.33.2-microsoft-standard-WSL2",
+      "system": "Linux"
+    },
+    "source_state": {
+      "revision": "0b749e3489faaae8cc988742bb5c487ebca3e4fc",
+      "working_tree_diff_sha256": "4b1959d056cff1c923d560ec82920d44df3ea3e710744d024e911744cff4edc7",
+      "working_tree_dirty": true
+    }
+  },
+  "schema": 3,
+  "startup_model_load": [
+    {
+      "command": [
+        "build-wsl/qxqxf",
+        "inspect-tensor",
+        "--in",
+        "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--name",
+        "token_embd.weight",
+        "--io-backend",
+        "buffered"
+      ],
+      "io_backend": "buffered",
+      "measured": [
+        0.006502113999999892,
+        0.007431563000011465,
+        0.011381931999949302
+      ],
+      "summary_seconds": {
+        "count": 3,
+        "mad": 0.0009294490000115729,
+        "max": 0.011381931999949302,
+        "median": 0.007431563000011465,
+        "min": 0.006502113999999892,
+        "pstdev": 0.0021156011594270743,
+        "stdev": 0.002591071669918409
+      },
+      "warmups": [
+        0.011562573000048815
+      ]
+    },
+    {
+      "command": [
+        "build-wsl/qxqxf",
+        "inspect-tensor",
+        "--in",
+        "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--name",
+        "token_embd.weight",
+        "--io-backend",
+        "mmap"
+      ],
+      "io_backend": "mmap",
+      "measured": [
+        0.006518585000037547,
+        0.006718202000001838,
+        0.0063878529999783495
+      ],
+      "summary_seconds": {
+        "count": 3,
+        "mad": 0.00013073200005919716,
+        "max": 0.006718202000001838,
+        "median": 0.006518585000037547,
+        "min": 0.0063878529999783495,
+        "pstdev": 0.0001358382470811602,
+        "stdev": 0.00016636719645147442
+      },
+      "warmups": [
+        0.006503046999966955
+      ]
+    }
+  ],
+  "status": "pass"
+}

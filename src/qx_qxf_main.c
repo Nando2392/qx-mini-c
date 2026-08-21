@@ -15,8 +15,8 @@ static void usage(const char *argv0) {
         "  %s inspect-gguf --in models/source.gguf\n"
         "  %s create-from-gguf --in source.gguf --model qwen3-30b-a3b --quant q2 --out model.qxf\n"
         "  %s create-from-gguf-copy --in source.gguf --model qwen3-30b-a3b --quant q2 --out model.qxf\n"
-        "  %s inspect-tensor --in model.qxf --name token_embd.weight\n"
-        "  %s verify-qxf --in model.qxf [--max 16]\n"
+        "  %s inspect-tensor --in model.qxf --name token_embd.weight [--io-backend buffered|mmap]\n"
+        "  %s verify-qxf --in model.qxf [--max 16] [--io-backend buffered|mmap]\n"
         "  %s expert-index --in model.qxf\n"
         "  %s expert-quant-coverage --in model.qxf\n"
         "  %s expert-plan --in model.qxf [--vram-gib 2.0] [--ram-gib 6.5]\n"
@@ -41,7 +41,7 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
         "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
-        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --temperature 0 --seed 7 --full-moe --final-head [--bench] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
+        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --temperature 0 --seed 7 --full-moe --final-head [--bench] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
         "  %s generate-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --top-k 5 --scan 64 --temperature 0 --seed 7\n"
         "  %s residual-vector-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --dims 64 --seed 7\n"
@@ -387,6 +387,7 @@ chat_fail:
         const char *text_path = NULL;
         const char *kv_format = "int8";
         const char *activation_format = "f32";
+        const char *io_backend = "buffered";
         const char *kv_snapshot_out_path = NULL;
         uint32_t generation_steps = 0u;
         uint32_t layers = 48u;
@@ -407,6 +408,7 @@ chat_fail:
             else if (strcmp(argv[i], "--ctx") == 0 && i + 1 < argc) ctx = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--kv") == 0 && i + 1 < argc) kv_format = argv[++i];
             else if (strcmp(argv[i], "--activation") == 0 && i + 1 < argc) activation_format = argv[++i];
+            else if (strcmp(argv[i], "--io-backend") == 0 && i + 1 < argc) io_backend = argv[++i];
             else if (strcmp(argv[i], "--temperature") == 0 && i + 1 < argc) temperature = strtod(argv[++i], NULL);
             else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) top_n = (uint32_t)strtoul(argv[++i], NULL, 10);
@@ -419,6 +421,9 @@ chat_fail:
         }
         if (!in_path || !tokenizer_path || !text_path || !full_moe || !final_head) { usage(argv[0]); return 2; }
         char err[256];
+        if (!qx_set_io_backend(io_backend, err, sizeof(err))) {
+            fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;
+        }
         unsigned char *input = NULL;
         uint32_t input_length = 0u;
         if (!qx_cli_read_prompt(text_path, &input, &input_length, err, sizeof(err))) {
@@ -563,13 +568,18 @@ chat_fail:
     if (strcmp(argv[1], "inspect-tensor") == 0) {
         const char *in_path = NULL;
         const char *name = NULL;
+        const char *io_backend = "buffered";
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
             else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) name = argv[++i];
+            else if (strcmp(argv[i], "--io-backend") == 0 && i + 1 < argc) io_backend = argv[++i];
             else { usage(argv[0]); return 2; }
         }
         if (!in_path || !name) { usage(argv[0]); return 2; }
         char err[256];
+        if (!qx_set_io_backend(io_backend, err, sizeof(err))) {
+            fprintf(stderr, "inspect-tensor failed: %s\n", err); return 2;
+        }
         if (!qx_dump_tensor_summary(in_path, name, stdout, err, sizeof(err))) {
             fprintf(stderr, "inspect-tensor failed: %s\n", err);
             return 1;
@@ -579,14 +589,19 @@ chat_fail:
 
     if (strcmp(argv[1], "verify-qxf") == 0) {
         const char *in_path = NULL;
+        const char *io_backend = "buffered";
         uint32_t max_tensors = 0;
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
             else if (strcmp(argv[i], "--max") == 0 && i + 1 < argc) max_tensors = (uint32_t)strtoul(argv[++i], NULL, 10);
+            else if (strcmp(argv[i], "--io-backend") == 0 && i + 1 < argc) io_backend = argv[++i];
             else { usage(argv[0]); return 2; }
         }
         if (!in_path) { usage(argv[0]); return 2; }
         char err[256];
+        if (!qx_set_io_backend(io_backend, err, sizeof(err))) {
+            fprintf(stderr, "verify-qxf failed: %s\n", err); return 2;
+        }
         if (!qx_verify_all_tensors(in_path, max_tensors, stdout, err, sizeof(err))) {
             fprintf(stderr, "verify-qxf failed: %s\n", err);
             return 1;

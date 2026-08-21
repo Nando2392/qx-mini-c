@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-08-20
+updated: 2026-08-21
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -56,6 +56,7 @@ clasificación acumulación/amplificación/modalidad: GREEN
 perturbación escalada layer 1: GREEN; respuesta no suave, top-8 estable, cruces de orden observados
 snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + replay 1
 baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
+QXF mmap read-only opt-in: GREEN local WSL2; gate 2x2 exacto por modalidad, buffered permanece default
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -86,6 +87,8 @@ El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en 
 `state-loop-probe --full-moe --final-head --steps 2` produce ahora `42 → 1124 → 50853`. El token `1124` se re-embebe en posición 1, cada una de las 48 capas atiende dos posiciones mediante KV INT8 persistente y ambos checksums de 151936 logits se validan con el helper Q6_K oficial.
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
+
+[[qxf-mmap-io]] añade un backend QXF read-only explícitamente opt-in sin alterar kernels. El gate 2×2 WSL2 preserva exactamente outputs buffered/mmap dentro de F32 y `q8_k_compat`; observa ratios de wall-clock total `1.25152×` y `1.41963×`, respectivamente, pero mmap añade ~`2.34 GB` de RSS y empeora prefill en este slice. Buffered sigue siendo default y la evidencia no autoriza inferencias de throughput global.
 
 ## Después
 

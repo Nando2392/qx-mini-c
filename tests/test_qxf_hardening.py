@@ -10,6 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 EXE = ROOT / "build" / "qxqxf.exe"
+MMAP_CONTRACT_EXE = ROOT / "build" / "qxf_mmap_api_contract.exe"
 MAKE_GGUF = ROOT / "scripts" / "make_synthetic_gguf.py"
 
 HEADER_SIZE = 272
@@ -52,6 +53,12 @@ def fnv1a64(data):
     return value
 
 
+def test_qxf_mmap_rejects_file_larger_than_address_space():
+    source = (ROOT / "src" / "qx_format.c").read_text(encoding="utf-8")
+    assert "QXF file too large to map" in source
+    assert "(uint64_t)PTRDIFF_MAX" in source
+
+
 def refresh_manifest_checksum(raw):
     checksum = fnv1a64(raw[MANIFEST_OFFSET:MANIFEST_OFFSET + MANIFEST_SIZE])
     struct.pack_into("<Q", raw, MANIFEST_CHECKSUM, checksum)
@@ -80,6 +87,73 @@ def run_inspect(path):
 
 def directory(raw):
     return struct.unpack_from("<Q", raw, HEADER_DIR_OFFSET)[0]
+
+
+def test_qxf_mmap_backend_opens_read_only_mapping(valid_qxf):
+    result = run_qxf(
+        valid_qxf,
+        "inspect-tensor",
+        "--name",
+        "token_embd.weight",
+        "--io-backend",
+        "mmap",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["io_backend"] == "mmap"
+
+
+def test_qxf_mmap_backend_reads_valid_tensor_span(valid_qxf):
+    buffered = run_qxf(valid_qxf, "verify-qxf", "--max", "1", "--io-backend", "buffered")
+    mapped = run_qxf(valid_qxf, "verify-qxf", "--max", "1", "--io-backend", "mmap")
+
+    assert buffered.returncode == 0, buffered.stderr
+    assert mapped.returncode == 0, mapped.stderr
+    assert json.loads(mapped.stdout) == json.loads(buffered.stdout)
+
+
+def test_qxf_mmap_backend_rejects_span_past_end_of_file(valid_qxf):
+    result = subprocess.run(
+        [str(MMAP_CONTRACT_EXE), str(valid_qxf), "bounds"],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"rejected": "bounds"}
+
+
+def test_qxf_mmap_backend_rejects_offset_size_overflow(valid_qxf):
+    result = subprocess.run(
+        [str(MMAP_CONTRACT_EXE), str(valid_qxf), "overflow"],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"rejected": "overflow"}
+
+
+def test_qxf_mmap_backend_rejects_empty_span(valid_qxf):
+    result = subprocess.run(
+        [str(MMAP_CONTRACT_EXE), str(valid_qxf), "empty"],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"rejected": "empty"}
+
+
+def test_qxf_mmap_backend_cleans_up_after_span_error(valid_qxf):
+    result = subprocess.run(
+        [str(MMAP_CONTRACT_EXE), str(valid_qxf), "cleanup"],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"cleanup": True}
 
 
 @pytest.mark.parametrize("case", ["dir_unaligned", "data_unaligned", "data_overlaps_directory"])

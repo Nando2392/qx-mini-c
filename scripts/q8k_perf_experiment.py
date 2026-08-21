@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""Fail-closed CPU inference A/B baseline for F32 vs Q8_K compatible.
+"""Fail-closed 2x2 CPU inference baseline for QXF I/O and activation modes.
 
 Measures:
 - startup/model-load wall latency
 - native prefill and decode latency/tokens per second
 - end-to-end wall latency and peak RSS
-- deterministic per-mode output signatures
+- deterministic per-cell output signatures and buffered/mmap equivalence
 
 Usage:
     python -m pip install -r scripts/requirements-q8k-perf.txt
@@ -15,7 +15,7 @@ Usage:
       --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf \
       --tokenizer models/Qwen3-30B-A3B.qxt \
       --prompt-file tests/fixtures/q8k_perf_prompt.txt \
-      --output wiki/evidence/issue-23-cpu-baseline.json \
+      --output wiki/evidence/issue-24-qxf-mmap-baseline.json \
       --kv int8 \
       --repetitions 5
 """
@@ -79,6 +79,7 @@ def summarize(values: list[float]) -> dict:
         "median": median,
         "max": max(values),
         "mad": statistics.median(deviations),
+        "stdev": statistics.stdev(values),
         "pstdev": statistics.pstdev(values),
     }
 
@@ -150,12 +151,13 @@ def extract_output_signature(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_native_payload(
-    payload: dict[str, Any], *, activation: str, kv: str, layers: int,
+    payload: dict[str, Any], *, activation: str, io_backend: str, kv: str, layers: int,
     ctx: int, generation_steps: int,
 ) -> dict[str, Any]:
     """Validate native timing, modality and output evidence fail-closed."""
     expected = {
         "probe": "state_loop", "activation_format": activation,
+        "io_backend": io_backend,
         "kv_format": kv, "layers": layers, "ctx_tokens": ctx,
         "generation_steps": generation_steps,
     }
@@ -209,18 +211,25 @@ def validate_native_payload(
 
 
 def validate_output_contract(signatures: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    """Require per-cell determinism and document bounded cross-mode drift."""
-    if set(signatures) != {"f32", "q8_k_compat"}:
-        raise ValueError("output evidence must contain exactly f32 and q8_k_compat")
+    """Require 2x2 determinism and exact buffered/mmap equality per activation."""
+    expected = {
+        "buffered:f32", "mmap:f32",
+        "buffered:q8_k_compat", "mmap:q8_k_compat",
+    }
+    if set(signatures) != expected:
+        raise ValueError("output evidence must contain the complete buffered/mmap activation matrix")
     canonical: dict[str, dict[str, Any]] = {}
-    for activation, items in signatures.items():
+    for cell, items in signatures.items():
         if not items:
-            raise ValueError(f"{activation} has no measured output signatures")
+            raise ValueError(f"{cell} has no measured output signatures")
         if any(item != items[0] for item in items[1:]):
-            raise ValueError(f"{activation} output is not deterministic across repetitions")
-        canonical[activation] = items[0]
-    f32 = canonical["f32"]
-    q8k = canonical["q8_k_compat"]
+            raise ValueError(f"{cell} output is not deterministic across repetitions")
+        canonical[cell] = items[0]
+    for activation in ("f32", "q8_k_compat"):
+        if canonical[f"buffered:{activation}"] != canonical[f"mmap:{activation}"]:
+            raise ValueError(f"buffered/mmap output mismatch for {activation}")
+    f32 = canonical["buffered:f32"]
+    q8k = canonical["buffered:q8_k_compat"]
     if f32["prompt_token_ids"] != q8k["prompt_token_ids"]:
         raise ValueError("prompt token IDs differ across activation modes")
     selected_equal = f32["selected_tokens"] == q8k["selected_tokens"]
@@ -231,15 +240,15 @@ def validate_output_contract(signatures: dict[str, list[dict[str, Any]]]) -> dic
     checksums_equal = all(f32[field] == q8k[field] for field in checksum_fields)
     return {
         "status": "pass",
+        "io_equivalence": {"f32": True, "q8_k_compat": True},
         "prompt_token_ids": f32["prompt_token_ids"],
-        "selected_tokens": f32["selected_tokens"] if selected_equal else None,
-        "selected_tokens_equal_across_modes": selected_equal,
+        "selected_tokens_equal_across_activations": selected_equal,
         "selected_tokens_by_mode": {
             "f32": f32["selected_tokens"],
             "q8_k_compat": q8k["selected_tokens"],
         },
-        "numeric_checksums_equal_across_modes": checksums_equal,
-        "allowed_cross_mode_differences": [
+        "activation_numeric_checksums_equal": checksums_equal,
+        "allowed_cross_activation_differences": [
             "selected-token sequence because q8_k_compat is an opt-in numerical mode without global greedy parity",
             "final residual, final norm, logits, and KV cache checksums",
         ],
@@ -249,7 +258,7 @@ def validate_output_contract(signatures: dict[str, list[dict[str, Any]]]) -> dic
 def build_inference_command(
     *, qx_exe: Path, model: Path, tokenizer: Path, prompt_file: Path,
     activation: str, kv: str, layers: int, ctx: int,
-    generation_steps: int, seed: int,
+    generation_steps: int, seed: int, io_backend: str,
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -257,6 +266,7 @@ def build_inference_command(
         "--tokenizer", str(tokenizer), "--text-file", str(prompt_file),
         "--generate", str(generation_steps), "--layers", str(layers),
         "--ctx", str(ctx), "--kv", kv, "--activation", activation,
+        "--io-backend", io_backend,
         "--temperature", "0", "--seed", str(seed), "--full-moe",
         "--final-head", "--bench",
     ]
@@ -288,7 +298,7 @@ def build_artifact_provenance(
     }
 
 
-def source_revision() -> str:
+def source_state() -> dict[str, Any]:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[1],
         text=True, capture_output=True, check=True,
@@ -296,16 +306,24 @@ def source_revision() -> str:
     revision = result.stdout.strip()
     if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
         raise ValueError("git revision is not a lowercase 40-character SHA-1")
-    return revision
+    diff = subprocess.run(
+        ["git", "diff", "--binary", "HEAD"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, check=True,
+    ).stdout
+    return {
+        "revision": revision,
+        "working_tree_dirty": bool(diff),
+        "working_tree_diff_sha256": hashlib.sha256(diff).hexdigest(),
+    }
 
 
 def compact_run(
-    raw: dict[str, Any], *, activation: str, kv: str, layers: int,
+    raw: dict[str, Any], *, activation: str, io_backend: str, kv: str, layers: int,
     ctx: int, generation_steps: int,
 ) -> dict[str, Any]:
     payload = _require_object(raw.get("payload"), "runtime payload")
     signature = validate_native_payload(
-        payload, activation=activation, kv=kv, layers=layers, ctx=ctx,
+        payload, activation=activation, io_backend=io_backend, kv=kv, layers=layers, ctx=ctx,
         generation_steps=generation_steps,
     )
     bench = _require_object(payload["bench"], "bench")
@@ -337,7 +355,7 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Fail-closed CPU F32/Q8_K inference A/B baseline")
+    parser = argparse.ArgumentParser(description="Fail-closed QXF I/O x activation CPU baseline")
     parser.add_argument("--qx-exe", type=Path, required=True)
     parser.add_argument("--source-model", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
@@ -371,61 +389,80 @@ def main() -> int:
         parser.error(f"output already exists (use --overwrite): {args.output}")
 
     try:
-        startup_command = [str(args.qx_exe), "inspect", "--in", str(args.model)]
-        startup_warmups = [one_run(startup_command) for _ in range(args.warmups)]
-        startup_measured = [one_run(startup_command) for _ in range(args.repetitions)]
-        for run in startup_warmups + startup_measured:
-            if _require_object(run["payload"], "inspect payload").get("magic") != "QXF1":
-                raise ValueError("startup/model-load probe did not inspect a QXF1 model")
+        startup_cells: list[dict[str, Any]] = []
+        for io_backend in ("buffered", "mmap"):
+            startup_command = [
+                str(args.qx_exe), "inspect-tensor", "--in", str(args.model),
+                "--name", "token_embd.weight", "--io-backend", io_backend,
+            ]
+            startup_warmups = [one_run(startup_command) for _ in range(args.warmups)]
+            startup_measured = [one_run(startup_command) for _ in range(args.repetitions)]
+            for run in startup_warmups + startup_measured:
+                payload = _require_object(run["payload"], "inspect payload")
+                if payload.get("name") != "token_embd.weight" or payload.get("io_backend") != io_backend:
+                    raise ValueError("startup/model-load probe drifted from the fixed QXF I/O backend")
+            startup_cells.append({
+                "io_backend": io_backend,
+                "command": startup_command,
+                "warmups": [run["wall_elapsed_seconds"] for run in startup_warmups],
+                "measured": [run["wall_elapsed_seconds"] for run in startup_measured],
+                "summary_seconds": summarize([run["wall_elapsed_seconds"] for run in startup_measured]),
+            })
 
         cells: list[dict[str, Any]] = []
         signatures: dict[str, list[dict[str, Any]]] = {}
-        for activation in ("f32", "q8_k_compat"):
-            command = build_inference_command(
-                qx_exe=args.qx_exe, model=args.model, tokenizer=args.tokenizer,
-                prompt_file=args.prompt_file, activation=activation, kv=args.kv,
-                layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
-                seed=args.seed,
-            )
-            warmups = [
-                compact_run(one_run(command), activation=activation, kv=args.kv,
-                            layers=args.layers, ctx=args.ctx, generation_steps=args.generate)
-                for _ in range(args.warmups)
-            ]
-            measured = [
-                compact_run(one_run(command), activation=activation, kv=args.kv,
-                            layers=args.layers, ctx=args.ctx, generation_steps=args.generate)
-                for _ in range(args.repetitions)
-            ]
-            signatures[activation] = [run["output_signature"] for run in warmups + measured]
-            cells.append({
-                "activation_format": activation,
-                "command": command,
-                "warmups": warmups,
-                "measured": measured,
-                "summary": summarize_runs(measured),
-            })
+        for io_backend in ("buffered", "mmap"):
+            for activation in ("f32", "q8_k_compat"):
+                command = build_inference_command(
+                    qx_exe=args.qx_exe, model=args.model, tokenizer=args.tokenizer,
+                    prompt_file=args.prompt_file, activation=activation, kv=args.kv,
+                    layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
+                    seed=args.seed, io_backend=io_backend,
+                )
+                warmups = [
+                    compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
+                                layers=args.layers, ctx=args.ctx, generation_steps=args.generate)
+                    for _ in range(args.warmups)
+                ]
+                measured = [
+                    compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
+                                layers=args.layers, ctx=args.ctx, generation_steps=args.generate)
+                    for _ in range(args.repetitions)
+                ]
+                cell_key = f"{io_backend}:{activation}"
+                signatures[cell_key] = [run["output_signature"] for run in warmups + measured]
+                cells.append({
+                    "io_backend": io_backend,
+                    "activation_format": activation,
+                    "command": command,
+                    "warmups": warmups,
+                    "measured": measured,
+                    "summary": summarize_runs(measured),
+                })
 
         output_gate = validate_output_contract(signatures)
-        by_mode = {cell["activation_format"]: cell for cell in cells}
-        f32_summary = by_mode["f32"]["summary"]
-        q8k_summary = by_mode["q8_k_compat"]["summary"]
-        comparisons = {}
-        for field in ("total_latency_seconds", "prefill_latency_seconds", "decode_latency_seconds"):
-            comparisons[f"{field}_speedup_f32_over_q8_k"] = (
-                f32_summary[field]["median"] / q8k_summary[field]["median"]
+        by_cell = {(cell["io_backend"], cell["activation_format"]): cell for cell in cells}
+        comparisons: dict[str, Any] = {}
+        for activation in ("f32", "q8_k_compat"):
+            buffered_summary = by_cell[("buffered", activation)]["summary"]
+            mmap_summary = by_cell[("mmap", activation)]["summary"]
+            activation_comparison: dict[str, float] = {}
+            for field in ("total_latency_seconds", "prefill_latency_seconds", "decode_latency_seconds"):
+                activation_comparison[f"{field}_speedup_buffered_over_mmap"] = (
+                    buffered_summary[field]["median"] / mmap_summary[field]["median"]
+                )
+            activation_comparison["peak_rss_median_delta_bytes_mmap_minus_buffered"] = (
+                mmap_summary["peak_rss_bytes"]["median"] - buffered_summary["peak_rss_bytes"]["median"]
             )
-        comparisons["peak_rss_median_delta_bytes_q8_k_minus_f32"] = (
-            q8k_summary["peak_rss_bytes"]["median"] - f32_summary["peak_rss_bytes"]["median"]
-        )
+            comparisons[activation] = activation_comparison
 
         report = {
-            "schema": 2,
-            "measurement": "cpu-inference-ab-baseline",
+            "schema": 3,
+            "measurement": "qxf-io-backend-2x2-baseline",
             "status": "pass",
             "claim_scope": "Pinned CPU, model, QXF, tokenizer, prompt, revision and arguments only; not global throughput or model/logit parity.",
             "provenance": {
-                "revision": source_revision(),
+                "source_state": source_state(),
                 "artifacts": build_artifact_provenance(
                     benchmark_script=Path(__file__), qx_exe=args.qx_exe,
                     source_model_gguf=args.source_model,
@@ -439,6 +476,7 @@ def main() -> int:
                 },
                 "fixed_arguments": {
                     "activation_modes": ["f32", "q8_k_compat"],
+                    "io_backends": ["buffered", "mmap"],
                     "kv": args.kv, "layers": args.layers, "ctx": args.ctx,
                     "generation_steps": args.generate, "seed": args.seed,
                     "temperature": 0, "warmups": args.warmups,
@@ -452,12 +490,7 @@ def main() -> int:
                 "total": "Wall-clock prompt-state-loop process including tokenizer/model open, allocation, prefill, decode, JSON emission and teardown.",
                 "peak_rss": "Maximum process resident set sampled by psutil at 5 ms intervals.",
             },
-            "startup_model_load": {
-                "command": startup_command,
-                "warmups": [run["wall_elapsed_seconds"] for run in startup_warmups],
-                "measured": [run["wall_elapsed_seconds"] for run in startup_measured],
-                "summary_seconds": summarize([run["wall_elapsed_seconds"] for run in startup_measured]),
-            },
+            "startup_model_load": startup_cells,
             "cells": cells,
             "output_contract": output_gate,
             "comparisons": comparisons,
