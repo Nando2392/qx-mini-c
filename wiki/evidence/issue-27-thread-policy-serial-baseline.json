@@ -2,10 +2,13 @@
   "claim_scope": "Opt-in thread policy contract only: serial remains default; pool is rejected fail-closed; no parallel execution or speedup claim.",
   "created_utc": "2026-08-21T19:04:42Z",
   "fail_closed": {
+    "malformed_threads_exit_code": 2,
+    "malformed_threads_stderr_tail": "prompt-state-loop-probe failed: invalid --threads\n",
     "unsupported_pool_exit_code": 1,
     "unsupported_pool_stderr_tail": "prompt-state-loop-probe failed: unsupported thread policy\n"
   },
   "gates": {
+    "malformed_threads_rejected_before_file_io": true,
     "no_default_promotion": true,
     "no_speedup_claim": true,
     "pool_not_implemented": true,
@@ -22,8 +25,8 @@
       },
       "qx_exe": {
         "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
-        "sha256": "3bbe6f1fdf9f8a7f56f56f3bc7ffdb706d2873fd48f217ca3b1ac08d074e71af",
-        "size": 616960
+        "sha256": "a41d004b285c21190b0b620ff99b4f70cb4a1720b543530b30a9ad1fa5532e0c",
+        "size": 617472
       }
     },
     "fixed_arguments": {
@@ -47,8 +50,8 @@
       "system": "Windows"
     },
     "source_state": {
-      "revision": "9c2d3727cdbc55a3e3a54bfd62659271e09d17da",
-      "working_tree_diff_sha256": "a29975561408d7aa03356faffc76b23db6a67756aa021be326e9f8f73e608e09",
+      "revision": "ef52ad5d212bda9f4cde166389b2ce09ebbeb2e8",
+      "working_tree_diff_sha256": "117145a8b02a3846c1ef043656ea7e57b258060323465df081385b40876314ca",
       "working_tree_dirty": true
     }
   },
@@ -83,5 +86,6 @@
     "threads": 1
   },
   "schema": 1,
-  "status": "pass"
+  "status": "pass",
+  "updated_utc": "2026-08-21T19:35:00Z"
 }

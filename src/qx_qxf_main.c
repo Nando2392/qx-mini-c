@@ -201,6 +201,18 @@ static int qx_cli_parse_ids(const char *text, uint32_t *ids, uint32_t capacity, 
     return 1;
 }
 
+static int qx_cli_parse_u32_arg(const char *name, const char *text, uint32_t *out, char *err, size_t err_len) {
+    if (!text || !*text) { snprintf(err, err_len, "invalid %s", name); return 0; }
+    errno = 0;
+    char *end = NULL;
+    unsigned long long parsed = strtoull(text, &end, 10);
+    if (errno != 0 || !end || end == text || *end != '\0' || parsed > UINT32_MAX) {
+        snprintf(err, err_len, "invalid %s", name); return 0;
+    }
+    *out = (uint32_t)parsed;
+    return 1;
+}
+
 static void qx_cli_json_string(const unsigned char *text, uint32_t length) {
     putchar('"');
     for (uint32_t i = 0; i < length; ++i) {
@@ -404,6 +416,7 @@ chat_fail:
         int final_head = 0;
         int bench = 0;
         int dequant_profile = 0;
+        char err[256];
         for (int i = 2; i < argc; ++i) {
             if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
             else if (strcmp(argv[i], "--tokenizer") == 0 && i + 1 < argc) tokenizer_path = argv[++i];
@@ -417,7 +430,11 @@ chat_fail:
             else if (strcmp(argv[i], "--scratch-policy") == 0 && i + 1 < argc) scratch_policy = argv[++i];
             else if (strcmp(argv[i], "--kernel-policy") == 0 && i + 1 < argc) kernel_policy = argv[++i];
             else if (strcmp(argv[i], "--thread-policy") == 0 && i + 1 < argc) thread_policy = argv[++i];
-            else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) threads = (uint32_t)strtoul(argv[++i], NULL, 10);
+            else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
+                if (!qx_cli_parse_u32_arg("--threads", argv[++i], &threads, err, sizeof(err))) {
+                    fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;
+                }
+            }
             else if (strcmp(argv[i], "--temperature") == 0 && i + 1 < argc) temperature = strtod(argv[++i], NULL);
             else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) top_n = (uint32_t)strtoul(argv[++i], NULL, 10);
@@ -430,7 +447,6 @@ chat_fail:
             else { usage(argv[0]); return 2; }
         }
         if (!in_path || !tokenizer_path || !text_path || !full_moe || !final_head) { usage(argv[0]); return 2; }
-        char err[256];
         if (!qx_set_io_backend(io_backend, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;
         }
