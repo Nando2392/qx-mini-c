@@ -41,7 +41,7 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
         "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
-        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --scratch-policy ephemeral|persistent --kernel-policy baseline|fused --temperature 0 --seed 7 --full-moe --final-head [--bench] [--dequant-profile] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
+        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --scratch-policy ephemeral|persistent --kernel-policy baseline|fused --thread-policy serial --threads 1 --temperature 0 --seed 7 --full-moe --final-head [--bench] [--dequant-profile] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
         "  %s generate-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --top-k 5 --scan 64 --temperature 0 --seed 7\n"
         "  %s residual-vector-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --dims 64 --seed 7\n"
@@ -390,12 +390,14 @@ chat_fail:
         const char *io_backend = "buffered";
         const char *scratch_policy = "ephemeral";
         const char *kernel_policy = "baseline";
+        const char *thread_policy = "serial";
         const char *kv_snapshot_out_path = NULL;
         uint32_t generation_steps = 0u;
         uint32_t layers = 48u;
         uint32_t ctx = 16u;
         uint32_t top_n = 5u;
         uint32_t seed = 7u;
+        uint32_t threads = 1u;
         double temperature = 0.0;
         int parse_special = 0;
         int full_moe = 0;
@@ -414,6 +416,8 @@ chat_fail:
             else if (strcmp(argv[i], "--io-backend") == 0 && i + 1 < argc) io_backend = argv[++i];
             else if (strcmp(argv[i], "--scratch-policy") == 0 && i + 1 < argc) scratch_policy = argv[++i];
             else if (strcmp(argv[i], "--kernel-policy") == 0 && i + 1 < argc) kernel_policy = argv[++i];
+            else if (strcmp(argv[i], "--thread-policy") == 0 && i + 1 < argc) thread_policy = argv[++i];
+            else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) threads = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--temperature") == 0 && i + 1 < argc) temperature = strtod(argv[++i], NULL);
             else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = (uint32_t)strtoul(argv[++i], NULL, 10);
             else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) top_n = (uint32_t)strtoul(argv[++i], NULL, 10);
@@ -453,7 +457,7 @@ chat_fail:
         }
         qx_tokenizer_free(&tokenizer);
         free(input);
-        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format, scratch_policy, kernel_policy, dequant_profile,
+        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format, scratch_policy, kernel_policy, thread_policy, threads, dequant_profile,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, full_moe, final_head, bench, 2048u, NULL, 8u, 151936u,
                 top_n, temperature, seed, NULL, 0u, NULL, kv_snapshot_out_path, NULL, stdout, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;

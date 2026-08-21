@@ -21,6 +21,8 @@ def native_payload(
     io_backend: str = "buffered",
     scratch_policy: str = "ephemeral",
     kernel_policy: str = "baseline",
+    thread_policy: str = "serial",
+    threads: int = 1,
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -58,6 +60,8 @@ def native_payload(
         "io_backend": io_backend,
         "scratch_policy": scratch_policy,
         "kernel_policy": kernel_policy,
+        "thread_policy": thread_policy,
+        "threads": threads,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -97,6 +101,16 @@ def native_payload(
             "fused_dot_calls": 0 if kernel_policy == "baseline" and activation == "f32" else 1215488,
             "fallback_dot_calls": 1215488 if kernel_policy == "baseline" and activation == "f32" else 0,
             "final_head_q6_k_blocks": 1215488,
+        },
+        "thread_profile": {
+            "enabled": True,
+            "policy": thread_policy,
+            "requested_threads": threads,
+            "workers_used": 1,
+            "parallel_jobs": 0,
+            "serial_jobs": 96,
+            "fallback_jobs": 96,
+            "disabled_reason": "serial_policy",
         },
     }
 
@@ -268,6 +282,8 @@ def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path)
         io_backend="mmap",
         scratch_policy="persistent",
         kernel_policy="fused",
+        thread_policy="serial",
+        threads=1,
     )
     assert command[1] == "prompt-state-loop-probe"
     assert "--full-moe" in command
@@ -277,6 +293,8 @@ def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path)
     assert command[command.index("--io-backend") + 1] == "mmap"
     assert command[command.index("--scratch-policy") + 1] == "persistent"
     assert command[command.index("--kernel-policy") + 1] == "fused"
+    assert command[command.index("--thread-policy") + 1] == "serial"
+    assert command[command.index("--threads") + 1] == "1"
     assert "--dequant-profile" in command
 
 
@@ -290,6 +308,59 @@ def test_validate_native_payload_requires_dequant_dot_profile():
             io_backend="buffered",
             scratch_policy="ephemeral",
             kernel_policy="baseline",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_requires_thread_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    del payload["thread_profile"]
+    with pytest.raises(ValueError, match="thread_profile"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_rejects_thread_policy_drift():
+    payload = native_payload(activation="f32", selected=(358, 1184), thread_policy="serial", threads=1)
+    payload["thread_profile"]["policy"] = "pool"
+    with pytest.raises(ValueError, match="thread_profile.policy"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_rejects_thread_count_drift():
+    payload = native_payload(activation="f32", selected=(358, 1184), thread_policy="serial", threads=1)
+    payload["thread_profile"]["requested_threads"] = 2
+    with pytest.raises(ValueError, match="thread_profile.requested_threads"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            thread_policy="serial",
+            threads=1,
             kv="int8",
             layers=48,
             ctx=16,

@@ -172,12 +172,14 @@ def extract_output_signature(payload: dict[str, Any]) -> dict[str, Any]:
 def validate_native_payload(
     payload: dict[str, Any], *, activation: str, io_backend: str, scratch_policy: str,
     kv: str, layers: int, ctx: int, generation_steps: int, kernel_policy: str = "baseline",
+    thread_policy: str = "serial", threads: int = 1,
 ) -> dict[str, Any]:
     """Validate native timing, modality and output evidence fail-closed."""
     expected = {
         "probe": "state_loop", "activation_format": activation,
         "io_backend": io_backend,
         "scratch_policy": scratch_policy, "kernel_policy": kernel_policy,
+        "thread_policy": thread_policy, "threads": threads,
         "kv_format": kv, "layers": layers, "ctx_tokens": ctx,
         "generation_steps": generation_steps,
     }
@@ -239,6 +241,24 @@ def validate_native_payload(
         value = _require_exact_int(profile.get(field), f"dequant_dot_profile.{field}")
         if value < 0:
             raise ValueError(f"dequant_dot_profile.{field} must be non-negative")
+    thread_profile = _require_object(payload.get("thread_profile"), "thread_profile")
+    if thread_profile.get("enabled") is not True:
+        raise ValueError("thread_profile.enabled must be true")
+    if thread_profile.get("policy") != thread_policy:
+        raise ValueError("thread_profile.policy does not match fixed benchmark contract")
+    if _require_exact_int(thread_profile.get("requested_threads"), "thread_profile.requested_threads") != threads:
+        raise ValueError("thread_profile.requested_threads does not match fixed benchmark contract")
+    for field in ("workers_used", "parallel_jobs", "serial_jobs", "fallback_jobs"):
+        value = _require_exact_int(thread_profile.get(field), f"thread_profile.{field}")
+        if value < 0:
+            raise ValueError(f"thread_profile.{field} must be non-negative")
+    if thread_policy == "serial":
+        if thread_profile.get("disabled_reason") != "serial_policy":
+            raise ValueError("thread_profile.disabled_reason must record serial_policy")
+        if _require_exact_int(thread_profile.get("workers_used"), "thread_profile.workers_used") != 1:
+            raise ValueError("thread_profile.workers_used must be 1 for serial policy")
+        if _require_exact_int(thread_profile.get("parallel_jobs"), "thread_profile.parallel_jobs") != 0:
+            raise ValueError("thread_profile.parallel_jobs must be 0 for serial policy")
     return signature
 
 
@@ -298,6 +318,7 @@ def build_inference_command(
     *, qx_exe: Path, model: Path, tokenizer: Path, prompt_file: Path,
     activation: str, kv: str, layers: int, ctx: int,
     generation_steps: int, seed: int, io_backend: str, scratch_policy: str, kernel_policy: str,
+    thread_policy: str = "serial", threads: int = 1,
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -308,6 +329,7 @@ def build_inference_command(
         "--io-backend", io_backend,
         "--scratch-policy", scratch_policy,
         "--kernel-policy", kernel_policy,
+        "--thread-policy", thread_policy, "--threads", str(threads),
         "--temperature", "0", "--seed", str(seed), "--full-moe",
         "--final-head", "--bench", "--dequant-profile",
     ]
@@ -361,11 +383,13 @@ def source_state() -> dict[str, Any]:
 def compact_run(
     raw: dict[str, Any], *, activation: str, io_backend: str, kv: str, layers: int,
     ctx: int, generation_steps: int, scratch_policy: str, kernel_policy: str,
+    thread_policy: str = "serial", threads: int = 1,
 ) -> dict[str, Any]:
     payload = _require_object(raw.get("payload"), "runtime payload")
     signature = validate_native_payload(
         payload, activation=activation, io_backend=io_backend, scratch_policy=scratch_policy,
-        kernel_policy=kernel_policy, kv=kv, layers=layers, ctx=ctx, generation_steps=generation_steps,
+        kernel_policy=kernel_policy, thread_policy=thread_policy, threads=threads,
+        kv=kv, layers=layers, ctx=ctx, generation_steps=generation_steps,
     )
     bench = _require_object(payload["bench"], "bench")
     phases = _require_object(bench["phases"], "bench.phases")
@@ -374,6 +398,7 @@ def compact_run(
     allocation = _require_object(payload.get("allocation_profile"), "allocation_profile")
     scratch = _require_object(payload.get("scratch_profile"), "scratch_profile")
     dequant = _require_object(payload.get("dequant_dot_profile"), "dequant_dot_profile")
+    thread_profile = _require_object(payload.get("thread_profile"), "thread_profile")
     peak_rss = _require_exact_int(raw.get("peak_rss_bytes"), "peak_rss_bytes")
     if peak_rss <= 0:
         raise ValueError("peak_rss_bytes must be positive")
@@ -395,12 +420,17 @@ def compact_run(
         "allocation_profile": allocation,
         "scratch_profile": scratch,
         "dequant_dot_profile": dequant,
+        "thread_profile": thread_profile,
         "dequant_temporary_blocks_decoded": _require_exact_int(dequant.get("temporary_blocks_decoded"), "dequant.temporary_blocks_decoded"),
         "dequant_temporary_floats_materialized": _require_exact_int(dequant.get("temporary_floats_materialized"), "dequant.temporary_floats_materialized"),
         "dequant_temporary_bytes_materialized": _require_exact_int(dequant.get("temporary_bytes_materialized"), "dequant.temporary_bytes_materialized"),
         "dequant_fused_dot_calls": _require_exact_int(dequant.get("fused_dot_calls"), "dequant.fused_dot_calls"),
         "dequant_fallback_dot_calls": _require_exact_int(dequant.get("fallback_dot_calls"), "dequant.fallback_dot_calls"),
         "dequant_final_head_q6_k_blocks": _require_exact_int(dequant.get("final_head_q6_k_blocks"), "dequant.final_head_q6_k_blocks"),
+        "thread_workers_used": _require_exact_int(thread_profile.get("workers_used"), "thread.workers_used"),
+        "thread_parallel_jobs": _require_exact_int(thread_profile.get("parallel_jobs"), "thread.parallel_jobs"),
+        "thread_serial_jobs": _require_exact_int(thread_profile.get("serial_jobs"), "thread.serial_jobs"),
+        "thread_fallback_jobs": _require_exact_int(thread_profile.get("fallback_jobs"), "thread.fallback_jobs"),
         "output_signature": signature,
     }
 
@@ -416,7 +446,8 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "allocation_free_calls", "allocation_bytes_requested", "scratch_peak_capacity_bytes",
         "scratch_growth_events", "dequant_temporary_blocks_decoded", "dequant_temporary_floats_materialized",
         "dequant_temporary_bytes_materialized", "dequant_fused_dot_calls", "dequant_fallback_dot_calls",
-        "dequant_final_head_q6_k_blocks",
+        "dequant_final_head_q6_k_blocks", "thread_workers_used", "thread_parallel_jobs",
+        "thread_serial_jobs", "thread_fallback_jobs",
     )
     summary = {field: summarize([float(run[field]) for run in runs]) for field in positive_fields}
     summary.update({field: summarize_non_negative([float(run[field]) for run in runs]) for field in non_negative_fields})
@@ -515,18 +546,20 @@ def main() -> int:
                     prompt_file=args.prompt_file, activation=activation, kv=args.kv,
                     layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
                     seed=args.seed, io_backend=io_backend, scratch_policy=scratch_policy,
-                    kernel_policy=kernel_policy,
+                    kernel_policy=kernel_policy, thread_policy="serial", threads=1,
                 )
                 warmups = [
                     compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
                                 layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
-                                scratch_policy=scratch_policy, kernel_policy=kernel_policy)
+                                scratch_policy=scratch_policy, kernel_policy=kernel_policy,
+                                thread_policy="serial", threads=1)
                     for _ in range(args.warmups)
                 ]
                 measured = [
                     compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
                                 layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
-                                scratch_policy=scratch_policy, kernel_policy=kernel_policy)
+                                scratch_policy=scratch_policy, kernel_policy=kernel_policy,
+                                thread_policy="serial", threads=1)
                     for _ in range(args.repetitions)
                 ]
                 cell_key = f"{scratch_policy}:{io_backend}:{activation}"
@@ -591,6 +624,8 @@ def main() -> int:
                 "fixed_arguments": {
                     "scratch_policies": ["ephemeral", "persistent"],
                     "kernel_policies": ["baseline", "fused"],
+                    "thread_policy": "serial",
+                    "threads": 1,
                     "activation_modes": ["f32", "q8_k_compat"],
                     "io_backends": ["buffered", "mmap"],
                     "kv": args.kv, "layers": args.layers, "ctx": args.ctx,

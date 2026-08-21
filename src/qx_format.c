@@ -5745,7 +5745,7 @@ static int qx_read_accumulated_kv_snapshot(
     return 1;
 }
 
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
         qx_set_err(err, err_len, "unsupported activation format"); return 0;
@@ -5758,6 +5758,14 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     if (!kernel_policy) kernel_policy = "baseline";
     if (strcmp(kernel_policy, "baseline") != 0 && strcmp(kernel_policy, "fused") != 0) {
         qx_set_err(err, err_len, "unsupported kernel policy"); return 0;
+    }
+    if (!thread_policy) thread_policy = "serial";
+    if (threads == 0u) threads = 1u;
+    if (strcmp(thread_policy, "serial") != 0) {
+        qx_set_err(err, err_len, "unsupported thread policy"); return 0;
+    }
+    if (threads != 1u) {
+        qx_set_err(err, err_len, "serial thread policy requires --threads 1"); return 0;
     }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
@@ -5946,6 +5954,8 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"io_backend\": \"%s\",\n", qx_io_backend_name(file.io_backend));
     fprintf(out, "  \"scratch_policy\": \"%s\",\n", scratch_policy);
     fprintf(out, "  \"kernel_policy\": \"%s\",\n", kernel_policy);
+    fprintf(out, "  \"thread_policy\": \"%s\",\n", thread_policy);
+    fprintf(out, "  \"threads\": %u,\n", threads);
     fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
     fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
     fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);
@@ -6384,6 +6394,9 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         (unsigned long long)dequant_profile.fused_dot_calls,
         (unsigned long long)dequant_profile.fallback_dot_calls,
         (unsigned long long)dequant_profile.final_head_q6_k_blocks);
+    uint64_t serial_jobs = (uint64_t)steps * (uint64_t)(layers - start_layer);
+    fprintf(out, "  \"thread_profile\": {\"enabled\": true, \"policy\": \"%s\", \"requested_threads\": %u, \"workers_used\": 1, \"parallel_jobs\": 0, \"serial_jobs\": %llu, \"fallback_jobs\": %llu, \"disabled_reason\": \"serial_policy\"},\n",
+        thread_policy, threads, (unsigned long long)serial_jobs, (unsigned long long)serial_jobs);
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16
@@ -6423,7 +6436,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     }
     if (steps == 0u) steps = 1u;
     if (steps > 64u) steps = 64u;
-    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", 0,
+    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", "serial", 1u, 0,
         real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector,
         causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm_name, top_k, scan,
         logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path,
