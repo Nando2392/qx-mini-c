@@ -1,11 +1,13 @@
 #!/usr/bin/env python
-"""Fail-closed 2x2 CPU inference baseline for QXF I/O and activation modes.
+"""Fail-closed CPU inference baseline for QXF I/O, activation and scratch modes.
 
 Measures:
 - startup/model-load wall latency
 - native prefill and decode latency/tokens per second
 - end-to-end wall latency and peak RSS
-- deterministic per-cell output signatures and buffered/mmap equivalence
+- allocation/free counters and scratch capacity/growth
+- deterministic per-cell output signatures, buffered/mmap equivalence and
+  ephemeral/persistent equivalence
 
 Usage:
     python -m pip install -r scripts/requirements-q8k-perf.txt
@@ -15,9 +17,9 @@ Usage:
       --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf \
       --tokenizer models/Qwen3-30B-A3B.qxt \
       --prompt-file tests/fixtures/q8k_perf_prompt.txt \
-      --output wiki/evidence/issue-24-qxf-mmap-baseline.json \
+      --output wiki/evidence/issue-25-persistent-scratch-baseline.json \
       --kv int8 \
-      --repetitions 5
+      --repetitions 3
 """
 
 from __future__ import annotations
@@ -71,6 +73,23 @@ def summarize(values: list[float]) -> dict:
     """Return statistical summary of timing values."""
     if not values or any(isinstance(value, bool) or not math.isfinite(value) or value <= 0 for value in values):
         raise ValueError("summary values must be finite positive numbers")
+    median = statistics.median(values)
+    deviations = [abs(value - median) for value in values]
+    return {
+        "count": len(values),
+        "min": min(values),
+        "median": median,
+        "max": max(values),
+        "mad": statistics.median(deviations),
+        "stdev": statistics.stdev(values),
+        "pstdev": statistics.pstdev(values),
+    }
+
+
+def summarize_non_negative(values: list[float]) -> dict:
+    """Return statistical summary of counters that may be zero."""
+    if not values or any(isinstance(value, bool) or not math.isfinite(value) or value < 0 for value in values):
+        raise ValueError("summary values must be finite non-negative numbers")
     median = statistics.median(values)
     deviations = [abs(value - median) for value in values]
     return {
@@ -151,13 +170,14 @@ def extract_output_signature(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_native_payload(
-    payload: dict[str, Any], *, activation: str, io_backend: str, kv: str, layers: int,
-    ctx: int, generation_steps: int,
+    payload: dict[str, Any], *, activation: str, io_backend: str, scratch_policy: str,
+    kv: str, layers: int, ctx: int, generation_steps: int,
 ) -> dict[str, Any]:
     """Validate native timing, modality and output evidence fail-closed."""
     expected = {
         "probe": "state_loop", "activation_format": activation,
         "io_backend": io_backend,
+        "scratch_policy": scratch_policy,
         "kv_format": kv, "layers": layers, "ctx_tokens": ctx,
         "generation_steps": generation_steps,
     }
@@ -211,13 +231,15 @@ def validate_native_payload(
 
 
 def validate_output_contract(signatures: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    """Require 2x2 determinism and exact buffered/mmap equality per activation."""
+    """Require 2x2x2 determinism plus exact I/O and scratch-policy equality per activation."""
     expected = {
-        "buffered:f32", "mmap:f32",
-        "buffered:q8_k_compat", "mmap:q8_k_compat",
+        f"{policy}:{backend}:{activation}"
+        for policy in ("ephemeral", "persistent")
+        for backend in ("buffered", "mmap")
+        for activation in ("f32", "q8_k_compat")
     }
     if set(signatures) != expected:
-        raise ValueError("output evidence must contain the complete buffered/mmap activation matrix")
+        raise ValueError("output evidence must contain the complete scratch-policy buffered/mmap activation matrix")
     canonical: dict[str, dict[str, Any]] = {}
     for cell, items in signatures.items():
         if not items:
@@ -226,10 +248,14 @@ def validate_output_contract(signatures: dict[str, list[dict[str, Any]]]) -> dic
             raise ValueError(f"{cell} output is not deterministic across repetitions")
         canonical[cell] = items[0]
     for activation in ("f32", "q8_k_compat"):
-        if canonical[f"buffered:{activation}"] != canonical[f"mmap:{activation}"]:
-            raise ValueError(f"buffered/mmap output mismatch for {activation}")
-    f32 = canonical["buffered:f32"]
-    q8k = canonical["buffered:q8_k_compat"]
+        for policy in ("ephemeral", "persistent"):
+            if canonical[f"{policy}:buffered:{activation}"] != canonical[f"{policy}:mmap:{activation}"]:
+                raise ValueError(f"buffered/mmap output mismatch for {activation}")
+        for backend in ("buffered", "mmap"):
+            if canonical[f"ephemeral:{backend}:{activation}"] != canonical[f"persistent:{backend}:{activation}"]:
+                raise ValueError(f"ephemeral/persistent output mismatch for {backend} {activation}")
+    f32 = canonical["ephemeral:buffered:f32"]
+    q8k = canonical["ephemeral:buffered:q8_k_compat"]
     if f32["prompt_token_ids"] != q8k["prompt_token_ids"]:
         raise ValueError("prompt token IDs differ across activation modes")
     selected_equal = f32["selected_tokens"] == q8k["selected_tokens"]
@@ -241,6 +267,7 @@ def validate_output_contract(signatures: dict[str, list[dict[str, Any]]]) -> dic
     return {
         "status": "pass",
         "io_equivalence": {"f32": True, "q8_k_compat": True},
+        "scratch_policy_equivalence": {"f32": True, "q8_k_compat": True},
         "prompt_token_ids": f32["prompt_token_ids"],
         "selected_tokens_equal_across_activations": selected_equal,
         "selected_tokens_by_mode": {
@@ -258,7 +285,7 @@ def validate_output_contract(signatures: dict[str, list[dict[str, Any]]]) -> dic
 def build_inference_command(
     *, qx_exe: Path, model: Path, tokenizer: Path, prompt_file: Path,
     activation: str, kv: str, layers: int, ctx: int,
-    generation_steps: int, seed: int, io_backend: str,
+    generation_steps: int, seed: int, io_backend: str, scratch_policy: str,
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -267,6 +294,7 @@ def build_inference_command(
         "--generate", str(generation_steps), "--layers", str(layers),
         "--ctx", str(ctx), "--kv", kv, "--activation", activation,
         "--io-backend", io_backend,
+        "--scratch-policy", scratch_policy,
         "--temperature", "0", "--seed", str(seed), "--full-moe",
         "--final-head", "--bench",
     ]
@@ -319,17 +347,19 @@ def source_state() -> dict[str, Any]:
 
 def compact_run(
     raw: dict[str, Any], *, activation: str, io_backend: str, kv: str, layers: int,
-    ctx: int, generation_steps: int,
+    ctx: int, generation_steps: int, scratch_policy: str,
 ) -> dict[str, Any]:
     payload = _require_object(raw.get("payload"), "runtime payload")
     signature = validate_native_payload(
-        payload, activation=activation, io_backend=io_backend, kv=kv, layers=layers, ctx=ctx,
-        generation_steps=generation_steps,
+        payload, activation=activation, io_backend=io_backend, scratch_policy=scratch_policy,
+        kv=kv, layers=layers, ctx=ctx, generation_steps=generation_steps,
     )
     bench = _require_object(payload["bench"], "bench")
     phases = _require_object(bench["phases"], "bench.phases")
     prefill = _require_object(phases["prefill"], "bench.phases.prefill")
     decode = _require_object(phases["decode"], "bench.phases.decode")
+    allocation = _require_object(payload.get("allocation_profile"), "allocation_profile")
+    scratch = _require_object(payload.get("scratch_profile"), "scratch_profile")
     peak_rss = _require_exact_int(raw.get("peak_rss_bytes"), "peak_rss_bytes")
     if peak_rss <= 0:
         raise ValueError("peak_rss_bytes must be positive")
@@ -341,17 +371,33 @@ def compact_run(
         "decode_latency_seconds": _require_positive_number(decode.get("elapsed_sec"), "decode.elapsed_sec"),
         "decode_tokens_per_second": _require_positive_number(decode.get("tokens_per_second"), "decode.tokens_per_second"),
         "peak_rss_bytes": peak_rss,
+        "allocation_malloc_calls": _require_exact_int(allocation.get("malloc_calls"), "allocation.malloc_calls"),
+        "allocation_calloc_calls": _require_exact_int(allocation.get("calloc_calls"), "allocation.calloc_calls"),
+        "allocation_realloc_calls": _require_exact_int(allocation.get("realloc_calls"), "allocation.realloc_calls"),
+        "allocation_free_calls": _require_exact_int(allocation.get("free_calls"), "allocation.free_calls"),
+        "allocation_bytes_requested": _require_exact_int(allocation.get("bytes_requested"), "allocation.bytes_requested"),
+        "scratch_peak_capacity_bytes": _require_exact_int(scratch.get("peak_capacity_bytes"), "scratch.peak_capacity_bytes"),
+        "scratch_growth_events": _require_exact_int(scratch.get("growth_events"), "scratch.growth_events"),
+        "allocation_profile": allocation,
+        "scratch_profile": scratch,
         "output_signature": signature,
     }
 
 
 def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
-    fields = (
+    positive_fields = (
         "total_latency_seconds", "native_process_seconds",
         "prefill_latency_seconds", "prefill_tokens_per_second",
         "decode_latency_seconds", "decode_tokens_per_second", "peak_rss_bytes",
     )
-    return {field: summarize([float(run[field]) for run in runs]) for field in fields}
+    non_negative_fields = (
+        "allocation_malloc_calls", "allocation_calloc_calls", "allocation_realloc_calls",
+        "allocation_free_calls", "allocation_bytes_requested", "scratch_peak_capacity_bytes",
+        "scratch_growth_events",
+    )
+    summary = {field: summarize([float(run[field]) for run in runs]) for field in positive_fields}
+    summary.update({field: summarize_non_negative([float(run[field]) for run in runs]) for field in non_negative_fields})
+    return summary
 
 
 def main() -> int:
@@ -411,27 +457,31 @@ def main() -> int:
 
         cells: list[dict[str, Any]] = []
         signatures: dict[str, list[dict[str, Any]]] = {}
-        for io_backend in ("buffered", "mmap"):
+        for scratch_policy in ("ephemeral", "persistent"):
+          for io_backend in ("buffered", "mmap"):
             for activation in ("f32", "q8_k_compat"):
                 command = build_inference_command(
                     qx_exe=args.qx_exe, model=args.model, tokenizer=args.tokenizer,
                     prompt_file=args.prompt_file, activation=activation, kv=args.kv,
                     layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
-                    seed=args.seed, io_backend=io_backend,
+                    seed=args.seed, io_backend=io_backend, scratch_policy=scratch_policy,
                 )
                 warmups = [
                     compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
-                                layers=args.layers, ctx=args.ctx, generation_steps=args.generate)
+                                layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
+                                scratch_policy=scratch_policy)
                     for _ in range(args.warmups)
                 ]
                 measured = [
                     compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
-                                layers=args.layers, ctx=args.ctx, generation_steps=args.generate)
+                                layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
+                                scratch_policy=scratch_policy)
                     for _ in range(args.repetitions)
                 ]
-                cell_key = f"{io_backend}:{activation}"
+                cell_key = f"{scratch_policy}:{io_backend}:{activation}"
                 signatures[cell_key] = [run["output_signature"] for run in warmups + measured]
                 cells.append({
+                    "scratch_policy": scratch_policy,
                     "io_backend": io_backend,
                     "activation_format": activation,
                     "command": command,
@@ -441,11 +491,11 @@ def main() -> int:
                 })
 
         output_gate = validate_output_contract(signatures)
-        by_cell = {(cell["io_backend"], cell["activation_format"]): cell for cell in cells}
+        by_cell = {(cell["scratch_policy"], cell["io_backend"], cell["activation_format"]): cell for cell in cells}
         comparisons: dict[str, Any] = {}
         for activation in ("f32", "q8_k_compat"):
-            buffered_summary = by_cell[("buffered", activation)]["summary"]
-            mmap_summary = by_cell[("mmap", activation)]["summary"]
+            buffered_summary = by_cell[("ephemeral", "buffered", activation)]["summary"]
+            mmap_summary = by_cell[("ephemeral", "mmap", activation)]["summary"]
             activation_comparison: dict[str, float] = {}
             for field in ("total_latency_seconds", "prefill_latency_seconds", "decode_latency_seconds"):
                 activation_comparison[f"{field}_speedup_buffered_over_mmap"] = (
@@ -454,11 +504,20 @@ def main() -> int:
             activation_comparison["peak_rss_median_delta_bytes_mmap_minus_buffered"] = (
                 mmap_summary["peak_rss_bytes"]["median"] - buffered_summary["peak_rss_bytes"]["median"]
             )
+            for io_backend in ("buffered", "mmap"):
+                ephemeral_summary = by_cell[("ephemeral", io_backend, activation)]["summary"]
+                persistent_summary = by_cell[("persistent", io_backend, activation)]["summary"]
+                activation_comparison[f"allocation_malloc_median_delta_ephemeral_minus_persistent_{io_backend}"] = (
+                    ephemeral_summary["allocation_malloc_calls"]["median"] - persistent_summary["allocation_malloc_calls"]["median"]
+                )
+                activation_comparison[f"allocation_free_median_delta_ephemeral_minus_persistent_{io_backend}"] = (
+                    ephemeral_summary["allocation_free_calls"]["median"] - persistent_summary["allocation_free_calls"]["median"]
+                )
             comparisons[activation] = activation_comparison
 
         report = {
-            "schema": 3,
-            "measurement": "qxf-io-backend-2x2-baseline",
+            "schema": 4,
+            "measurement": "persistent-scratch-2x2x2-baseline",
             "status": "pass",
             "claim_scope": "Pinned CPU, model, QXF, tokenizer, prompt, revision and arguments only; not global throughput or model/logit parity.",
             "provenance": {
@@ -475,6 +534,7 @@ def main() -> int:
                     "python": platform.python_version(),
                 },
                 "fixed_arguments": {
+                    "scratch_policies": ["ephemeral", "persistent"],
                     "activation_modes": ["f32", "q8_k_compat"],
                     "io_backends": ["buffered", "mmap"],
                     "kv": args.kv, "layers": args.layers, "ctx": args.ctx,

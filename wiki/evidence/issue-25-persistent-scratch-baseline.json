@@ -1,0 +1,3140 @@
+{
+  "cells": [
+    {
+      "activation_format": "f32",
+      "command": [
+        "build\\qxqxf.exe",
+        "prompt-state-loop-probe",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests\\fixtures\\q8k_perf_prompt.txt",
+        "--generate",
+        "1",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "f32",
+        "--io-backend",
+        "buffered",
+        "--scratch-policy",
+        "ephemeral",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "buffered",
+      "measured": [
+        {
+          "allocation_bytes_requested": 2638435584,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 49136,
+          "allocation_profile": {
+            "bytes_requested": 2638435584,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 49136,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 8.995,
+          "decode_tokens_per_second": 0.111172874,
+          "native_process_seconds": 17.312,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 8.317,
+          "prefill_tokens_per_second": 0.120235662,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 17.3411141000106
+        },
+        {
+          "allocation_bytes_requested": 2638435584,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 49136,
+          "allocation_profile": {
+            "bytes_requested": 2638435584,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 49136,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 8.576,
+          "decode_tokens_per_second": 0.116604478,
+          "native_process_seconds": 16.699,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 8.123,
+          "prefill_tokens_per_second": 0.123107226,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 16.735029899995425
+        },
+        {
+          "allocation_bytes_requested": 2638435584,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 49136,
+          "allocation_profile": {
+            "bytes_requested": 2638435584,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 49136,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 8.913,
+          "decode_tokens_per_second": 0.112195669,
+          "native_process_seconds": 17.118,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 18354176,
+          "prefill_latency_seconds": 8.205,
+          "prefill_tokens_per_second": 0.121876904,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 17.154889600002207
+        }
+      ],
+      "scratch_policy": "ephemeral",
+      "summary": {
+        "allocation_bytes_requested": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 2638435584.0,
+          "median": 2638435584.0,
+          "min": 2638435584.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_calloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 196.0,
+          "median": 196.0,
+          "min": 196.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_free_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 54965.0,
+          "median": 54965.0,
+          "min": 54965.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_malloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 49136.0,
+          "median": 49136.0,
+          "min": 49136.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_realloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.08199999999999896,
+          "max": 8.995,
+          "median": 8.913,
+          "min": 8.576,
+          "pstdev": 0.1813082090437896,
+          "stdev": 0.22205629916757544
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.001022794999999993,
+          "max": 0.116604478,
+          "median": 0.112195669,
+          "min": 0.111172874,
+          "pstdev": 0.0023566932677263875,
+          "stdev": 0.002886347993090978
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.19400000000000261,
+          "max": 17.312,
+          "median": 17.118,
+          "min": 16.699,
+          "pstdev": 0.2558137343198493,
+          "stdev": 0.3133065591397659
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 20406272.0,
+          "median": 20406272.0,
+          "min": 18354176.0,
+          "pstdev": 967367.331497193,
+          "stdev": 1184778.1780029542
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.08200000000000074,
+          "max": 8.317,
+          "median": 8.205,
+          "min": 8.123,
+          "pstdev": 0.07951519770878218,
+          "stdev": 0.0973858305915192
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.001230322000000006,
+          "max": 0.123107226,
+          "median": 0.121876904,
+          "min": 0.120235662,
+          "pstdev": 0.0011763052954221658,
+          "stdev": 0.0014406738777590657
+        },
+        "scratch_growth_events": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "scratch_peak_capacity_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.18622450000839308,
+          "max": 17.3411141000106,
+          "median": 17.154889600002207,
+          "min": 16.735029899995425,
+          "pstdev": 0.2534867495115093,
+          "stdev": 0.3104565964299454
+        }
+      },
+      "warmups": [
+        {
+          "allocation_bytes_requested": 2638435584,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 49136,
+          "allocation_profile": {
+            "bytes_requested": 2638435584,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 49136,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 8.855,
+          "decode_tokens_per_second": 0.112930548,
+          "native_process_seconds": 16.955,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 8.1,
+          "prefill_tokens_per_second": 0.12345679,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 16.984862199999043
+        }
+      ]
+    },
+    {
+      "activation_format": "q8_k_compat",
+      "command": [
+        "build\\qxqxf.exe",
+        "prompt-state-loop-probe",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests\\fixtures\\q8k_perf_prompt.txt",
+        "--generate",
+        "1",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "q8_k_compat",
+        "--io-backend",
+        "buffered",
+        "--scratch-policy",
+        "ephemeral",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "buffered",
+      "measured": [
+        {
+          "allocation_bytes_requested": 2638435584,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 49136,
+          "allocation_profile": {
+            "bytes_requested": 2638435584,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 49136,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 2.564,
+          "decode_tokens_per_second": 0.390015601,
+          "native_process_seconds": 4.385,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 1.821,
+          "prefill_tokens_per_second": 0.549148819,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 4.414596500006155
+        },
+        {
+          "allocation_bytes_requested": 2638435584,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 49136,
+          "allocation_profile": {
+            "bytes_requested": 2638435584,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 49136,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 2.43,
+          "decode_tokens_per_second": 0.411522634,
+          "native_process_seconds": 4.346,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 18305024,
+          "prefill_latency_seconds": 1.916,
+          "prefill_tokens_per_second": 0.521920668,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 4.37970970000606
+        },
+        {
+          "allocation_bytes_requested": 2638435584,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 49136,
+          "allocation_profile": {
+            "bytes_requested": 2638435584,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 49136,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 2.362,
+          "decode_tokens_per_second": 0.423370025,
+          "native_process_seconds": 4.186,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 1.824,
+          "prefill_tokens_per_second": 0.548245614,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 4.216680000012275
+        }
+      ],
+      "scratch_policy": "ephemeral",
+      "summary": {
+        "allocation_bytes_requested": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 2638435584.0,
+          "median": 2638435584.0,
+          "min": 2638435584.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_calloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 196.0,
+          "median": 196.0,
+          "min": 196.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_free_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 54965.0,
+          "median": 54965.0,
+          "min": 54965.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_malloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 49136.0,
+          "median": 49136.0,
+          "min": 49136.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_realloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.06800000000000006,
+          "max": 2.564,
+          "median": 2.43,
+          "min": 2.362,
+          "pstdev": 0.0839205973922175,
+          "stdev": 0.10278132126023674
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.011847390999999985,
+          "max": 0.423370025,
+          "median": 0.411522634,
+          "min": 0.390015601,
+          "pstdev": 0.01380591959326685,
+          "stdev": 0.016908729216698226
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.0389999999999997,
+          "max": 4.385,
+          "median": 4.346,
+          "min": 4.186,
+          "pstdev": 0.08610200668715887,
+          "stdev": 0.10545299110662214
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 20406272.0,
+          "median": 20406272.0,
+          "min": 18305024.0,
+          "pstdev": 990537.8065031137,
+          "stdev": 1213156.0984341628
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.0030000000000001137,
+          "max": 1.916,
+          "median": 1.824,
+          "min": 1.821,
+          "pstdev": 0.044093335349259064,
+          "stdev": 0.0540030863315545
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0009032049999999625,
+          "max": 0.549148819,
+          "median": 0.548245614,
+          "min": 0.521920668,
+          "pstdev": 0.01262797057705078,
+          "stdev": 0.015466042200326826
+        },
+        "scratch_growth_events": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "scratch_peak_capacity_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.03488680000009481,
+          "max": 4.414596500006155,
+          "median": 4.37970970000606,
+          "min": 4.216680000012275,
+          "pstdev": 0.08625975813664853,
+          "stdev": 0.10564619638533919
+        }
+      },
+      "warmups": [
+        {
+          "allocation_bytes_requested": 2638435584,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 49136,
+          "allocation_profile": {
+            "bytes_requested": 2638435584,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 49136,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 2.365,
+          "decode_tokens_per_second": 0.422832981,
+          "native_process_seconds": 4.24,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 1.875,
+          "prefill_tokens_per_second": 0.533333333,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 4.273404699997627
+        }
+      ]
+    },
+    {
+      "activation_format": "f32",
+      "command": [
+        "build\\qxqxf.exe",
+        "prompt-state-loop-probe",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests\\fixtures\\q8k_perf_prompt.txt",
+        "--generate",
+        "1",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "f32",
+        "--io-backend",
+        "mmap",
+        "--scratch-policy",
+        "ephemeral",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "mmap",
+      "measured": [
+        {
+          "allocation_bytes_requested": 1599966464,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 5742,
+          "allocation_profile": {
+            "bytes_requested": 1599966464,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 5742,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 8.856,
+          "decode_tokens_per_second": 0.112917796,
+          "native_process_seconds": 17.339,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 1964695552,
+          "prefill_latency_seconds": 8.483,
+          "prefill_tokens_per_second": 0.117882824,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 17.5682497999951
+        },
+        {
+          "allocation_bytes_requested": 1599966464,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 5742,
+          "allocation_profile": {
+            "bytes_requested": 1599966464,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 5742,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 8.918,
+          "decode_tokens_per_second": 0.112132765,
+          "native_process_seconds": 17.324,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 1964683264,
+          "prefill_latency_seconds": 8.406,
+          "prefill_tokens_per_second": 0.118962646,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 17.552435300007346
+        },
+        {
+          "allocation_bytes_requested": 1599966464,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 5742,
+          "allocation_profile": {
+            "bytes_requested": 1599966464,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 5742,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 9.122,
+          "decode_tokens_per_second": 0.109625082,
+          "native_process_seconds": 17.364,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 1964691456,
+          "prefill_latency_seconds": 8.242,
+          "prefill_tokens_per_second": 0.121329774,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 17.60242090000247
+        }
+      ],
+      "scratch_policy": "ephemeral",
+      "summary": {
+        "allocation_bytes_requested": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1599966464.0,
+          "median": 1599966464.0,
+          "min": 1599966464.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_calloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 196.0,
+          "median": 196.0,
+          "min": 196.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_free_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 54965.0,
+          "median": 54965.0,
+          "min": 54965.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_malloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 5742.0,
+          "median": 5742.0,
+          "min": 5742.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_realloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.06199999999999939,
+          "max": 9.122,
+          "median": 8.918,
+          "min": 8.856,
+          "pstdev": 0.11363489291977578,
+          "stdev": 0.13917375231462778
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0007850310000000055,
+          "max": 0.112917796,
+          "median": 0.112132765,
+          "min": 0.109625082,
+          "pstdev": 0.0014042282651274649,
+          "stdev": 0.001719821365977971
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.014999999999997016,
+          "max": 17.364,
+          "median": 17.339,
+          "min": 17.324,
+          "pstdev": 0.016499158227685936,
+          "stdev": 0.02020725942163669
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 4096.0,
+          "max": 1964695552.0,
+          "median": 1964691456.0,
+          "min": 1964683264.0,
+          "pstdev": 5108.609552075354,
+          "stdev": 6256.743348846374
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.07699999999999996,
+          "max": 8.483,
+          "median": 8.406,
+          "min": 8.242,
+          "pstdev": 0.10050207294711208,
+          "stdev": 0.12308939840619888
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.001079822000000008,
+          "max": 0.121329774,
+          "median": 0.118962646,
+          "min": 0.117882824,
+          "pstdev": 0.0014395514279172766,
+          "stdev": 0.0017630832284461233
+        },
+        "scratch_growth_events": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "scratch_peak_capacity_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.01581449998775497,
+          "max": 17.60242090000247,
+          "median": 17.5682497999951,
+          "min": 17.552435300007346,
+          "pstdev": 0.020860176553128,
+          "stdev": 0.025548394249766595
+        }
+      },
+      "warmups": [
+        {
+          "allocation_bytes_requested": 1599966464,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 5742,
+          "allocation_profile": {
+            "bytes_requested": 1599966464,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 5742,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 9.013,
+          "decode_tokens_per_second": 0.110950849,
+          "native_process_seconds": 17.566,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 1964687360,
+          "prefill_latency_seconds": 8.553,
+          "prefill_tokens_per_second": 0.11691804,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 17.799337099990225
+        }
+      ]
+    },
+    {
+      "activation_format": "q8_k_compat",
+      "command": [
+        "build\\qxqxf.exe",
+        "prompt-state-loop-probe",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests\\fixtures\\q8k_perf_prompt.txt",
+        "--generate",
+        "1",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "q8_k_compat",
+        "--io-backend",
+        "mmap",
+        "--scratch-policy",
+        "ephemeral",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "mmap",
+      "measured": [
+        {
+          "allocation_bytes_requested": 1599966464,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 5742,
+          "allocation_profile": {
+            "bytes_requested": 1599966464,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 5742,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 2.376,
+          "decode_tokens_per_second": 0.420875421,
+          "native_process_seconds": 4.364,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 1964699648,
+          "prefill_latency_seconds": 1.988,
+          "prefill_tokens_per_second": 0.503018109,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 4.6015538000065135
+        },
+        {
+          "allocation_bytes_requested": 1599966464,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 5742,
+          "allocation_profile": {
+            "bytes_requested": 1599966464,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 5742,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 2.466,
+          "decode_tokens_per_second": 0.405515004,
+          "native_process_seconds": 4.401,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 1964703744,
+          "prefill_latency_seconds": 1.935,
+          "prefill_tokens_per_second": 0.516795866,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 4.636502000008477
+        },
+        {
+          "allocation_bytes_requested": 1599966464,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 5742,
+          "allocation_profile": {
+            "bytes_requested": 1599966464,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 5742,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 2.355,
+          "decode_tokens_per_second": 0.42462845,
+          "native_process_seconds": 4.258,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 1964699648,
+          "prefill_latency_seconds": 1.903,
+          "prefill_tokens_per_second": 0.525486075,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 4.484319199997117
+        }
+      ],
+      "scratch_policy": "ephemeral",
+      "summary": {
+        "allocation_bytes_requested": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1599966464.0,
+          "median": 1599966464.0,
+          "min": 1599966464.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_calloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 196.0,
+          "median": 196.0,
+          "min": 196.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_free_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 54965.0,
+          "median": 54965.0,
+          "min": 54965.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_malloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 5742.0,
+          "median": 5742.0,
+          "min": 5742.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_realloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.020999999999999908,
+          "max": 2.466,
+          "median": 2.376,
+          "min": 2.355,
+          "pstdev": 0.048145612468843,
+          "stdev": 0.05896609195122241
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0037530289999999633,
+          "max": 0.42462845,
+          "median": 0.420875421,
+          "min": 0.405515004,
+          "pstdev": 0.008268759513868015,
+          "stdev": 0.010127120807380261
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.03699999999999992,
+          "max": 4.401,
+          "median": 4.364,
+          "min": 4.258,
+          "pstdev": 0.060602530200204154,
+          "stdev": 0.07422263805605393
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1964703744.0,
+          "median": 1964699648.0,
+          "min": 1964699648.0,
+          "pstdev": 1930.8729171600658,
+          "stdev": 2364.826702600707
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.03200000000000003,
+          "max": 1.988,
+          "median": 1.935,
+          "min": 1.903,
+          "pstdev": 0.035052341814302015,
+          "stdev": 0.04293017586733134
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.008690208999999949,
+          "max": 0.525486075,
+          "median": 0.516795866,
+          "min": 0.503018109,
+          "pstdev": 0.00925056044303315,
+          "stdev": 0.011329576460102755
+        },
+        "scratch_growth_events": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "scratch_peak_capacity_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.034948200001963414,
+          "max": 4.636502000008477,
+          "median": 4.6015538000065135,
+          "min": 4.484319199997117,
+          "pstdev": 0.06508535655586617,
+          "stdev": 0.07971295664449003
+        }
+      },
+      "warmups": [
+        {
+          "allocation_bytes_requested": 1599966464,
+          "allocation_calloc_calls": 196,
+          "allocation_free_calls": 54965,
+          "allocation_malloc_calls": 5742,
+          "allocation_profile": {
+            "bytes_requested": 1599966464,
+            "calloc_calls": 196,
+            "free_calls": 54965,
+            "malloc_calls": 5742,
+            "realloc_calls": 0
+          },
+          "allocation_realloc_calls": 0,
+          "decode_latency_seconds": 2.406,
+          "decode_tokens_per_second": 0.415627598,
+          "native_process_seconds": 4.305,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 1964695552,
+          "prefill_latency_seconds": 1.899,
+          "prefill_tokens_per_second": 0.526592944,
+          "scratch_growth_events": 0,
+          "scratch_peak_capacity_bytes": 0,
+          "scratch_profile": {
+            "growth_events": 0,
+            "peak_capacity_bytes": 0,
+            "policy": "ephemeral"
+          },
+          "total_latency_seconds": 4.5352217000036035
+        }
+      ]
+    },
+    {
+      "activation_format": "f32",
+      "command": [
+        "build\\qxqxf.exe",
+        "prompt-state-loop-probe",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests\\fixtures\\q8k_perf_prompt.txt",
+        "--generate",
+        "1",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "f32",
+        "--io-backend",
+        "buffered",
+        "--scratch-policy",
+        "persistent",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "buffered",
+      "measured": [
+        {
+          "allocation_bytes_requested": 2630661376,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 48656,
+          "allocation_profile": {
+            "bytes_requested": 2630661376,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 48656,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 9.083,
+          "decode_tokens_per_second": 0.110095783,
+          "native_process_seconds": 17.423,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 8.34,
+          "prefill_tokens_per_second": 0.119904077,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 17.460854099990684
+        },
+        {
+          "allocation_bytes_requested": 2630661376,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 48656,
+          "allocation_profile": {
+            "bytes_requested": 2630661376,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 48656,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 8.96,
+          "decode_tokens_per_second": 0.111607143,
+          "native_process_seconds": 17.371,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 8.411,
+          "prefill_tokens_per_second": 0.118891927,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 17.4008302000002
+        },
+        {
+          "allocation_bytes_requested": 2630661376,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 48656,
+          "allocation_profile": {
+            "bytes_requested": 2630661376,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 48656,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 8.993,
+          "decode_tokens_per_second": 0.111197598,
+          "native_process_seconds": 17.328,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 20611072,
+          "prefill_latency_seconds": 8.335,
+          "prefill_tokens_per_second": 0.119976005,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 17.367662999997265
+        }
+      ],
+      "scratch_policy": "persistent",
+      "summary": {
+        "allocation_bytes_requested": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 2630661376.0,
+          "median": 2630661376.0,
+          "min": 2630661376.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_calloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 4.0,
+          "median": 4.0,
+          "min": 4.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_free_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 54293.0,
+          "median": 54293.0,
+          "min": 54293.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_malloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 48656.0,
+          "median": 48656.0,
+          "min": 48656.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_realloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.032999999999999474,
+          "max": 9.083,
+          "median": 8.993,
+          "min": 8.96,
+          "pstdev": 0.05198076567346786,
+          "stdev": 0.06366317616958772
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.00040954500000001115,
+          "max": 0.111607143,
+          "median": 0.111197598,
+          "min": 0.110095783,
+          "pstdev": 0.0006382208300206304,
+          "stdev": 0.0007816576883830502
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.04299999999999926,
+          "max": 17.423,
+          "median": 17.371,
+          "min": 17.328,
+          "pstdev": 0.03884155849945559,
+          "stdev": 0.047570999569064625
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 20611072.0,
+          "median": 20406272.0,
+          "min": 20406272.0,
+          "pstdev": 96543.64585800329,
+          "stdev": 118241.33513003535
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.004999999999999005,
+          "max": 8.411,
+          "median": 8.34,
+          "min": 8.335,
+          "pstdev": 0.034708308323319934,
+          "stdev": 0.04250882261366409
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 7.192799999999888e-05,
+          "max": 0.119976005,
+          "median": 0.119904077,
+          "min": 0.118891927,
+          "pstdev": 0.0004949575032002479,
+          "stdev": 0.0006061966636012897
+        },
+        "scratch_growth_events": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "scratch_peak_capacity_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 65536.0,
+          "median": 65536.0,
+          "min": 65536.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.033167200002935715,
+          "max": 17.460854099990684,
+          "median": 17.4008302000002,
+          "min": 17.367662999997265,
+          "pstdev": 0.038568140052647464,
+          "stdev": 0.04723613172859251
+        }
+      },
+      "warmups": [
+        {
+          "allocation_bytes_requested": 2630661376,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 48656,
+          "allocation_profile": {
+            "bytes_requested": 2630661376,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 48656,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 8.832,
+          "decode_tokens_per_second": 0.113224638,
+          "native_process_seconds": 16.935,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 8.103,
+          "prefill_tokens_per_second": 0.123411082,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 16.967642799994792
+        }
+      ]
+    },
+    {
+      "activation_format": "q8_k_compat",
+      "command": [
+        "build\\qxqxf.exe",
+        "prompt-state-loop-probe",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests\\fixtures\\q8k_perf_prompt.txt",
+        "--generate",
+        "1",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "q8_k_compat",
+        "--io-backend",
+        "buffered",
+        "--scratch-policy",
+        "persistent",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "buffered",
+      "measured": [
+        {
+          "allocation_bytes_requested": 2630661376,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 48656,
+          "allocation_profile": {
+            "bytes_requested": 2630661376,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 48656,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 2.294,
+          "decode_tokens_per_second": 0.435919791,
+          "native_process_seconds": 4.062,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 1.768,
+          "prefill_tokens_per_second": 0.56561086,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 4.099652100005187
+        },
+        {
+          "allocation_bytes_requested": 2630661376,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 48656,
+          "allocation_profile": {
+            "bytes_requested": 2630661376,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 48656,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 2.34,
+          "decode_tokens_per_second": 0.427350427,
+          "native_process_seconds": 4.116,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 20402176,
+          "prefill_latency_seconds": 1.776,
+          "prefill_tokens_per_second": 0.563063063,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 4.146189000006416
+        },
+        {
+          "allocation_bytes_requested": 2630661376,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 48656,
+          "allocation_profile": {
+            "bytes_requested": 2630661376,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 48656,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 2.458,
+          "decode_tokens_per_second": 0.406834825,
+          "native_process_seconds": 4.286,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 1.828,
+          "prefill_tokens_per_second": 0.547045952,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 4.316553699987708
+        }
+      ],
+      "scratch_policy": "persistent",
+      "summary": {
+        "allocation_bytes_requested": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 2630661376.0,
+          "median": 2630661376.0,
+          "min": 2630661376.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_calloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 4.0,
+          "median": 4.0,
+          "min": 4.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_free_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 54293.0,
+          "median": 54293.0,
+          "min": 54293.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_malloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 48656.0,
+          "median": 48656.0,
+          "min": 48656.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_realloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.04599999999999982,
+          "max": 2.458,
+          "median": 2.34,
+          "min": 2.294,
+          "pstdev": 0.06907001278895697,
+          "stdev": 0.0845931439302265
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.008569364000000024,
+          "max": 0.435919791,
+          "median": 0.427350427,
+          "min": 0.406834825,
+          "pstdev": 0.01220318342805158,
+          "stdev": 0.014945786318157003
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.05399999999999938,
+          "max": 4.286,
+          "median": 4.116,
+          "min": 4.062,
+          "pstdev": 0.09544748410629889,
+          "stdev": 0.11689881664641977
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 20406272.0,
+          "median": 20406272.0,
+          "min": 20402176.0,
+          "pstdev": 1930.8729171600658,
+          "stdev": 2364.826702600707
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.008000000000000007,
+          "max": 1.828,
+          "median": 1.776,
+          "min": 1.768,
+          "pstdev": 0.026599916457680027,
+          "stdev": 0.03257811126098834
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.002547797000000074,
+          "max": 0.56561086,
+          "median": 0.563063063,
+          "min": 0.547045952,
+          "pstdev": 0.008217156330155958,
+          "stdev": 0.01006392007278144
+        },
+        "scratch_growth_events": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "scratch_peak_capacity_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 65536.0,
+          "median": 65536.0,
+          "min": 65536.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.04653690000122879,
+          "max": 4.316553699987708,
+          "median": 4.146189000006416,
+          "min": 4.099652100005187,
+          "pstdev": 0.09323573357440525,
+          "stdev": 0.1141899865256854
+        }
+      },
+      "warmups": [
+        {
+          "allocation_bytes_requested": 2630661376,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 48656,
+          "allocation_profile": {
+            "bytes_requested": 2630661376,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 48656,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 2.385,
+          "decode_tokens_per_second": 0.419287212,
+          "native_process_seconds": 4.184,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 20406272,
+          "prefill_latency_seconds": 1.799,
+          "prefill_tokens_per_second": 0.555864369,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 4.217862399993464
+        }
+      ]
+    },
+    {
+      "activation_format": "f32",
+      "command": [
+        "build\\qxqxf.exe",
+        "prompt-state-loop-probe",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests\\fixtures\\q8k_perf_prompt.txt",
+        "--generate",
+        "1",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "f32",
+        "--io-backend",
+        "mmap",
+        "--scratch-policy",
+        "persistent",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "mmap",
+      "measured": [
+        {
+          "allocation_bytes_requested": 1592192256,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 5262,
+          "allocation_profile": {
+            "bytes_requested": 1592192256,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 5262,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 8.757,
+          "decode_tokens_per_second": 0.114194359,
+          "native_process_seconds": 17.061,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 1964744704,
+          "prefill_latency_seconds": 8.304,
+          "prefill_tokens_per_second": 0.120423892,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 17.287937500004773
+        },
+        {
+          "allocation_bytes_requested": 1592192256,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 5262,
+          "allocation_profile": {
+            "bytes_requested": 1592192256,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 5262,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 8.633,
+          "decode_tokens_per_second": 0.115834588,
+          "native_process_seconds": 16.875,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 1965932544,
+          "prefill_latency_seconds": 8.242,
+          "prefill_tokens_per_second": 0.121329774,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 17.105064500006847
+        },
+        {
+          "allocation_bytes_requested": 1592192256,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 5262,
+          "allocation_profile": {
+            "bytes_requested": 1592192256,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 5262,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 8.692,
+          "decode_tokens_per_second": 0.11504832,
+          "native_process_seconds": 16.818,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 1964736512,
+          "prefill_latency_seconds": 8.126,
+          "prefill_tokens_per_second": 0.123061777,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 17.056494999997085
+        }
+      ],
+      "scratch_policy": "persistent",
+      "summary": {
+        "allocation_bytes_requested": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1592192256.0,
+          "median": 1592192256.0,
+          "min": 1592192256.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_calloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 4.0,
+          "median": 4.0,
+          "min": 4.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_free_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 54293.0,
+          "median": 54293.0,
+          "min": 54293.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_malloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 5262.0,
+          "median": 5262.0,
+          "min": 5262.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_realloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.05900000000000105,
+          "max": 8.757,
+          "median": 8.692,
+          "min": 8.633,
+          "pstdev": 0.050642538114382546,
+          "stdev": 0.06202418882984309
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0007862680000000066,
+          "max": 0.115834588,
+          "median": 0.11504832,
+          "min": 0.114194359,
+          "pstdev": 0.0006698107468851874,
+          "stdev": 0.0008203472770506031
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.05699999999999861,
+          "max": 17.061,
+          "median": 16.875,
+          "min": 16.818,
+          "pstdev": 0.10375933692926098,
+          "stdev": 0.1270787157631043
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 8192.0,
+          "max": 1965932544.0,
+          "median": 1964744704.0,
+          "min": 1964736512.0,
+          "pstdev": 561893.9717586109,
+          "stdev": 688176.7601772092
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.06199999999999939,
+          "max": 8.304,
+          "median": 8.242,
+          "min": 8.126,
+          "pstdev": 0.07377443098165332,
+          "stdev": 0.09035485598461265
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0009058819999999967,
+          "max": 0.123061777,
+          "median": 0.121329774,
+          "min": 0.120423892,
+          "pstdev": 0.0010943741927166484,
+          "stdev": 0.0013403291799130256
+        },
+        "scratch_growth_events": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "scratch_peak_capacity_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 65536.0,
+          "median": 65536.0,
+          "min": 65536.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.04856950000976212,
+          "max": 17.287937500004773,
+          "median": 17.105064500006847,
+          "min": 17.056494999997085,
+          "pstdev": 0.09964780271271437,
+          "stdev": 0.1220431353178378
+        }
+      },
+      "warmups": [
+        {
+          "allocation_bytes_requested": 1592192256,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 5262,
+          "allocation_profile": {
+            "bytes_requested": 1592192256,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 5262,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 8.783,
+          "decode_tokens_per_second": 0.113856313,
+          "native_process_seconds": 16.974,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              648938303818007011
+            ],
+            "final_residual_checksums": [
+              11401753417758216440
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 2757613331181102236,
+            "logits_checksums": [
+              13347842135191822952
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 3644865919051889479
+          },
+          "peak_rss_bytes": 1965137920,
+          "prefill_latency_seconds": 8.191,
+          "prefill_tokens_per_second": 0.122085215,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 17.266508800006704
+        }
+      ]
+    },
+    {
+      "activation_format": "q8_k_compat",
+      "command": [
+        "build\\qxqxf.exe",
+        "prompt-state-loop-probe",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "tests\\fixtures\\q8k_perf_prompt.txt",
+        "--generate",
+        "1",
+        "--layers",
+        "48",
+        "--ctx",
+        "16",
+        "--kv",
+        "int8",
+        "--activation",
+        "q8_k_compat",
+        "--io-backend",
+        "mmap",
+        "--scratch-policy",
+        "persistent",
+        "--temperature",
+        "0",
+        "--seed",
+        "7",
+        "--full-moe",
+        "--final-head",
+        "--bench"
+      ],
+      "io_backend": "mmap",
+      "measured": [
+        {
+          "allocation_bytes_requested": 1592192256,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 5262,
+          "allocation_profile": {
+            "bytes_requested": 1592192256,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 5262,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 2.389,
+          "decode_tokens_per_second": 0.418585182,
+          "native_process_seconds": 4.303,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 1965092864,
+          "prefill_latency_seconds": 1.914,
+          "prefill_tokens_per_second": 0.52246604,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 4.586475900010555
+        },
+        {
+          "allocation_bytes_requested": 1592192256,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 5262,
+          "allocation_profile": {
+            "bytes_requested": 1592192256,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 5262,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 2.326,
+          "decode_tokens_per_second": 0.429922614,
+          "native_process_seconds": 4.481,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 1964748800,
+          "prefill_latency_seconds": 2.155,
+          "prefill_tokens_per_second": 0.464037123,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 4.716039100007038
+        },
+        {
+          "allocation_bytes_requested": 1592192256,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 5262,
+          "allocation_profile": {
+            "bytes_requested": 1592192256,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 5262,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 2.314,
+          "decode_tokens_per_second": 0.432152118,
+          "native_process_seconds": 4.245,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 1964748800,
+          "prefill_latency_seconds": 1.931,
+          "prefill_tokens_per_second": 0.51786639,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 4.469629200000782
+        }
+      ],
+      "scratch_policy": "persistent",
+      "summary": {
+        "allocation_bytes_requested": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1592192256.0,
+          "median": 1592192256.0,
+          "min": 1592192256.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_calloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 4.0,
+          "median": 4.0,
+          "min": 4.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_free_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 54293.0,
+          "median": 54293.0,
+          "min": 54293.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_malloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 5262.0,
+          "median": 5262.0,
+          "min": 5262.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "allocation_realloc_calls": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "decode_latency_seconds": {
+          "count": 3,
+          "mad": 0.01200000000000001,
+          "max": 2.389,
+          "median": 2.326,
+          "min": 2.314,
+          "pstdev": 0.032893768406796926,
+          "stdev": 0.04028647415696722
+        },
+        "decode_tokens_per_second": {
+          "count": 3,
+          "mad": 0.0022295039999999933,
+          "max": 0.432152118,
+          "median": 0.429922614,
+          "min": 0.418585182,
+          "pstdev": 0.005940162781801848,
+          "stdev": 0.007275183902243008
+        },
+        "native_process_seconds": {
+          "count": 3,
+          "mad": 0.05799999999999983,
+          "max": 4.481,
+          "median": 4.303,
+          "min": 4.245,
+          "pstdev": 0.10041248262375874,
+          "stdev": 0.12297967311714555
+        },
+        "peak_rss_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1965092864.0,
+          "median": 1964748800.0,
+          "min": 1964748800.0,
+          "pstdev": 162193.32504144553,
+          "stdev": 198645.4430184594
+        },
+        "prefill_latency_seconds": {
+          "count": 3,
+          "mad": 0.017000000000000126,
+          "max": 2.155,
+          "median": 1.931,
+          "min": 1.914,
+          "pstdev": 0.10982106658864067,
+          "stdev": 0.13450278807519186
+        },
+        "prefill_tokens_per_second": {
+          "count": 3,
+          "mad": 0.004599649999999955,
+          "max": 0.52246604,
+          "median": 0.51786639,
+          "min": 0.464037123,
+          "pstdev": 0.026526056597811466,
+          "stdev": 0.03248765177641262
+        },
+        "scratch_growth_events": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "scratch_peak_capacity_bytes": {
+          "count": 3,
+          "mad": 0.0,
+          "max": 65536.0,
+          "median": 65536.0,
+          "min": 65536.0,
+          "pstdev": 0.0,
+          "stdev": 0.0
+        },
+        "total_latency_seconds": {
+          "count": 3,
+          "mad": 0.11684670000977349,
+          "max": 4.716039100007038,
+          "median": 4.586475900010555,
+          "min": 4.469629200000782,
+          "pstdev": 0.10064106347565406,
+          "stdev": 0.12325962634320267
+        }
+      },
+      "warmups": [
+        {
+          "allocation_bytes_requested": 1592192256,
+          "allocation_calloc_calls": 4,
+          "allocation_free_calls": 54293,
+          "allocation_malloc_calls": 5262,
+          "allocation_profile": {
+            "bytes_requested": 1592192256,
+            "calloc_calls": 4,
+            "free_calls": 54293,
+            "malloc_calls": 5262,
+            "realloc_calls": 1
+          },
+          "allocation_realloc_calls": 1,
+          "decode_latency_seconds": 2.304,
+          "decode_tokens_per_second": 0.434027778,
+          "native_process_seconds": 4.205,
+          "output_signature": {
+            "cache_readback_ok": true,
+            "final_norm_checksums": [
+              9740423844514229368
+            ],
+            "final_residual_checksums": [
+              16184155507198772844
+            ],
+            "final_token": 358,
+            "k_cache_checksum": 3866199324497196071,
+            "logits_checksums": [
+              9727720709648537766
+            ],
+            "prompt_token_ids": [
+              9707,
+              0
+            ],
+            "selected_tokens": [
+              358
+            ],
+            "v_cache_checksum": 463023536410778518
+          },
+          "peak_rss_bytes": 1964748800,
+          "prefill_latency_seconds": 1.901,
+          "prefill_tokens_per_second": 0.526038927,
+          "scratch_growth_events": 1,
+          "scratch_peak_capacity_bytes": 65536,
+          "scratch_profile": {
+            "growth_events": 1,
+            "peak_capacity_bytes": 65536,
+            "policy": "persistent"
+          },
+          "total_latency_seconds": 4.438884200004395
+        }
+      ]
+    }
+  ],
+  "claim_scope": "Pinned CPU, model, QXF, tokenizer, prompt, revision and arguments only; not global throughput or model/logit parity.",
+  "comparisons": {
+    "f32": {
+      "allocation_free_median_delta_ephemeral_minus_persistent_buffered": 672.0,
+      "allocation_free_median_delta_ephemeral_minus_persistent_mmap": 672.0,
+      "allocation_malloc_median_delta_ephemeral_minus_persistent_buffered": 480.0,
+      "allocation_malloc_median_delta_ephemeral_minus_persistent_mmap": 480.0,
+      "decode_latency_seconds_speedup_buffered_over_mmap": 0.9994393361740301,
+      "peak_rss_median_delta_bytes_mmap_minus_buffered": 1944285184.0,
+      "prefill_latency_seconds_speedup_buffered_over_mmap": 0.9760885082084225,
+      "total_latency_seconds_speedup_buffered_over_mmap": 0.9764711792751826
+    },
+    "q8_k_compat": {
+      "allocation_free_median_delta_ephemeral_minus_persistent_buffered": 672.0,
+      "allocation_free_median_delta_ephemeral_minus_persistent_mmap": 672.0,
+      "allocation_malloc_median_delta_ephemeral_minus_persistent_buffered": 480.0,
+      "allocation_malloc_median_delta_ephemeral_minus_persistent_mmap": 480.0,
+      "decode_latency_seconds_speedup_buffered_over_mmap": 1.022727272727273,
+      "peak_rss_median_delta_bytes_mmap_minus_buffered": 1944293376.0,
+      "prefill_latency_seconds_speedup_buffered_over_mmap": 0.9426356589147287,
+      "total_latency_seconds_speedup_buffered_over_mmap": 0.9517893064729268
+    }
+  },
+  "measurement": "persistent-scratch-2x2x2-baseline",
+  "output_contract": {
+    "activation_numeric_checksums_equal": false,
+    "allowed_cross_activation_differences": [
+      "selected-token sequence because q8_k_compat is an opt-in numerical mode without global greedy parity",
+      "final residual, final norm, logits, and KV cache checksums"
+    ],
+    "io_equivalence": {
+      "f32": true,
+      "q8_k_compat": true
+    },
+    "prompt_token_ids": [
+      9707,
+      0
+    ],
+    "scratch_policy_equivalence": {
+      "f32": true,
+      "q8_k_compat": true
+    },
+    "selected_tokens_by_mode": {
+      "f32": [
+        358
+      ],
+      "q8_k_compat": [
+        358
+      ]
+    },
+    "selected_tokens_equal_across_activations": true,
+    "status": "pass"
+  },
+  "phase_definitions": {
+    "decode": "Native C clock() elapsed sum for generation positions including the complete final head and per-position JSON emission.",
+    "peak_rss": "Maximum process resident set sampled by psutil at 5 ms intervals.",
+    "prefill": "Native C clock() elapsed sum for fixed prompt positions before the first generation output, including per-position JSON emission.",
+    "startup_model_load": "Wall-clock qxqxf inspect process for the same QXF; reported separately and not subtracted from inference.",
+    "total": "Wall-clock prompt-state-loop process including tokenizer/model open, allocation, prefill, decode, JSON emission and teardown."
+  },
+  "provenance": {
+    "artifacts": {
+      "benchmark_script": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\scripts\\q8k_perf_experiment.py",
+        "sha256": "e96b0f0a72f30fa1392b4a8121ce2b54b742253ef83b44cf66353767afe6f3db",
+        "size": 29970
+      },
+      "model_qxf": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+        "size": 10860081152
+      },
+      "prompt": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+        "sha256": "334d016f755cd6dc58c53a86e183882f8ec14f52fb05345887c8a5edd42c87b7",
+        "size": 6
+      },
+      "qx_exe": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+        "sha256": "970d4e49e39db54e6b641746a69e11f160dbe251f86deed4e4dabb98841c556d",
+        "size": 614912
+      },
+      "source_model_gguf": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.gguf",
+        "sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+        "size": 10865578560
+      },
+      "tokenizer_qxt": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt",
+        "sha256": "8ec26e5ae058b271c0e17ee28aea3cf4d2b9ae9a4cd8f68f7aac81e9380761c6",
+        "size": 5168466
+      }
+    },
+    "fixed_arguments": {
+      "activation_modes": [
+        "f32",
+        "q8_k_compat"
+      ],
+      "ctx": 16,
+      "generation_steps": 1,
+      "io_backends": [
+        "buffered",
+        "mmap"
+      ],
+      "kv": "int8",
+      "layers": 48,
+      "repetitions": 3,
+      "scratch_policies": [
+        "ephemeral",
+        "persistent"
+      ],
+      "seed": 7,
+      "temperature": 0,
+      "warmups": 1
+    },
+    "platform": {
+      "machine": "AMD64",
+      "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+      "python": "3.11.15",
+      "release": "10",
+      "system": "Windows"
+    },
+    "source_state": {
+      "revision": "6a25a04f70b7a9161e4a6f4fda81eabef7e2d646",
+      "working_tree_diff_sha256": "aeff6b8bdc7e42054b774d22a143579a26fba0b0c85df4f27c40a2618ea100cc",
+      "working_tree_dirty": true
+    }
+  },
+  "schema": 4,
+  "startup_model_load": [
+    {
+      "command": [
+        "build\\qxqxf.exe",
+        "inspect-tensor",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--name",
+        "token_embd.weight",
+        "--io-backend",
+        "buffered"
+      ],
+      "io_backend": "buffered",
+      "measured": [
+        0.01841479999711737,
+        0.007252300012623891,
+        0.007281600002897903
+      ],
+      "summary_seconds": {
+        "count": 3,
+        "mad": 2.929999027401209e-05,
+        "max": 0.01841479999711737,
+        "median": 0.007281600002897903,
+        "min": 0.007252300012623891,
+        "pstdev": 0.005255160495535532,
+        "stdev": 0.006436230865246824
+      },
+      "warmups": [
+        0.5933605000027455
+      ]
+    },
+    {
+      "command": [
+        "build\\qxqxf.exe",
+        "inspect-tensor",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--name",
+        "token_embd.weight",
+        "--io-backend",
+        "mmap"
+      ],
+      "io_backend": "mmap",
+      "measured": [
+        0.0072619999991729856,
+        0.0072613999946042895,
+        0.0072623000014573336
+      ],
+      "summary_seconds": {
+        "count": 3,
+        "mad": 3.00002284348011e-07,
+        "max": 0.0072623000014573336,
+        "median": 0.0072619999991729856,
+        "min": 0.0072613999946042895,
+        "pstdev": 3.741685877599306e-07,
+        "stdev": 4.582610588948087e-07
+      },
+      "warmups": [
+        0.009110500002861954
+      ]
+    }
+  ],
+  "status": "pass"
+}

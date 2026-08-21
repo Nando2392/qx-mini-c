@@ -57,6 +57,7 @@ perturbación escalada layer 1: GREEN; respuesta no suave, top-8 estable, cruces
 snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + replay 1
 baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
 QXF mmap read-only opt-in: GREEN local WSL2; gate 2x2 exacto por modalidad, buffered permanece default
+scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend, ephemeral permanece default
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -88,7 +89,9 @@ El bisect descendente [[layer41-iq3s-q8k]] cerró layers 44–42 y localizó en 
 
 La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coincide con llama F16/Q8_0 en `[1124, 50853]` para `[42]`, y coincide con llama F16 en `[358, 1184]` para `Hello!`. Llama Q8_0 produce `[358, 614]`; cobertura exhaustiva y paridad exacta de logits siguen pendientes.
 
-[[qxf-mmap-io]] añade un backend QXF read-only explícitamente opt-in sin alterar kernels. El gate 2×2 WSL2 preserva exactamente outputs buffered/mmap dentro de F32 y `q8_k_compat`; observa ratios de wall-clock total `1.25152×` y `1.41963×`, respectivamente, pero mmap añade ~`2.34 GB` de RSS y empeora prefill en este slice. Buffered sigue siendo default y la evidencia no autoriza inferencias de throughput global.
+[[qxf-mmap-io]] añade un backend QXF read-only explícitamente opt-in sin alterar kernels. El JSON final de Issue #24 (`wiki/evidence/issue-24-qxf-mmap-baseline.json`) supersede números antiguos: el gate 2×2 preserva exactamente outputs buffered/mmap dentro de F32 y `q8_k_compat`; observa ratios de wall-clock total `2.12548×` y `1.96456×`, respectivamente, mientras mmap añade aproximadamente `2.35 GB` de peak RSS y prefill/decode nativos no demuestran mejora material. Buffered sigue siendo default y la evidencia no autoriza inferencias de throughput global.
+
+[[persistent-scratch-buffers]] completa Issue #25 para la prioridad CPU 2. La política `--scratch-policy persistent` queda opt-in; `ephemeral` sigue default/control. En la matriz 2×2×2 con 1 warm-up y 3 mediciones por celda, persistent reduce `480` malloc y `672` frees medianos por activación/backend, retiene `65,536` bytes de scratch, conserva outputs exactos por modalidad/backend y no muestra mejora wall-clock material. No se inicia prioridad 3 desde este resultado.
 
 ## Después
 

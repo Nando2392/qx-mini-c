@@ -15,8 +15,153 @@
 
 #include "qx_iq2xs_tables.inc"
 
-static qx_io_backend qx_requested_io_backend = QX_IO_BUFFERED;
+static struct {
+    uint64_t malloc_calls;
+    uint64_t calloc_calls;
+    uint64_t realloc_calls;
+    uint64_t free_calls;
+    uint64_t bytes_requested;
+} qx_alloc_profile;
+
+static void qx_alloc_profile_print(void) {
+    if (!getenv("QX_ALLOC_PROFILE")) return;
+    fprintf(stderr,
+        "QX_ALLOC_PROFILE {\"malloc\":%llu,\"calloc\":%llu,\"realloc\":%llu,\"free\":%llu,\"bytes_requested\":%llu}\n",
+        (unsigned long long)qx_alloc_profile.malloc_calls,
+        (unsigned long long)qx_alloc_profile.calloc_calls,
+        (unsigned long long)qx_alloc_profile.realloc_calls,
+        (unsigned long long)qx_alloc_profile.free_calls,
+        (unsigned long long)qx_alloc_profile.bytes_requested);
+}
+
+static void *qx_profile_malloc(size_t size) {
+    qx_alloc_profile.malloc_calls++;
+    qx_alloc_profile.bytes_requested += (uint64_t)size;
+    return malloc(size);
+}
+
+static void *qx_profile_calloc(size_t count, size_t size) {
+    qx_alloc_profile.calloc_calls++;
+    if (size && count <= SIZE_MAX / size) qx_alloc_profile.bytes_requested += (uint64_t)(count * size);
+    return calloc(count, size);
+}
+
+static void *qx_profile_realloc(void *ptr, size_t size) {
+    qx_alloc_profile.realloc_calls++;
+    qx_alloc_profile.bytes_requested += (uint64_t)size;
+    return realloc(ptr, size);
+}
+
+static void qx_profile_free(void *ptr) {
+    qx_alloc_profile.free_calls++;
+    free(ptr);
+}
+
+static void qx_alloc_profile_init_once(void) {
+    static int initialized = 0;
+    if (!initialized) {
+        initialized = 1;
+        atexit(qx_alloc_profile_print);
+    }
+}
+
+#define malloc(size) qx_profile_malloc(size)
+#define calloc(count, size) qx_profile_calloc(count, size)
+#define realloc(ptr, size) qx_profile_realloc(ptr, size)
+#define free(ptr) qx_profile_free(ptr)
+
 static void qx_set_err(char *err, uint64_t err_len, const char *msg);
+
+typedef struct qx_alloc_snapshot {
+    uint64_t malloc_calls;
+    uint64_t calloc_calls;
+    uint64_t realloc_calls;
+    uint64_t free_calls;
+    uint64_t bytes_requested;
+} qx_alloc_snapshot;
+
+typedef struct qx_scratch_workspace {
+    unsigned char *data;
+    size_t capacity;
+    size_t used;
+    size_t peak_capacity;
+    uint64_t growth_events;
+} qx_scratch_workspace;
+
+static qx_alloc_snapshot qx_alloc_profile_snapshot(void) {
+    qx_alloc_snapshot snapshot;
+    snapshot.malloc_calls = qx_alloc_profile.malloc_calls;
+    snapshot.calloc_calls = qx_alloc_profile.calloc_calls;
+    snapshot.realloc_calls = qx_alloc_profile.realloc_calls;
+    snapshot.free_calls = qx_alloc_profile.free_calls;
+    snapshot.bytes_requested = qx_alloc_profile.bytes_requested;
+    return snapshot;
+}
+
+static qx_alloc_snapshot qx_alloc_profile_delta(qx_alloc_snapshot start) {
+    qx_alloc_snapshot end = qx_alloc_profile_snapshot();
+    end.malloc_calls -= start.malloc_calls;
+    end.calloc_calls -= start.calloc_calls;
+    end.realloc_calls -= start.realloc_calls;
+    end.free_calls -= start.free_calls;
+    end.bytes_requested -= start.bytes_requested;
+    return end;
+}
+
+static void qx_scratch_free(qx_scratch_workspace *workspace) {
+    if (!workspace) return;
+    free(workspace->data);
+    memset(workspace, 0, sizeof(*workspace));
+}
+
+static void qx_scratch_reset(qx_scratch_workspace *workspace) {
+    if (workspace) workspace->used = 0u;
+}
+
+static int qx_scratch_reserve_capacity(qx_scratch_workspace *workspace, size_t required, char *err, uint64_t err_len) {
+    if (!workspace) { qx_set_err(err, err_len, "invalid scratch workspace"); return 0; }
+    if (required <= workspace->capacity) return 1;
+    size_t capacity = workspace->capacity ? workspace->capacity : 4096u;
+    while (capacity < required) {
+        if (capacity > SIZE_MAX / 2u) { qx_set_err(err, err_len, "scratch workspace size overflow"); return 0; }
+        capacity *= 2u;
+    }
+    unsigned char *next = (unsigned char *)realloc(workspace->data, capacity);
+    if (!next) { qx_set_err(err, err_len, "out of memory"); return 0; }
+    workspace->data = next;
+    workspace->capacity = capacity;
+    if (workspace->peak_capacity < capacity) workspace->peak_capacity = capacity;
+    workspace->growth_events++;
+    return 1;
+}
+
+static int qx_scratch_plan_add(size_t *cursor, size_t count, size_t size, char *err, uint64_t err_len) {
+    if (!cursor) { qx_set_err(err, err_len, "invalid scratch plan"); return 0; }
+    if (size && count > SIZE_MAX / size) { qx_set_err(err, err_len, "scratch allocation size overflow"); return 0; }
+    size_t bytes = count * size;
+    if (*cursor > SIZE_MAX - 15u) { qx_set_err(err, err_len, "scratch allocation size overflow"); return 0; }
+    size_t aligned = (*cursor + 15u) & ~(size_t)15u;
+    if (aligned > SIZE_MAX - bytes) { qx_set_err(err, err_len, "scratch allocation size overflow"); return 0; }
+    *cursor = aligned + bytes;
+    return 1;
+}
+
+static void *qx_scratch_alloc(qx_scratch_workspace *workspace, size_t count, size_t size, int zero, char *err, uint64_t err_len) {
+    if (size && count > SIZE_MAX / size) { qx_set_err(err, err_len, "scratch allocation size overflow"); return NULL; }
+    size_t bytes = count * size;
+    if (!workspace) return zero ? calloc(count, size) : malloc(bytes);
+    if (workspace->used > SIZE_MAX - 15u) { qx_set_err(err, err_len, "scratch allocation size overflow"); return NULL; }
+    size_t aligned = (workspace->used + 15u) & ~(size_t)15u;
+    if (aligned > SIZE_MAX - bytes) { qx_set_err(err, err_len, "scratch allocation size overflow"); return NULL; }
+    size_t required = aligned + bytes;
+    if (!qx_scratch_reserve_capacity(workspace, required, err, err_len)) return NULL;
+    void *ptr = workspace->data + aligned;
+    workspace->used = required;
+    if (zero && bytes) memset(ptr, 0, bytes);
+    return ptr;
+}
+
+static qx_io_backend qx_requested_io_backend = QX_IO_BUFFERED;
 
 int qx_set_io_backend(const char *backend, char *err, uint64_t err_len) {
     if (!backend || strcmp(backend, "buffered") == 0) {
@@ -563,6 +708,7 @@ static int qx_validate_tensor_traits(const qx_tensor_dir_entry *tensor) {
 
 int qx_open_file(const char *path, qx_file *out, char *err, uint64_t err_len) {
     if (!path || !out) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    qx_alloc_profile_init_once();
     memset(out, 0, sizeof(*out));
     out->fp = fopen(path, "rb");
     if (!out->fp) { qx_set_errno_err(err, err_len, errno); return 0; }
@@ -4636,6 +4782,7 @@ static int qx_rope_gqa_attention_partial(
     double *softmax_min_out, double *softmax_max_out, uint32_t *q_heads_run_out,
     uint64_t *q_values_out, const char **q_name_out, const char **o_name_out,
     const char *activation_format, qx_projection_workspace *projection_workspace,
+    qx_scratch_workspace *scratch_workspace,
     char *err, uint64_t err_len) {
     const double rope_theta = 1000000.0;
     uint32_t group_size = kv_heads_total ? q_heads_total / kv_heads_total : 1u;
@@ -4662,14 +4809,29 @@ static int qx_rope_gqa_attention_partial(
     memset(out_vec, 0, (size_t)dims * sizeof(float));
 
     uint32_t attend_count = step + 1u;
-    unsigned char *qbuf = (unsigned char *)malloc(q_dims);
-    unsigned char *obuf = (unsigned char *)malloc(output_dims);
-    float *qfloat = (float *)malloc((size_t)q_dims * sizeof(float));
-    float *context = (float *)calloc(q_dims, sizeof(float));
-    double *scores = (double *)malloc((size_t)q_heads_run * attend_count * sizeof(double));
-    double *weights = (double *)malloc((size_t)q_heads_run * attend_count * sizeof(double));
+    qx_scratch_reset(scratch_workspace);
+    if (q_heads_run && (size_t)q_heads_run > SIZE_MAX / (size_t)attend_count) {
+        qx_set_err(err, err_len, "scratch allocation size overflow"); return 0;
+    }
+    size_t score_count = (size_t)q_heads_run * (size_t)attend_count;
+    if (scratch_workspace) {
+        size_t scratch_required = 0u;
+        if (!qx_scratch_plan_add(&scratch_required, q_dims, 1u, err, err_len) ||
+            !qx_scratch_plan_add(&scratch_required, output_dims, 1u, err, err_len) ||
+            !qx_scratch_plan_add(&scratch_required, q_dims, sizeof(float), err, err_len) ||
+            !qx_scratch_plan_add(&scratch_required, q_dims, sizeof(float), err, err_len) ||
+            !qx_scratch_plan_add(&scratch_required, score_count, sizeof(double), err, err_len) ||
+            !qx_scratch_plan_add(&scratch_required, score_count, sizeof(double), err, err_len) ||
+            !qx_scratch_reserve_capacity(scratch_workspace, scratch_required, err, err_len)) return 0;
+    }
+    unsigned char *qbuf = (unsigned char *)qx_scratch_alloc(scratch_workspace, q_dims, 1u, 0, err, err_len);
+    unsigned char *obuf = (unsigned char *)qx_scratch_alloc(scratch_workspace, output_dims, 1u, 0, err, err_len);
+    float *qfloat = (float *)qx_scratch_alloc(scratch_workspace, q_dims, sizeof(float), 0, err, err_len);
+    float *context = (float *)qx_scratch_alloc(scratch_workspace, q_dims, sizeof(float), 1, err, err_len);
+    double *scores = (double *)qx_scratch_alloc(scratch_workspace, score_count, sizeof(double), 0, err, err_len);
+    double *weights = (double *)qx_scratch_alloc(scratch_workspace, score_count, sizeof(double), 0, err, err_len);
     if (!qbuf || !obuf || !qfloat || !context || !scores || !weights) {
-        free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights);
+        if (!scratch_workspace) { free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); }
         qx_set_err(err, err_len, "out of memory"); return 0;
     }
 
@@ -4677,10 +4839,10 @@ static int qx_rope_gqa_attention_partial(
     uint64_t qvals = 0;
     if (!qx_projection_matvec_fill_mode(file, qt, qbuf, qfloat, q_dims, dims, residual, dims, token, layer, seed ^ 0xa511e9b3u,
             activation_format, projection_workspace, &qprobe, &qvals, err, err_len)) {
-        free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); return 0;
+        if (!scratch_workspace) { free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); } return 0;
     }
     if (qnt && !qx_apply_f32_head_rmsnorm(file, qnt, qfloat, q_heads_run, head_dim, err, err_len)) {
-        free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); return 0;
+        if (!scratch_workspace) { free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); } return 0;
     }
     qx_apply_rope(qfloat, q_heads_run, head_dim, step, rope_theta);
 
@@ -4736,7 +4898,7 @@ static int qx_rope_gqa_attention_partial(
 
     if (context_capture) {
         if (context_capture_count < q_dims) {
-            free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights);
+            if (!scratch_workspace) { free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); }
             qx_set_err(err, err_len, "attention context capture too small"); return 0;
         }
         memcpy(context_capture, context, (size_t)q_dims * sizeof(float));
@@ -4745,7 +4907,7 @@ static int qx_rope_gqa_attention_partial(
     uint64_t ovals = 0;
     if (!qx_projection_matvec_fill_mode(file, ot, obuf, out_vec, output_dims, q_dims, context, q_dims, token, layer, seed ^ 0x63d83595u,
             activation_format, projection_workspace, &oprobe, &ovals, err, err_len)) {
-        free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); return 0;
+        if (!scratch_workspace) { free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); } return 0;
     }
     if (softmax_sum_out) *softmax_sum_out = sum_total / (double)q_heads_run;
     if (softmax_min_out) *softmax_min_out = sum_min;
@@ -4754,7 +4916,7 @@ static int qx_rope_gqa_attention_partial(
     if (q_values_out) *q_values_out = qvals;
     if (q_name_out) *q_name_out = qt->name;
     if (o_name_out) *o_name_out = ot->name;
-    free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights);
+    if (!scratch_workspace) { free(qbuf); free(obuf); free(qfloat); free(context); free(scores); free(weights); }
     return 1;
 }
 
@@ -4762,7 +4924,8 @@ static int qx_apply_real_moe_layer(
     qx_file *file, uint32_t layer, const float *residual_after_attention, uint32_t hidden,
     float *layer_output, float *moe_output_capture, uint32_t selected_experts[8], double routing_weights[8],
     uint32_t *gate_type_out, uint32_t *up_type_out, uint32_t *down_type_out,
-    const char *activation_format, double *moe_l2_out, char *err, uint64_t err_len) {
+    const char *activation_format, qx_scratch_workspace *scratch_workspace,
+    double *moe_l2_out, char *err, uint64_t err_len) {
     int use_q8_k = activation_format && strcmp(activation_format, "q8_k_compat") == 0;
     if (!use_q8_k && (!activation_format || strcmp(activation_format, "f32") != 0)) {
         qx_set_err(err, err_len, "unsupported real MoE activation format"); return 0;
@@ -4790,7 +4953,17 @@ static int qx_apply_real_moe_layer(
         down_exps->dims[0] != intermediate || down_exps->dims[1] != hidden) {
         qx_set_err(err, err_len, "unsupported real MoE tensor layout"); return 0;
     }
-    float *buffers = (float *)calloc((size_t)hidden * 4u + (size_t)intermediate * 3u, sizeof(float));
+    qx_scratch_reset(scratch_workspace);
+    if ((size_t)hidden > SIZE_MAX / 4u || (size_t)intermediate > SIZE_MAX / 3u) {
+        qx_set_err(err, err_len, "scratch allocation size overflow"); return 0;
+    }
+    size_t hidden_scratch = (size_t)hidden * 4u;
+    size_t intermediate_scratch = (size_t)intermediate * 3u;
+    if (hidden_scratch > SIZE_MAX - intermediate_scratch) {
+        qx_set_err(err, err_len, "scratch allocation size overflow"); return 0;
+    }
+    float *buffers = (float *)qx_scratch_alloc(scratch_workspace,
+        hidden_scratch + intermediate_scratch, sizeof(float), 1, err, err_len);
     if (!buffers) { qx_set_err(err, err_len, "out of memory"); return 0; }
     float *ffn_input = buffers;
     float *moe_output = ffn_input + hidden;
@@ -4800,11 +4973,11 @@ static int qx_apply_real_moe_layer(
     float *expert_hidden = up_values + intermediate;
     double ffn_rms = 0.0;
     if (!qx_apply_f32_rmsnorm(file, ffn_norm, residual_after_attention, ffn_input, hidden, &ffn_rms, err, err_len)) {
-        free(buffers); return 0;
+        if (!scratch_workspace) free(buffers); return 0;
     }
     unsigned char *router_raw = NULL;
     if (!qx_read_raw_span(file, router->offset, (uint64_t)hidden * experts * 4ull, &router_raw, err, err_len)) {
-        free(buffers); return 0;
+        if (!scratch_workspace) free(buffers); return 0;
     }
     double logits[128], probabilities[128];
     double max_logit = -1.0e300;
@@ -4818,7 +4991,7 @@ static int qx_apply_real_moe_layer(
     free(router_raw);
     double denominator = 0.0;
     for (uint32_t expert = 0; expert < experts; ++expert) { probabilities[expert] = exp(logits[expert] - max_logit); denominator += probabilities[expert]; }
-    if (!isfinite(denominator) || denominator <= 0.0) { free(buffers); qx_set_err(err, err_len, "invalid router softmax"); return 0; }
+    if (!isfinite(denominator) || denominator <= 0.0) { if (!scratch_workspace) free(buffers); qx_set_err(err, err_len, "invalid router softmax"); return 0; }
     for (uint32_t expert = 0; expert < experts; ++expert) probabilities[expert] /= denominator;
     unsigned char picked[128] = {0};
     double selected_weight_sum = 0.0;
@@ -4833,24 +5006,24 @@ static int qx_apply_real_moe_layer(
         routing_weights[rank] = best_probability;
         selected_weight_sum += best_probability;
     }
-    if (!isfinite(selected_weight_sum) || selected_weight_sum <= 0.0) { free(buffers); qx_set_err(err, err_len, "invalid selected router weights"); return 0; }
+    if (!isfinite(selected_weight_sum) || selected_weight_sum <= 0.0) { if (!scratch_workspace) free(buffers); qx_set_err(err, err_len, "invalid selected router weights"); return 0; }
     for (uint32_t rank = 0; rank < 8u; ++rank) routing_weights[rank] /= selected_weight_sum;
     int gate_up_q8_k = use_q8_k && ((gate_exps->flags == 17u && up_exps->flags == 17u) ||
         (gate_exps->flags == 22u && up_exps->flags == 22u));
     int down_q8_k = use_q8_k && (down_exps->flags == 18u || down_exps->flags == 21u || down_exps->flags == 23u);
     qx_projection_workspace gate_up_workspace = {0};
-    if (gate_up_q8_k && !qx_quantize_q8_k(ffn_input, hidden, &gate_up_workspace, err, err_len)) { free(buffers); return 0; }
+    if (gate_up_q8_k && !qx_quantize_q8_k(ffn_input, hidden, &gate_up_workspace, err, err_len)) { if (!scratch_workspace) free(buffers); return 0; }
     for (uint32_t rank = 0; rank < 8u; ++rank) {
         uint32_t expert = selected_experts[rank];
         if (!qx_packed_expert_matvec_mode(file, gate_exps, expert, ffn_input, hidden, gate_values, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, err, err_len) ||
             !qx_packed_expert_matvec_mode(file, up_exps, expert, ffn_input, hidden, up_values, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, err, err_len)) {
-            free(buffers); return 0;
+            if (!scratch_workspace) free(buffers); return 0;
         }
         for (uint32_t i = 0; i < intermediate; ++i) expert_hidden[i] = (float)(qx_silu((double)gate_values[i]) * (double)up_values[i]);
         qx_projection_workspace down_workspace = {0};
-        if (down_q8_k && !qx_quantize_q8_k(expert_hidden, intermediate, &down_workspace, err, err_len)) { free(buffers); return 0; }
+        if (down_q8_k && !qx_quantize_q8_k(expert_hidden, intermediate, &down_workspace, err, err_len)) { if (!scratch_workspace) free(buffers); return 0; }
         if (!qx_packed_expert_matvec_mode(file, down_exps, expert, expert_hidden, intermediate, expert_output, hidden, down_q8_k ? &down_workspace : NULL, err, err_len)) {
-            free(buffers); return 0;
+            if (!scratch_workspace) free(buffers); return 0;
         }
         for (uint32_t i = 0; i < hidden; ++i) moe_output[i] += (float)(routing_weights[rank] * (double)expert_output[i]);
     }
@@ -4864,7 +5037,7 @@ static int qx_apply_real_moe_layer(
     if (up_type_out) *up_type_out = up_exps->flags;
     if (down_type_out) *down_type_out = down_exps->flags;
     if (moe_l2_out) *moe_l2_out = sqrt(moe_l2);
-    free(buffers);
+    if (!scratch_workspace) free(buffers);
     return 1;
 }
 
@@ -5519,10 +5692,15 @@ static int qx_read_accumulated_kv_snapshot(
     return 1;
 }
 
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
         qx_set_err(err, err_len, "unsupported activation format"); return 0;
+    }
+    if (!scratch_policy) scratch_policy = "ephemeral";
+    int scratch_persistent = strcmp(scratch_policy, "persistent") == 0;
+    if (!scratch_persistent && strcmp(scratch_policy, "ephemeral") != 0) {
+        qx_set_err(err, err_len, "unsupported scratch policy"); return 0;
     }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
@@ -5552,6 +5730,9 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     }
     qx_file file;
     if (!qx_open_file(path, &file, err, err_len)) return 0;
+    qx_alloc_snapshot alloc_start = qx_alloc_profile_snapshot();
+    qx_scratch_workspace scratch_workspace = {0};
+    qx_scratch_workspace *scratch = scratch_persistent ? &scratch_workspace : NULL;
     if (full_moe) {
         if (strcmp(kv_format, "int8") != 0 && strcmp(kv_format, "f16") != 0 && strcmp(kv_format, "fp16") != 0 && strcmp(kv_format, "f32") != 0) { qx_close_file(&file); qx_set_err(err, err_len, "full MoE state loop requires INT8, F16, or diagnostic F32 KV"); return 0; }
         residual_dims = file.header.manifest.hidden;
@@ -5660,24 +5841,24 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     float *kscales = causal_attention ? (float *)calloc((size_t)cache_slots, sizeof(float)) : NULL;
     float *vscales = causal_attention ? (float *)calloc((size_t)cache_slots, sizeof(float)) : NULL;
     float *residual_vec = residual_vector ? (float *)malloc((size_t)residual_dims * (full_moe ? 2u : 1u) * sizeof(float)) : NULL;
-    if (!kbuf || !vbuf || (causal_attention && (!kcache || !vcache || !kfloat || !vfloat || !kscales || !vscales)) || (residual_vector && !residual_vec)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+    if (!kbuf || !vbuf || (causal_attention && (!kcache || !vcache || !kfloat || !vfloat || !kscales || !vscales)) || (residual_vector && !residual_vec)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
     uint32_t position_base = 0u;
     uint32_t snapshot_next_token = prompt_tokens[0];
     if (kv_snapshot_in_path && *kv_snapshot_in_path) {
         if (prompt_count != 1u || !qx_read_accumulated_kv_snapshot(kv_snapshot_in_path, layers, ctx_tokens, kv_heads,
                 head_dim, kv_format, bytes_per_k_or_v, seed, kcache, vcache, kscales, vscales,
                 &position_base, &snapshot_next_token, err, err_len)) {
-            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file);
+            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file);
             if (prompt_count != 1u) qx_set_err(err, err_len, "KV snapshot replay requires exactly one continuation token");
             return 0;
         }
         if (prompt_tokens[0] != snapshot_next_token) {
-            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file);
+            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file);
             qx_set_err(err, err_len, "KV snapshot continuation token mismatch"); return 0;
         }
     }
     if (position_base > ctx_tokens || steps > ctx_tokens - position_base || position_base > 64u || steps > 64u - position_base) {
-        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file);
+        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file);
         qx_set_err(err, err_len, "KV snapshot plus replay steps exceed context"); return 0;
     }
     uint32_t current = prompt_tokens[0];
@@ -5705,6 +5886,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
     fprintf(out, "  \"activation_format\": \"%s\",\n", activation_format);
     fprintf(out, "  \"io_backend\": \"%s\",\n", qx_io_backend_name(file.io_backend));
+    fprintf(out, "  \"scratch_policy\": \"%s\",\n", scratch_policy);
     fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
     fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
     fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);
@@ -5740,10 +5922,10 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         double residual_rms = 0.0;
         uint64_t residual_checksum = 0;
         if (residual_vector) {
-            if (!qx_fill_residual_vector_from_embedding(&file, current, norm_name, residual_vec, residual_dims, &residual_rms, &residual_checksum, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
+            if (!qx_fill_residual_vector_from_embedding(&file, current, norm_name, residual_vec, residual_dims, &residual_rms, &residual_checksum, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
             residual_values = residual_dims;
             if (residual_replay) {
-                if (!qx_read_exact_f32_sidecar(residual_input_path, residual_vec, residual_values, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
+                if (!qx_read_exact_f32_sidecar(residual_input_path, residual_vec, residual_values, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
                 double sumsq = 0.0;
                 for (uint32_t ri = 0; ri < residual_values; ++ri) sumsq += (double)residual_vec[ri] * (double)residual_vec[ri];
                 residual_rms = sqrt(sumsq / (double)residual_values);
@@ -5757,7 +5939,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             uint64_t residual_input_checksum = residual_vec && residual_values
                 ? qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float)) : 0ull;
             if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "input", residual_vec, residual_values, err, err_len)) {
-                free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
             }
             float *projection_residual = residual_vec;
             if (full_moe) {
@@ -5769,7 +5951,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                 double attention_rms = 0.0;
                 projection_residual = residual_vec + residual_values;
                 if (!attention_norm || !q_norm || !qx_apply_f32_rmsnorm(&file, attention_norm, residual_vec, projection_residual, residual_values, &attention_rms, err, err_len)) {
-                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
             }
             uint64_t k_offset = (uint64_t)layer * layer_stride + (uint64_t)step * bytes_per_token_layer;
@@ -5795,18 +5977,18 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                     kt = qx_find_tensor(&file, kn);
                     vt = qx_find_tensor(&file, vn);
                 }
-                if (!kt || !vt) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "projection tensor not found"); return 0; }
+                if (!kt || !vt) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "projection tensor not found"); return 0; }
                 if (projection_matvec) {
                     uint32_t matvec_dims = residual_values ? residual_values : 64u;
                     if (!qx_projection_matvec_fill_mode(&file, kt, kbuf, causal_attention ? kfloat : NULL, (uint32_t)values_per_k_or_v, matvec_dims, projection_residual, residual_values, current, layer, seed + step * 17u, activation_format, &projection_workspace, &kprobe, &k_matvec_values, err, err_len) ||
                         !qx_projection_matvec_fill_mode(&file, vt, vbuf, causal_attention ? vfloat : NULL, (uint32_t)values_per_k_or_v, matvec_dims, projection_residual, residual_values, current, layer, (seed ^ 0x9e3779b9u) + step * 17u, activation_format, &projection_workspace, &vprobe, &v_matvec_values, err, err_len)) {
-                        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                     }
                     k_real_values = k_matvec_values;
                     v_real_values = v_matvec_values;
                 } else if (!qx_fill_kv_from_projection(&file, kt, kbuf, bytes_per_k_or_v, current, step, layer, seed, &k_real_values, err, err_len) ||
                     !qx_fill_kv_from_projection(&file, vt, vbuf, bytes_per_k_or_v, current, step, layer, seed ^ 0x9e3779b9u, &v_real_values, err, err_len)) {
-                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
             } else {
                 qx_fill_kv_append(kbuf, bytes_per_k_or_v, current, step, layer, seed, 0);
@@ -5816,11 +5998,11 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                 char k_norm_name[QX_NAME_MAX];
                 snprintf(k_norm_name, sizeof(k_norm_name), "blk.%u.attn_k_norm.weight", layer);
                 const qx_tensor_dir_entry *k_norm = qx_find_tensor(&file, k_norm_name);
-                if (full_moe && !k_norm) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "K head RMSNorm tensor not found"); return 0; }
-                if (k_norm && !qx_apply_f32_head_rmsnorm(&file, k_norm, kfloat, kv_heads, head_dim, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
+                if (full_moe && !k_norm) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "K head RMSNorm tensor not found"); return 0; }
+                if (k_norm && !qx_apply_f32_head_rmsnorm(&file, k_norm, kfloat, kv_heads, head_dim, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
                 if (rope_gqa_attention) qx_apply_rope(kfloat, kv_heads, head_dim, step, 1000000.0);
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "v-cur", vfloat, (uint32_t)values_per_k_or_v, err, err_len)) {
-                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
                 uint64_t scale_index = (uint64_t)layer * ctx_tokens + step;
                 if (kv_f32) {
@@ -5884,16 +6066,16 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                 uint32_t attention_context_values = q_heads * head_dim;
                 attention_context_capture = residual_dump_dir && *residual_dump_dir ? (float *)malloc((size_t)attention_context_values * sizeof(float)) : NULL;
                 if (residual_dump_dir && *residual_dump_dir && !attention_context_capture) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0;
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0;
                 }
                 int attention_ok = causal_vec && (rope_gqa_attention
-                    ? qx_rope_gqa_attention_partial(&file, layer, step, ctx_tokens, bytes_per_k_or_v, kcache, vcache, (uint32_t)values_per_k_or_v, bytes_per_value, kscales, vscales, projection_residual, residual_values, q_heads, kv_heads, head_dim, current, seed, causal_vec, attention_context_capture, attention_context_values, &causal_softmax_sum, &causal_softmax_min, &causal_softmax_max, &causal_q_heads_run, &causal_q_values, &causal_q_name, &causal_o_name, activation_format, &projection_workspace, err, err_len)
+                    ? qx_rope_gqa_attention_partial(&file, layer, step, ctx_tokens, bytes_per_k_or_v, kcache, vcache, (uint32_t)values_per_k_or_v, bytes_per_value, kscales, vscales, projection_residual, residual_values, q_heads, kv_heads, head_dim, current, seed, causal_vec, attention_context_capture, attention_context_values, &causal_softmax_sum, &causal_softmax_min, &causal_softmax_max, &causal_q_heads_run, &causal_q_values, &causal_q_name, &causal_o_name, activation_format, &projection_workspace, scratch, err, err_len)
                     : qx_causal_attention_partial(&file, layer, step, ctx_tokens, bytes_per_k_or_v, kcache, vcache, bytes_per_value, kscales, vscales, projection_residual, residual_values, current, seed, causal_vec, &causal_softmax_sum, &causal_q_values, &causal_q_name, &causal_o_name, err, err_len));
                 if (!attention_ok) {
-                    free(attention_context_capture); free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    free(attention_context_capture); free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "kqv-out", attention_context_capture, attention_context_values, err, err_len)) {
-                    free(attention_context_capture); free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    free(attention_context_capture); free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
                 free(attention_context_capture);
                 attention_context_capture = NULL;
@@ -5906,20 +6088,20 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                 attention_output_l2 = sqrt(attention_output_l2);
                 attention_output_checksum = qx_fnv1a64((const unsigned char *)causal_vec, (uint64_t)residual_values * sizeof(float));
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "ffn-inp", residual_vec, residual_values, err, err_len)) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
                 if (!qx_apply_real_moe_layer(&file, layer, residual_vec, residual_values, residual_vec,
                         residual_dump_dir && *residual_dump_dir ? causal_vec : NULL,
                         selected_experts, routing_weights, &gate_ggml_type, &up_ggml_type, &down_ggml_type,
-                        activation_format, &real_moe_output_l2, err, err_len)) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                        activation_format, scratch, &real_moe_output_l2, err, err_len)) {
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "ffn-moe-out", causal_vec, residual_values, err, err_len)) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
                 residual_output_checksum = qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float));
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "output", residual_vec, residual_values, err, err_len)) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
                 }
                 residual_probe = 0.0;
                 for (uint32_t ri = 0; ri < residual_values; ++ri) residual_probe += residual_vec[ri];
@@ -5939,7 +6121,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                     float *avec = (float *)malloc((size_t)residual_values * sizeof(float));
                     float *mvec = (float *)malloc((size_t)residual_values * sizeof(float));
                     float *outv = attention_output_vector ? (float *)malloc((size_t)residual_values * sizeof(float)) : NULL;
-                    if (!avec || !mvec || (attention_output_vector && !outv)) { free(avec); free(mvec); free(outv); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+                    if (!avec || !mvec || (attention_output_vector && !outv)) { free(avec); free(mvec); free(outv); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
                     for (uint32_t ri = 0; ri < residual_values; ++ri) {
                         double awave = ((double)(((ri + 1u) * (layer + 3u)) % 17u) - 8.0) / 8.0;
                         double mwave = ((double)(((ri + 5u) * (layer + 7u)) % 19u) - 9.0) / 9.0;
@@ -6037,9 +6219,9 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         if (final_head) {
             float *normalized = residual_vec + residual_values;
             float *logits_dump = residual_dump_dir && *residual_dump_dir ? (float *)malloc((size_t)file.header.manifest.vocab * sizeof(float)) : NULL;
-            if (residual_dump_dir && *residual_dump_dir && !logits_dump) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
-            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
-            if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0; }
+            if (residual_dump_dir && *residual_dump_dir && !logits_dump) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
+            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
+            if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
             free(logits_dump);
             memcpy(top, head_result.top, (size_t)head_result.top_n * sizeof(qx_top_token));
             sample_top_n = head_result.top_n;
@@ -6047,7 +6229,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             scanned = head_result.logits_computed;
             head_ready = 1;
         } else if (!qx_collect_top_logits(&file, residual_probe, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) {
-            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
         }
         if (!head_ready && sample_top_n > scanned) sample_top_n = scanned;
         qx_sample_result sr = qx_sample_from_top(top, sample_top_n, temperature, seed + step * 101u + current);
@@ -6099,7 +6281,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     if (kv_snapshot_out_path && *kv_snapshot_out_path && !qx_write_accumulated_kv_snapshot(
             kv_snapshot_out_path, layers, position_base + steps, ctx_tokens, kv_heads, head_dim, kv_format,
             bytes_per_k_or_v, current, seed, kcache, vcache, kscales, vscales, err, err_len)) {
-        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_close_file(&file); return 0;
+        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
     }
     fprintf(out, "],\n");
     fprintf(out, "  \"layers_run\": %llu,\n", (unsigned long long)layers_run);
@@ -6121,6 +6303,14 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             elapsed, tps, mspt, (unsigned long long)layers_run, lps,
             prefill_tokens, prefill_elapsed, prefill_tps, decode_tokens, decode_elapsed, decode_tps);
     }
+    qx_alloc_snapshot alloc_delta = qx_alloc_profile_delta(alloc_start);
+    fprintf(out, "  \"allocation_profile\": {\"malloc_calls\": %llu, \"calloc_calls\": %llu, \"realloc_calls\": %llu, \"free_calls\": %llu, \"bytes_requested\": %llu},\n",
+        (unsigned long long)alloc_delta.malloc_calls, (unsigned long long)alloc_delta.calloc_calls,
+        (unsigned long long)alloc_delta.realloc_calls, (unsigned long long)alloc_delta.free_calls,
+        (unsigned long long)alloc_delta.bytes_requested);
+    fprintf(out, "  \"scratch_profile\": {\"policy\": \"%s\", \"peak_capacity_bytes\": %llu, \"growth_events\": %llu},\n",
+        scratch_policy, (unsigned long long)scratch_workspace.peak_capacity,
+        (unsigned long long)scratch_workspace.growth_events);
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16
@@ -6148,6 +6338,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     free(kscales);
     free(vscales);
     free(residual_vec);
+    qx_scratch_free(&scratch_workspace);
     qx_close_file(&file);
     return 1;
 }
@@ -6159,7 +6350,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     }
     if (steps == 0u) steps = 1u;
     if (steps > 64u) steps = 64u;
-    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format,
+    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral",
         real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector,
         causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm_name, top_k, scan,
         logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path,

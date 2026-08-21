@@ -19,6 +19,7 @@ SPEC.loader.exec_module(PERF)
 def native_payload(
     *, activation: str, selected: tuple[int, ...], checksum_bias: int = 0,
     io_backend: str = "buffered",
+    scratch_policy: str = "ephemeral",
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -54,6 +55,7 @@ def native_payload(
         "kv_format": "int8",
         "activation_format": activation,
         "io_backend": io_backend,
+        "scratch_policy": scratch_policy,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -71,6 +73,18 @@ def native_payload(
                 "prefill": {"tokens": 1, "elapsed_sec": 1.0, "tokens_per_second": 1.0},
                 "decode": {"tokens": 2, "elapsed_sec": 2.0, "tokens_per_second": 1.0},
             },
+        },
+        "allocation_profile": {
+            "malloc_calls": 10,
+            "calloc_calls": 2,
+            "realloc_calls": 0,
+            "free_calls": 12,
+            "bytes_requested": 4096,
+        },
+        "scratch_profile": {
+            "policy": scratch_policy,
+            "peak_capacity_bytes": 0 if scratch_policy == "ephemeral" else 65536,
+            "growth_events": 0 if scratch_policy == "ephemeral" else 1,
         },
     }
 
@@ -126,6 +140,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
         payload,
         activation="q8_k_compat",
         io_backend="buffered",
+        scratch_policy="ephemeral",
         kv="int8",
         layers=48,
         ctx=16,
@@ -139,6 +154,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
             payload,
             activation="q8_k_compat",
             io_backend="buffered",
+            scratch_policy="ephemeral",
             kv="int8",
             layers=48,
             ctx=16,
@@ -152,6 +168,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
             wrong_prefill,
             activation="q8_k_compat",
             io_backend="buffered",
+            scratch_policy="ephemeral",
             kv="int8",
             layers=48,
             ctx=16,
@@ -165,6 +182,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
             wrong_backend,
             activation="q8_k_compat",
             io_backend="buffered",
+            scratch_policy="ephemeral",
             kv="int8",
             layers=48,
             ctx=16,
@@ -178,6 +196,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
             missing_selected,
             activation="q8_k_compat",
             io_backend="buffered",
+            scratch_policy="ephemeral",
             kv="int8",
             layers=48,
             ctx=16,
@@ -185,7 +204,7 @@ def test_validate_native_payload_rejects_argument_or_phase_drift():
         )
 
 
-def test_output_gate_requires_buffered_mmap_equivalence_within_each_activation():
+def test_output_gate_requires_buffered_mmap_and_scratch_equivalence_within_each_activation():
     f32 = PERF.extract_output_signature(native_payload(activation="f32", selected=(358, 1184)))
     f32_mmap = PERF.extract_output_signature(
         native_payload(activation="f32", selected=(358, 1184), io_backend="mmap")
@@ -196,10 +215,12 @@ def test_output_gate_requires_buffered_mmap_equivalence_within_each_activation()
     q8k_mmap = PERF.extract_output_signature(
         native_payload(activation="q8_k_compat", selected=(358, 1184), checksum_bias=10, io_backend="mmap")
     )
-    cells = {
-        "buffered:f32": [f32, f32], "mmap:f32": [f32_mmap, f32_mmap],
-        "buffered:q8_k_compat": [q8k, q8k], "mmap:q8_k_compat": [q8k_mmap, q8k_mmap],
-    }
+    cells = {}
+    for policy in ("ephemeral", "persistent"):
+        cells[f"{policy}:buffered:f32"] = [f32, f32]
+        cells[f"{policy}:mmap:f32"] = [f32_mmap, f32_mmap]
+        cells[f"{policy}:buffered:q8_k_compat"] = [q8k, q8k]
+        cells[f"{policy}:mmap:q8_k_compat"] = [q8k_mmap, q8k_mmap]
     gate = PERF.validate_output_contract(cells)
     assert gate["status"] == "pass"
     assert gate["io_equivalence"] == {"f32": True, "q8_k_compat": True}
@@ -209,9 +230,15 @@ def test_output_gate_requires_buffered_mmap_equivalence_within_each_activation()
         native_payload(activation="q8_k_compat", selected=(358, 999), checksum_bias=20)
     )
     with pytest.raises(ValueError, match="not deterministic"):
-        PERF.validate_output_contract({**cells, "buffered:q8_k_compat": [q8k, changed]})
+        PERF.validate_output_contract({**cells, "ephemeral:buffered:q8_k_compat": [q8k, changed]})
     with pytest.raises(ValueError, match="buffered/mmap output mismatch"):
-        PERF.validate_output_contract({**cells, "mmap:f32": [changed]})
+        PERF.validate_output_contract({**cells, "ephemeral:mmap:f32": [changed]})
+    with pytest.raises(ValueError, match="ephemeral/persistent output mismatch"):
+        PERF.validate_output_contract({
+            **cells,
+            "persistent:buffered:f32": [changed],
+            "persistent:mmap:f32": [changed],
+        })
 
 
 def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path):
@@ -227,6 +254,7 @@ def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path)
         generation_steps=2,
         seed=7,
         io_backend="mmap",
+        scratch_policy="persistent",
     )
     assert command[1] == "prompt-state-loop-probe"
     assert "--full-moe" in command
@@ -234,6 +262,34 @@ def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path)
     assert "--bench" in command
     assert command[command.index("--temperature") + 1] == "0"
     assert command[command.index("--io-backend") + 1] == "mmap"
+    assert command[command.index("--scratch-policy") + 1] == "persistent"
+
+
+def test_validate_native_payload_rejects_scratch_policy_drift():
+    payload = native_payload(activation="f32", selected=(358, 1184), scratch_policy="persistent")
+    signature = PERF.validate_native_payload(
+        payload,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="persistent",
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+    )
+    assert signature["selected_tokens"] == [358, 1184]
+
+    with pytest.raises(ValueError, match="scratch_policy"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
 
 
 def test_build_artifact_provenance_pins_source_model_and_runtime_inputs(tmp_path):
