@@ -1,0 +1,553 @@
+{
+  "aggregate_gates": {
+    "all_pair_outputs_equal": true,
+    "f32_buffered_temporaries_reduced": true,
+    "f32_mmap_temporaries_reduced": true,
+    "no_default_promotion": true
+  },
+  "causal_inventory": [
+    {
+      "file": "src/qx_format.c",
+      "implemented_policy": "baseline",
+      "materiality": "vocab_size * (hidden/256) = 151936 * 8 = 1215488 blocks per generated final-head call",
+      "route": "final lm_head Q6_K with F32 activation",
+      "temporary": "float weights[256] per block"
+    },
+    {
+      "file": "src/qx_format.c",
+      "implemented_policy": "fused",
+      "materiality": "same 1215488 blocks counted as fused_dot_calls",
+      "route": "final lm_head Q6_K with F32 activation",
+      "temporary": "no float[256]; decodes each Q6_K scalar in dot order"
+    },
+    {
+      "file": "src/qx_format.c",
+      "implemented_policy": "existing q8_k_compat",
+      "materiality": "compat/control only; no default promotion",
+      "route": "final lm_head Q6_K with q8_k_compat activation",
+      "temporary": "existing Q6_K x Q8_K path; Issue #26 policy is exposed but not the target seam"
+    }
+  ],
+  "claim_scope": "Direct shell execution on this Windows host; Python benchmark subprocess is blocked by Device Guard/WDAC and remains a recorded local limitation. Shell matrix verifies correctness/counters; final CI must exercise Windows subprocess path.",
+  "hypothesis": "Final lm_head Q6_K F32 path materializes one float[256] per block before dot; fused scalar Q6_KxF32 can avoid those temporary floats with identical output checksums. q8_k_compat is included as compatibility/control and is not promoted as the target seam.",
+  "issue": 26,
+  "limitations": [
+    "Full psutil Python benchmark harness is blocked locally by WinError 4551 Device Guard when Python subprocess launches build/qxqxf.exe; this evidence uses direct shell execution of the same rebuilt binary.",
+    "Only scratch_policy=ephemeral is in the direct shell matrix because Issue #26 target is kernel temporaries, not scratch allocation policy; Issue #25 already covers scratch ephemeral|persistent."
+  ],
+  "matrix": {
+    "ephemeral:buffered:f32:baseline": {
+      "activation_format": "f32",
+      "bench": {
+        "elapsed_sec": 17.996,
+        "enabled": true,
+        "layer_steps": 96,
+        "layer_steps_per_second": 5.33451878,
+        "ms_per_token": 8998,
+        "phases": {
+          "decode": {
+            "elapsed_sec": 9.044,
+            "tokens": 1,
+            "tokens_per_second": 0.110570544
+          },
+          "prefill": {
+            "elapsed_sec": 8.952,
+            "tokens": 1,
+            "tokens_per_second": 0.111706881
+          }
+        },
+        "timer": "process_clock",
+        "tokens_per_second": 0.111135808
+      },
+      "cache_readback_ok": true,
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 1215488,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 0,
+        "kernel_policy": "baseline",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 1215488,
+        "temporary_bytes_materialized": 1244659712,
+        "temporary_floats_materialized": 311164928
+      },
+      "final_head_kernel": "dequant_f32",
+      "final_norm_checksum": 648938303818007011,
+      "final_residual_checksum": 11401753417758216440,
+      "final_token": 358,
+      "io_backend": "buffered",
+      "k_cache_checksum": 2757613331181102236,
+      "kernel_policy": "baseline",
+      "logits_checksum": 13347842135191822952,
+      "path": "C:/Users/fjmn2/AppData/Local/Temp/qx_issue26_buffered_f32_baseline.json",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "scratch_policy": "ephemeral",
+      "selected_tokens": [
+        358
+      ],
+      "sha256": "f9ad44e58c2f8458fcdd316615140bc86be61af6ff20bf7b9f828269bb0834d8",
+      "v_cache_checksum": 3644865919051889479
+    },
+    "ephemeral:buffered:f32:fused": {
+      "activation_format": "f32",
+      "bench": {
+        "elapsed_sec": 17.807,
+        "enabled": true,
+        "layer_steps": 96,
+        "layer_steps_per_second": 5.39113832,
+        "ms_per_token": 8903.5,
+        "phases": {
+          "decode": {
+            "elapsed_sec": 9.4,
+            "tokens": 1,
+            "tokens_per_second": 0.106382979
+          },
+          "prefill": {
+            "elapsed_sec": 8.407,
+            "tokens": 1,
+            "tokens_per_second": 0.118948495
+          }
+        },
+        "timer": "process_clock",
+        "tokens_per_second": 0.112315382
+      },
+      "cache_readback_ok": true,
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 0,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 1215488,
+        "kernel_policy": "fused",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 0,
+        "temporary_bytes_materialized": 0,
+        "temporary_floats_materialized": 0
+      },
+      "final_head_kernel": "q6_k_fused_f32",
+      "final_norm_checksum": 648938303818007011,
+      "final_residual_checksum": 11401753417758216440,
+      "final_token": 358,
+      "io_backend": "buffered",
+      "k_cache_checksum": 2757613331181102236,
+      "kernel_policy": "fused",
+      "logits_checksum": 13347842135191822952,
+      "path": "C:/Users/fjmn2/AppData/Local/Temp/qx_issue26_buffered_f32_fused.json",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "scratch_policy": "ephemeral",
+      "selected_tokens": [
+        358
+      ],
+      "sha256": "6d0cec39c96bcae594c248abc6843025ae5737368882d0c0a38d7b4cbde22dd9",
+      "v_cache_checksum": 3644865919051889479
+    },
+    "ephemeral:buffered:q8_k_compat:baseline": {
+      "activation_format": "q8_k_compat",
+      "bench": {
+        "elapsed_sec": 4.194,
+        "enabled": true,
+        "layer_steps": 96,
+        "layer_steps_per_second": 22.8898426,
+        "ms_per_token": 2097,
+        "phases": {
+          "decode": {
+            "elapsed_sec": 2.4,
+            "tokens": 1,
+            "tokens_per_second": 0.416666667
+          },
+          "prefill": {
+            "elapsed_sec": 1.794,
+            "tokens": 1,
+            "tokens_per_second": 0.557413601
+          }
+        },
+        "timer": "process_clock",
+        "tokens_per_second": 0.476871722
+      },
+      "cache_readback_ok": true,
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 0,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 1215488,
+        "kernel_policy": "baseline",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 0,
+        "temporary_bytes_materialized": 0,
+        "temporary_floats_materialized": 0
+      },
+      "final_head_kernel": "q6_k_q8_k",
+      "final_norm_checksum": 9740423844514229368,
+      "final_residual_checksum": 16184155507198772844,
+      "final_token": 358,
+      "io_backend": "buffered",
+      "k_cache_checksum": 3866199324497196071,
+      "kernel_policy": "baseline",
+      "logits_checksum": 9727720709648537766,
+      "path": "C:/Users/fjmn2/AppData/Local/Temp/qx_issue26_buffered_q8_k_compat_baseline.json",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "scratch_policy": "ephemeral",
+      "selected_tokens": [
+        358
+      ],
+      "sha256": "afb5040fd1a1dc88eca9e8d2b55b7fe92cf8d80cc92e53b55a7eb53934b11b8a",
+      "v_cache_checksum": 463023536410778518
+    },
+    "ephemeral:buffered:q8_k_compat:fused": {
+      "activation_format": "q8_k_compat",
+      "bench": {
+        "elapsed_sec": 4.177,
+        "enabled": true,
+        "layer_steps": 96,
+        "layer_steps_per_second": 22.9830022,
+        "ms_per_token": 2088.5,
+        "phases": {
+          "decode": {
+            "elapsed_sec": 2.409,
+            "tokens": 1,
+            "tokens_per_second": 0.415110004
+          },
+          "prefill": {
+            "elapsed_sec": 1.768,
+            "tokens": 1,
+            "tokens_per_second": 0.56561086
+          }
+        },
+        "timer": "process_clock",
+        "tokens_per_second": 0.478812545
+      },
+      "cache_readback_ok": true,
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 0,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 1215488,
+        "kernel_policy": "fused",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 0,
+        "temporary_bytes_materialized": 0,
+        "temporary_floats_materialized": 0
+      },
+      "final_head_kernel": "q6_k_q8_k",
+      "final_norm_checksum": 9740423844514229368,
+      "final_residual_checksum": 16184155507198772844,
+      "final_token": 358,
+      "io_backend": "buffered",
+      "k_cache_checksum": 3866199324497196071,
+      "kernel_policy": "fused",
+      "logits_checksum": 9727720709648537766,
+      "path": "C:/Users/fjmn2/AppData/Local/Temp/qx_issue26_buffered_q8_k_compat_fused.json",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "scratch_policy": "ephemeral",
+      "selected_tokens": [
+        358
+      ],
+      "sha256": "499389ac1385270858f109b4ef15ced151b6d92faa2a999301f6b54fbff0168f",
+      "v_cache_checksum": 463023536410778518
+    },
+    "ephemeral:mmap:f32:baseline": {
+      "activation_format": "f32",
+      "bench": {
+        "elapsed_sec": 17.731,
+        "enabled": true,
+        "layer_steps": 96,
+        "layer_steps_per_second": 5.41424624,
+        "ms_per_token": 8865.5,
+        "phases": {
+          "decode": {
+            "elapsed_sec": 9.296,
+            "tokens": 1,
+            "tokens_per_second": 0.10757315
+          },
+          "prefill": {
+            "elapsed_sec": 8.435,
+            "tokens": 1,
+            "tokens_per_second": 0.118553646
+          }
+        },
+        "timer": "process_clock",
+        "tokens_per_second": 0.112796797
+      },
+      "cache_readback_ok": true,
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 1215488,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 0,
+        "kernel_policy": "baseline",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 1215488,
+        "temporary_bytes_materialized": 1244659712,
+        "temporary_floats_materialized": 311164928
+      },
+      "final_head_kernel": "dequant_f32",
+      "final_norm_checksum": 648938303818007011,
+      "final_residual_checksum": 11401753417758216440,
+      "final_token": 358,
+      "io_backend": "mmap",
+      "k_cache_checksum": 2757613331181102236,
+      "kernel_policy": "baseline",
+      "logits_checksum": 13347842135191822952,
+      "path": "C:/Users/fjmn2/AppData/Local/Temp/qx_issue26_mmap_f32_baseline.json",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "scratch_policy": "ephemeral",
+      "selected_tokens": [
+        358
+      ],
+      "sha256": "88de08d52a1e7f28823d0a9ac0ed6f246ad23dbb49fed4ab7682b52312622a39",
+      "v_cache_checksum": 3644865919051889479
+    },
+    "ephemeral:mmap:f32:fused": {
+      "activation_format": "f32",
+      "bench": {
+        "elapsed_sec": 18.284,
+        "enabled": true,
+        "layer_steps": 96,
+        "layer_steps_per_second": 5.25049223,
+        "ms_per_token": 9142,
+        "phases": {
+          "decode": {
+            "elapsed_sec": 9.465,
+            "tokens": 1,
+            "tokens_per_second": 0.105652404
+          },
+          "prefill": {
+            "elapsed_sec": 8.819,
+            "tokens": 1,
+            "tokens_per_second": 0.113391541
+          }
+        },
+        "timer": "process_clock",
+        "tokens_per_second": 0.109385255
+      },
+      "cache_readback_ok": true,
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 0,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 1215488,
+        "kernel_policy": "fused",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 0,
+        "temporary_bytes_materialized": 0,
+        "temporary_floats_materialized": 0
+      },
+      "final_head_kernel": "q6_k_fused_f32",
+      "final_norm_checksum": 648938303818007011,
+      "final_residual_checksum": 11401753417758216440,
+      "final_token": 358,
+      "io_backend": "mmap",
+      "k_cache_checksum": 2757613331181102236,
+      "kernel_policy": "fused",
+      "logits_checksum": 13347842135191822952,
+      "path": "C:/Users/fjmn2/AppData/Local/Temp/qx_issue26_mmap_f32_fused.json",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "scratch_policy": "ephemeral",
+      "selected_tokens": [
+        358
+      ],
+      "sha256": "6c02a3d6dc8495b05f54d4e2b9431331f0f435b635adee95a701126bac95c013",
+      "v_cache_checksum": 3644865919051889479
+    },
+    "ephemeral:mmap:q8_k_compat:baseline": {
+      "activation_format": "q8_k_compat",
+      "bench": {
+        "elapsed_sec": 4.408,
+        "enabled": true,
+        "layer_steps": 96,
+        "layer_steps_per_second": 21.7785844,
+        "ms_per_token": 2204,
+        "phases": {
+          "decode": {
+            "elapsed_sec": 2.449,
+            "tokens": 1,
+            "tokens_per_second": 0.408329931
+          },
+          "prefill": {
+            "elapsed_sec": 1.959,
+            "tokens": 1,
+            "tokens_per_second": 0.510464523
+          }
+        },
+        "timer": "process_clock",
+        "tokens_per_second": 0.453720508
+      },
+      "cache_readback_ok": true,
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 0,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 1215488,
+        "kernel_policy": "baseline",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 0,
+        "temporary_bytes_materialized": 0,
+        "temporary_floats_materialized": 0
+      },
+      "final_head_kernel": "q6_k_q8_k",
+      "final_norm_checksum": 9740423844514229368,
+      "final_residual_checksum": 16184155507198772844,
+      "final_token": 358,
+      "io_backend": "mmap",
+      "k_cache_checksum": 3866199324497196071,
+      "kernel_policy": "baseline",
+      "logits_checksum": 9727720709648537766,
+      "path": "C:/Users/fjmn2/AppData/Local/Temp/qx_issue26_mmap_q8_k_compat_baseline.json",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "scratch_policy": "ephemeral",
+      "selected_tokens": [
+        358
+      ],
+      "sha256": "18be149ba1b24ef8e6a40a0fdff9feaf4adecc7675741c740c5f594142bfc148",
+      "v_cache_checksum": 463023536410778518
+    },
+    "ephemeral:mmap:q8_k_compat:fused": {
+      "activation_format": "q8_k_compat",
+      "bench": {
+        "elapsed_sec": 4.395,
+        "enabled": true,
+        "layer_steps": 96,
+        "layer_steps_per_second": 21.8430034,
+        "ms_per_token": 2197.5,
+        "phases": {
+          "decode": {
+            "elapsed_sec": 2.418,
+            "tokens": 1,
+            "tokens_per_second": 0.41356493
+          },
+          "prefill": {
+            "elapsed_sec": 1.977,
+            "tokens": 1,
+            "tokens_per_second": 0.505816894
+          }
+        },
+        "timer": "process_clock",
+        "tokens_per_second": 0.455062571
+      },
+      "cache_readback_ok": true,
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 0,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 1215488,
+        "kernel_policy": "fused",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 0,
+        "temporary_bytes_materialized": 0,
+        "temporary_floats_materialized": 0
+      },
+      "final_head_kernel": "q6_k_q8_k",
+      "final_norm_checksum": 9740423844514229368,
+      "final_residual_checksum": 16184155507198772844,
+      "final_token": 358,
+      "io_backend": "mmap",
+      "k_cache_checksum": 3866199324497196071,
+      "kernel_policy": "fused",
+      "logits_checksum": 9727720709648537766,
+      "path": "C:/Users/fjmn2/AppData/Local/Temp/qx_issue26_mmap_q8_k_compat_fused.json",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "scratch_policy": "ephemeral",
+      "selected_tokens": [
+        358
+      ],
+      "sha256": "659f8e86583a50cfbdee81f61a647d9fcc07e71b15030dac4b7179e8c5c54367",
+      "v_cache_checksum": 463023536410778518
+    }
+  },
+  "measurement": "issue-26-fused-dequant-dot-direct-shell-matrix",
+  "pair_gates": {
+    "buffered:f32": {
+      "cache_readback_ok": true,
+      "final_norm_checksum_equal": true,
+      "final_residual_checksum_equal": true,
+      "final_token_equal": true,
+      "fused_calls_increased": true,
+      "kv_checksums_equal": true,
+      "logits_checksum_equal": true,
+      "selected_tokens_equal": true,
+      "temporary_bytes_reduced": true
+    },
+    "buffered:q8_k_compat": {
+      "cache_readback_ok": true,
+      "final_norm_checksum_equal": true,
+      "final_residual_checksum_equal": true,
+      "final_token_equal": true,
+      "fused_calls_increased": false,
+      "kv_checksums_equal": true,
+      "logits_checksum_equal": true,
+      "selected_tokens_equal": true,
+      "temporary_bytes_reduced": false
+    },
+    "mmap:f32": {
+      "cache_readback_ok": true,
+      "final_norm_checksum_equal": true,
+      "final_residual_checksum_equal": true,
+      "final_token_equal": true,
+      "fused_calls_increased": true,
+      "kv_checksums_equal": true,
+      "logits_checksum_equal": true,
+      "selected_tokens_equal": true,
+      "temporary_bytes_reduced": true
+    },
+    "mmap:q8_k_compat": {
+      "cache_readback_ok": true,
+      "final_norm_checksum_equal": true,
+      "final_residual_checksum_equal": true,
+      "final_token_equal": true,
+      "fused_calls_increased": false,
+      "kv_checksums_equal": true,
+      "logits_checksum_equal": true,
+      "selected_tokens_equal": true,
+      "temporary_bytes_reduced": false
+    }
+  },
+  "provenance": {
+    "command_template": "build/qxqxf.exe prompt-state-loop-probe --in models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt --text-file tests/fixtures/q8k_perf_prompt.txt --generate 1 --layers 48 --ctx 16 --kv int8 --scratch-policy ephemeral --temperature 0 --seed 7 --full-moe --final-head --bench --dequant-profile --activation <activation> --io-backend <backend> --kernel-policy <policy>",
+    "created_unix": 1787333104,
+    "fixed_args": {
+      "ctx": 16,
+      "dequant_profile": true,
+      "final_head": true,
+      "full_moe": true,
+      "generate": 1,
+      "kv": "int8",
+      "layers": 48,
+      "scratch_policy": "ephemeral",
+      "seed": 7,
+      "temperature": 0
+    },
+    "head": "ac53c5e4884e584284c06f7612c2d3590b814117",
+    "platform": {
+      "machine": "AMD64",
+      "python": "3.11.15",
+      "release": "10",
+      "system": "Windows"
+    },
+    "repo": "C:/Users/fjmn2/Dev/qx-mini-c"
+  },
+  "schema": 2,
+  "status": "pass_with_local_wdac_limitation"
+}

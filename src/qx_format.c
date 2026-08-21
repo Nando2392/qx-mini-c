@@ -2165,6 +2165,30 @@ static int qx_decode_q6_k_block(const unsigned char *buf, float out[256]) {
     return 1;
 }
 
+static float qx_decode_q6_k_value_at(const unsigned char *buf, uint32_t index) {
+    uint32_t half = index >> 7u;
+    uint32_t local = index & 127u;
+    uint32_t lane = local & 31u;
+    uint32_t section = local >> 5u;
+    const unsigned char *ql = buf + half * 64u;
+    const unsigned char *qh = buf + 128u + half * 32u;
+    const signed char *scales = (const signed char *)(buf + 192u + half * 8u);
+    uint32_t ql_index = lane + ((section == 1u || section == 3u) ? 32u : 0u);
+    uint32_t packed = ql[ql_index];
+    uint32_t quant = (section < 2u) ? (packed & 0x0fu) : (packed >> 4u);
+    quant |= ((uint32_t)(qh[lane] >> (2u * section)) & 3u) << 4u;
+    uint32_t scale_index = (lane >> 4u) + section * 2u;
+    return qx_fp16_to_f32(qx_rd_le16(buf + 208u)) * (float)scales[scale_index] * ((float)((int32_t)quant - 32));
+}
+
+static double qx_dot_q6_k_f32_fused_block(const unsigned char *buf, const float *input) {
+    double total = 0.0;
+    for (uint32_t i = 0; i < 256u; ++i) {
+        total += (double)qx_decode_q6_k_value_at(buf, i) * (double)input[i];
+    }
+    return total;
+}
+
 static int qx_decoder_info(uint32_t ggml_type, const char **decoder, uint64_t *block_size) {
     if (ggml_type == 12u) { if (decoder) *decoder = "Q4_K"; if (block_size) *block_size = 144; return 1; }
     if (ggml_type == 13u) { if (decoder) *decoder = "Q5_K"; if (block_size) *block_size = 176; return 1; }
@@ -2897,6 +2921,15 @@ typedef struct {
     uint64_t checksum;
 } qx_top_token;
 
+typedef struct {
+    uint64_t temporary_blocks_decoded;
+    uint64_t temporary_floats_materialized;
+    uint64_t temporary_bytes_materialized;
+    uint64_t fused_dot_calls;
+    uint64_t fallback_dot_calls;
+    uint64_t final_head_q6_k_blocks;
+} qx_dequant_dot_profile;
+
 static const qx_tensor_dir_entry *qx_select_lm_head_tensor(qx_file *file, const char **name_out, int *tied_out) {
     const qx_tensor_dir_entry *t = qx_find_tensor(file, "output.weight");
     if (t) { if (name_out) *name_out = "output.weight"; if (tied_out) *tied_out = 0; return t; }
@@ -3352,6 +3385,7 @@ typedef struct {
     uint64_t lm_head_raw_checksum;
     const char *lm_head_kernel;
     uint32_t activation_quantizations;
+    qx_dequant_dot_profile dequant_profile;
     qx_top_token top[32];
 } qx_real_head_result;
 
@@ -3361,6 +3395,7 @@ static int qx_compute_real_final_head_q8_k(qx_file *file, const qx_tensor_dir_en
 
 static int qx_compute_real_final_head(qx_file *file, const float *residual, float *normalized,
                                       uint32_t dims, uint32_t top_n, const char *activation_mode,
+                                      const char *kernel_policy,
                                       float *logits_out, uint32_t logits_capacity, qx_real_head_result *result,
                                       char *err, uint64_t err_len) {
     if (!file || !residual || !normalized || !dims || !result) {
@@ -3371,6 +3406,12 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     int use_q8_k = activation_mode && strcmp(activation_mode, "q8_k_compat") == 0;
     if (!use_q8_k && (!activation_mode || strcmp(activation_mode, "f32") != 0)) {
         qx_set_err(err, err_len, "unsupported final head activation mode"); return 0;
+    }
+    int use_fused_f32 = 0;
+    if (!kernel_policy) kernel_policy = "baseline";
+    if (strcmp(kernel_policy, "fused") == 0) use_fused_f32 = !use_q8_k;
+    else if (strcmp(kernel_policy, "baseline") != 0) {
+        qx_set_err(err, err_len, "unsupported kernel policy"); return 0;
     }
     const qx_tensor_dir_entry *norm = qx_find_tensor(file, "output_norm.weight");
     const qx_tensor_dir_entry *lm = qx_find_tensor(file, "output.weight");
@@ -3402,7 +3443,7 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     result->vocab_size = vocab;
     result->top_n = top_n;
     result->lm_head_ggml_type = lm->flags;
-    result->lm_head_kernel = use_q8_k ? "q6_k_q8_k" : "dequant_f32";
+    result->lm_head_kernel = use_q8_k ? "q6_k_q8_k" : use_fused_f32 ? "q6_k_fused_f32" : "dequant_f32";
     result->activation_quantizations = use_q8_k ? 1u : 0u;
     result->norm_raw_checksum = norm->checksum;
     result->lm_head_raw_checksum = lm->checksum;
@@ -3432,12 +3473,22 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
             const unsigned char *row = raw + (uint64_t)local * row_bytes;
             double logit = 0.0;
             for (uint64_t block = 0; block < blocks_per_row; ++block) {
-                float weights[256];
-                if (!qx_decode_supported_block(lm->flags, row + block * block_size, weights)) {
-                    free(raw); qx_set_err(err, err_len, "Q6_K decode failed in final head"); return 0;
-                }
                 const float *input = normalized + block * 256u;
-                for (uint32_t i = 0; i < 256u; ++i) logit += (double)weights[i] * (double)input[i];
+                if (use_fused_f32) {
+                    logit += qx_dot_q6_k_f32_fused_block(row + block * block_size, input);
+                    result->dequant_profile.fused_dot_calls++;
+                } else {
+                    float weights[256];
+                    if (!qx_decode_supported_block(lm->flags, row + block * block_size, weights)) {
+                        free(raw); qx_set_err(err, err_len, "Q6_K decode failed in final head"); return 0;
+                    }
+                    result->dequant_profile.temporary_blocks_decoded++;
+                    result->dequant_profile.temporary_floats_materialized += 256ull;
+                    result->dequant_profile.temporary_bytes_materialized += 256ull * (uint64_t)sizeof(float);
+                    result->dequant_profile.fallback_dot_calls++;
+                    for (uint32_t i = 0; i < 256u; ++i) logit += (double)weights[i] * (double)input[i];
+                }
+                result->dequant_profile.final_head_q6_k_blocks++;
             }
             if (!isfinite(logit)) { free(raw); qx_set_err(err, err_len, "non-finite final logit"); return 0; }
             float stored_logit = (float)logit;
@@ -3765,6 +3816,8 @@ static int qx_compute_real_final_head_q8_k(qx_file *file, const qx_tensor_dir_en
             const unsigned char *row = raw + (uint64_t)local * row_bytes;
             float stored_logit = qx_dot_q6_k_q8_k(row, &workspace);
             if (!isfinite(stored_logit)) { free(raw); qx_set_err(err, err_len, "non-finite final Q6_K Q8_K logit"); return 0; }
+            result->dequant_profile.fused_dot_calls += workspace.count;
+            result->dequant_profile.final_head_q6_k_blocks += workspace.count;
             if (logits_out) logits_out[first + local] = stored_logit;
             result->logits_checksum = qx_fnv1a64_update(result->logits_checksum, &stored_logit, sizeof(stored_logit));
             logits_sumsq += (double)stored_logit * (double)stored_logit;
@@ -5116,7 +5169,7 @@ int qx_dump_final_head_probe_summary(const char *path, const char *residual_path
     qx_real_head_result result;
     int ok = qx_read_exact_f32_sidecar(residual_path, residual, hidden, err, err_len) &&
         qx_compute_real_final_head(&file, residual, normalized, hidden, top_n, activation_mode,
-            logits, vocab, &result, err, err_len);
+            "baseline", logits, vocab, &result, err, err_len);
     if (ok && !qx_write_final_head_sidecar(output_dir, "final-norm", normalized, hidden, err, err_len)) ok = 0;
     if (ok && !qx_write_final_head_sidecar(output_dir, "logits", logits, vocab, err, err_len)) {
         qx_remove_final_head_sidecar(output_dir, "final-norm");
@@ -5692,7 +5745,7 @@ static int qx_read_accumulated_kv_snapshot(
     return 1;
 }
 
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
         qx_set_err(err, err_len, "unsupported activation format"); return 0;
@@ -5701,6 +5754,10 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     int scratch_persistent = strcmp(scratch_policy, "persistent") == 0;
     if (!scratch_persistent && strcmp(scratch_policy, "ephemeral") != 0) {
         qx_set_err(err, err_len, "unsupported scratch policy"); return 0;
+    }
+    if (!kernel_policy) kernel_policy = "baseline";
+    if (strcmp(kernel_policy, "baseline") != 0 && strcmp(kernel_policy, "fused") != 0) {
+        qx_set_err(err, err_len, "unsupported kernel policy"); return 0;
     }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
@@ -5867,6 +5924,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     int readback_ok = 1;
     uint64_t k_mix = 1469598103934665603ull;
     uint64_t v_mix = 1469598103934665603ull;
+    qx_dequant_dot_profile dequant_profile = {0};
     char generated[32768];
     generated[0] = 0;
     size_t generated_len = 0;
@@ -5887,6 +5945,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"activation_format\": \"%s\",\n", activation_format);
     fprintf(out, "  \"io_backend\": \"%s\",\n", qx_io_backend_name(file.io_backend));
     fprintf(out, "  \"scratch_policy\": \"%s\",\n", scratch_policy);
+    fprintf(out, "  \"kernel_policy\": \"%s\",\n", kernel_policy);
     fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
     fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
     fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);
@@ -6220,7 +6279,13 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             float *normalized = residual_vec + residual_values;
             float *logits_dump = residual_dump_dir && *residual_dump_dir ? (float *)malloc((size_t)file.header.manifest.vocab * sizeof(float)) : NULL;
             if (residual_dump_dir && *residual_dump_dir && !logits_dump) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
-            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
+            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, kernel_policy, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
+            dequant_profile.temporary_blocks_decoded += head_result.dequant_profile.temporary_blocks_decoded;
+            dequant_profile.temporary_floats_materialized += head_result.dequant_profile.temporary_floats_materialized;
+            dequant_profile.temporary_bytes_materialized += head_result.dequant_profile.temporary_bytes_materialized;
+            dequant_profile.fused_dot_calls += head_result.dequant_profile.fused_dot_calls;
+            dequant_profile.fallback_dot_calls += head_result.dequant_profile.fallback_dot_calls;
+            dequant_profile.final_head_q6_k_blocks += head_result.dequant_profile.final_head_q6_k_blocks;
             if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
             free(logits_dump);
             memcpy(top, head_result.top, (size_t)head_result.top_n * sizeof(qx_top_token));
@@ -6311,6 +6376,14 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"scratch_profile\": {\"policy\": \"%s\", \"peak_capacity_bytes\": %llu, \"growth_events\": %llu},\n",
         scratch_policy, (unsigned long long)scratch_workspace.peak_capacity,
         (unsigned long long)scratch_workspace.growth_events);
+    fprintf(out, "  \"dequant_dot_profile\": {\"enabled\": %s, \"kernel_policy\": \"%s\", \"target\": \"final_head_q6_k\", \"temporary_blocks_decoded\": %llu, \"temporary_floats_materialized\": %llu, \"temporary_bytes_materialized\": %llu, \"fused_dot_calls\": %llu, \"fallback_dot_calls\": %llu, \"final_head_q6_k_blocks\": %llu},\n",
+        dequant_profile_enabled ? "true" : "false", kernel_policy,
+        (unsigned long long)dequant_profile.temporary_blocks_decoded,
+        (unsigned long long)dequant_profile.temporary_floats_materialized,
+        (unsigned long long)dequant_profile.temporary_bytes_materialized,
+        (unsigned long long)dequant_profile.fused_dot_calls,
+        (unsigned long long)dequant_profile.fallback_dot_calls,
+        (unsigned long long)dequant_profile.final_head_q6_k_blocks);
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16
@@ -6350,7 +6423,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     }
     if (steps == 0u) steps = 1u;
     if (steps > 64u) steps = 64u;
-    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral",
+    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", 0,
         real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector,
         causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm_name, top_k, scan,
         logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path,

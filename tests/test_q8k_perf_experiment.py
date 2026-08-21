@@ -20,6 +20,7 @@ def native_payload(
     *, activation: str, selected: tuple[int, ...], checksum_bias: int = 0,
     io_backend: str = "buffered",
     scratch_policy: str = "ephemeral",
+    kernel_policy: str = "baseline",
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -56,6 +57,7 @@ def native_payload(
         "activation_format": activation,
         "io_backend": io_backend,
         "scratch_policy": scratch_policy,
+        "kernel_policy": kernel_policy,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -85,6 +87,16 @@ def native_payload(
             "policy": scratch_policy,
             "peak_capacity_bytes": 0 if scratch_policy == "ephemeral" else 65536,
             "growth_events": 0 if scratch_policy == "ephemeral" else 1,
+        },
+        "dequant_dot_profile": {
+            "enabled": True,
+            "kernel_policy": kernel_policy,
+            "temporary_blocks_decoded": 1215488 if kernel_policy == "baseline" and activation == "f32" else 0,
+            "temporary_floats_materialized": 311164928 if kernel_policy == "baseline" and activation == "f32" else 0,
+            "temporary_bytes_materialized": 1244659712 if kernel_policy == "baseline" and activation == "f32" else 0,
+            "fused_dot_calls": 0 if kernel_policy == "baseline" and activation == "f32" else 1215488,
+            "fallback_dot_calls": 1215488 if kernel_policy == "baseline" and activation == "f32" else 0,
+            "final_head_q6_k_blocks": 1215488,
         },
     }
 
@@ -255,6 +267,7 @@ def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path)
         seed=7,
         io_backend="mmap",
         scratch_policy="persistent",
+        kernel_policy="fused",
     )
     assert command[1] == "prompt-state-loop-probe"
     assert "--full-moe" in command
@@ -263,6 +276,58 @@ def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path)
     assert command[command.index("--temperature") + 1] == "0"
     assert command[command.index("--io-backend") + 1] == "mmap"
     assert command[command.index("--scratch-policy") + 1] == "persistent"
+    assert command[command.index("--kernel-policy") + 1] == "fused"
+    assert "--dequant-profile" in command
+
+
+def test_validate_native_payload_requires_dequant_dot_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    del payload["dequant_dot_profile"]
+    with pytest.raises(ValueError, match="dequant_dot_profile"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_compare_kernel_policy_requires_fused_to_reduce_f32_temporaries():
+    baseline = PERF.compact_run(
+        {"wall_elapsed_seconds": 3.0, "peak_rss_bytes": 4096, "payload": native_payload(activation="f32", selected=(358, 1184), kernel_policy="baseline")},
+        activation="f32",
+        io_backend="buffered",
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+    )
+    fused = PERF.compact_run(
+        {"wall_elapsed_seconds": 3.0, "peak_rss_bytes": 4096, "payload": native_payload(activation="f32", selected=(358, 1184), kernel_policy="fused")},
+        activation="f32",
+        io_backend="buffered",
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+        scratch_policy="ephemeral",
+        kernel_policy="fused",
+    )
+
+    gate = PERF.compare_kernel_policy_effects({"baseline": [baseline, baseline, baseline], "fused": [fused, fused, fused]})
+    assert gate["status"] == "pass"
+    assert gate["temporary_bytes_materialized_reduced"] is True
+    assert gate["fused_dot_calls_increased"] is True
+
+    with pytest.raises(ValueError, match="did not reduce"):
+        PERF.compare_kernel_policy_effects({"baseline": [baseline, baseline, baseline], "fused": [baseline, baseline, baseline]})
 
 
 def test_validate_native_payload_rejects_scratch_policy_drift():

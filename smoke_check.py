@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import struct
 import subprocess
 import sys
@@ -11,6 +12,60 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 EXE = ROOT / "build" / "qxqxf.exe"
+WSL_EXE = ROOT / "build-wsl" / "qxqxf"
+_USE_WSL_QX = False
+
+
+def _is_wdac_block(error: OSError) -> bool:
+    return getattr(error, "winerror", None) == 4551
+
+
+def _wsl_path(value: object) -> str:
+    text = str(value).replace("\\", "/")
+    if len(text) >= 3 and text[1] == ":" and text[2] == "/":
+        return f"/mnt/{text[0].lower()}/{text[3:]}"
+    return text
+
+
+def _run_wsl_qx(args: list[str], *, capture: bool) -> subprocess.CompletedProcess[str]:
+    if not WSL_EXE.exists():
+        raise FileNotFoundError(f"Windows qxqxf.exe is blocked by WDAC and fallback is missing: {WSL_EXE}")
+    rel_exe = "./" + WSL_EXE.relative_to(ROOT).as_posix()
+    quoted = " ".join(shlex.quote(_wsl_path(arg)) for arg in args[1:])
+    command = f"cd {shlex.quote(_wsl_path(ROOT))} && {shlex.quote(rel_exe)} {quoted}"
+    return subprocess.run(["wsl.exe", "bash", "-lc", command], cwd=ROOT, text=True, capture_output=capture)
+
+
+def run_qx(*args: object) -> str:
+    global _USE_WSL_QX
+    command = [str(EXE), *[str(arg) for arg in args]]
+    if _USE_WSL_QX:
+        completed = _run_wsl_qx(command, capture=True)
+    else:
+        try:
+            return subprocess.check_output(command, cwd=ROOT, text=True)
+        except OSError as error:
+            if not _is_wdac_block(error):
+                raise
+            _USE_WSL_QX = True
+            completed = _run_wsl_qx(command, capture=True)
+    if completed.returncode != 0:
+        raise subprocess.CalledProcessError(completed.returncode, command, completed.stdout, completed.stderr)
+    return completed.stdout
+
+
+def run_qx_capture(*args: object) -> subprocess.CompletedProcess[str]:
+    global _USE_WSL_QX
+    command = [str(EXE), *[str(arg) for arg in args]]
+    if _USE_WSL_QX:
+        return _run_wsl_qx(command, capture=True)
+    try:
+        return subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+    except OSError as error:
+        if not _is_wdac_block(error):
+            raise
+        _USE_WSL_QX = True
+        return _run_wsl_qx(command, capture=True)
 
 
 def run(*args: object) -> str:
@@ -70,25 +125,19 @@ def main() -> int:
         prompt = temp_path / "prompt.txt"
 
         run(sys.executable, ROOT / "scripts" / "make_synthetic_gguf.py", "--out", gguf)
-        run(EXE, "create-from-gguf-copy", "--in", gguf, "--model", "qwen3-30b-a3b", "--quant", "q2", "--out", qxf)
-        malformed = subprocess.run(
-            [str(EXE), "token-embedding", "--in", str(qxf), "--token-id", "2"],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-        )
+        run_qx("create-from-gguf-copy", "--in", gguf, "--model", "qwen3-30b-a3b", "--quant", "q2", "--out", qxf)
+        malformed = run_qx_capture("token-embedding", "--in", qxf, "--token-id", "2")
         assert malformed.returncode != 0
         assert "tensor byte size is not divisible by row count" in malformed.stderr
         make_compact_valid_embedding(qxf)
-        run(EXE, "tokenizer-export", "--gguf", gguf, "--out", tokens)
+        run_qx("tokenizer-export", "--gguf", gguf, "--out", tokens)
         run(sys.executable, ROOT / "scripts" / "export_qwen3_tokenizer.py", "--gguf", gguf, "--out", tokenizer)
         prompt.write_text("Hello", encoding="utf-8")
-        tokenizer_summary = json.loads(run(EXE, "tokenizer-inspect", "--tokenizer", tokenizer))
-        encoded = json.loads(run(EXE, "tokenizer-encode", "--tokenizer", tokenizer, "--text-file", prompt))
-        decoded = json.loads(run(EXE, "tokenizer-decode", "--tokenizer", tokenizer, "--ids", "7"))
+        tokenizer_summary = json.loads(run_qx("tokenizer-inspect", "--tokenizer", tokenizer))
+        encoded = json.loads(run_qx("tokenizer-encode", "--tokenizer", tokenizer, "--text-file", prompt))
+        decoded = json.loads(run_qx("tokenizer-decode", "--tokenizer", tokenizer, "--ids", "7"))
         result = json.loads(
-            run(
-                EXE,
+            run_qx(
                 "state-loop-probe",
                 "--in",
                 qxf,
@@ -119,14 +168,14 @@ def main() -> int:
                 "blk.0.attn_norm.weight",
             )
         )
-        golden = json.loads(run(EXE, "rope-gqa-golden-probe", "--tokens", 2, "--q-heads-run", 9, "--seed", 7))
+        golden = json.loads(run_qx("rope-gqa-golden-probe", "--tokens", 2, "--q-heads-run", 9, "--seed", 7))
 
     real_model = ROOT / "models" / "Qwen3-30B-A3B-UD-IQ2_M.qxf"
     real_golden = None
     real_state = None
     if real_model.exists():
-        real_golden = json.loads(run(EXE, "real-qkv-golden-probe", "--in", real_model, "--layer", 0, "--token-a", 42, "--token-b", 43, "--q-heads-run", 32, "--seed", 7, "--full-moe"))
-        real_state = json.loads(run(EXE, "state-loop-probe", "--in", real_model, "--prompt-token", 42, "--steps", 2, "--layers", 48, "--ctx", 4, "--kv", "int8", "--temperature", 0, "--seed", 7, "--full-moe", "--final-head", "--top-n", 5))
+        real_golden = json.loads(run_qx("real-qkv-golden-probe", "--in", real_model, "--layer", 0, "--token-a", 42, "--token-b", 43, "--q-heads-run", 32, "--seed", 7, "--full-moe"))
+        real_state = json.loads(run_qx("state-loop-probe", "--in", real_model, "--prompt-token", 42, "--steps", 2, "--layers", 48, "--ctx", 4, "--kv", "int8", "--temperature", 0, "--seed", 7, "--full-moe", "--final-head", "--top-n", 5))
 
     layer0 = result["tokens"][0]["layers"][0]
     assert result["delta_source"] == "rope_gqa_attention"
