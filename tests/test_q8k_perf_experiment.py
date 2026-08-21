@@ -368,6 +368,64 @@ def test_validate_native_payload_rejects_thread_count_drift():
         )
 
 
+def test_validate_native_payload_requires_real_pool_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), thread_policy="pool", threads=4)
+    with pytest.raises(ValueError, match="thread_profile.workers_used"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            thread_policy="pool",
+            threads=4,
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+    payload["thread_profile"] = {
+        "enabled": True,
+        "policy": "pool",
+        "requested_threads": 4,
+        "workers_used": 4,
+        "parallel_jobs": 96,
+        "serial_jobs": 1,
+        "fallback_jobs": 0,
+    }
+    with pytest.raises(ValueError, match="thread_profile.serial_jobs"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            thread_policy="pool",
+            threads=4,
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+    payload["thread_profile"]["serial_jobs"] = 0
+    signature = PERF.validate_native_payload(
+        payload,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        thread_policy="pool",
+        threads=4,
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+    )
+    assert signature["selected_tokens"] == [358, 1184]
+
+
 def test_compare_kernel_policy_requires_fused_to_reduce_f32_temporaries():
     baseline = PERF.compact_run(
         {"wall_elapsed_seconds": 3.0, "peak_rss_bytes": 4096, "payload": native_payload(activation="f32", selected=(358, 1184), kernel_policy="baseline")},

@@ -259,6 +259,19 @@ def validate_native_payload(
             raise ValueError("thread_profile.workers_used must be 1 for serial policy")
         if _require_exact_int(thread_profile.get("parallel_jobs"), "thread_profile.parallel_jobs") != 0:
             raise ValueError("thread_profile.parallel_jobs must be 0 for serial policy")
+    elif thread_policy == "pool":
+        if _require_exact_int(thread_profile.get("workers_used"), "thread_profile.workers_used") != threads:
+            raise ValueError("thread_profile.workers_used must match --threads for pool policy")
+        if _require_exact_int(thread_profile.get("parallel_jobs"), "thread_profile.parallel_jobs") <= 0:
+            raise ValueError("thread_profile.parallel_jobs must be positive for pool policy")
+        if _require_exact_int(thread_profile.get("serial_jobs"), "thread_profile.serial_jobs") != 0:
+            raise ValueError("thread_profile.serial_jobs must be 0 for pool policy")
+        if _require_exact_int(thread_profile.get("fallback_jobs"), "thread_profile.fallback_jobs") != 0:
+            raise ValueError("thread_profile.fallback_jobs must be 0 for pool policy")
+        if thread_profile.get("disabled_reason"):
+            raise ValueError("thread_profile.disabled_reason must be absent for pool policy")
+    else:
+        raise ValueError("unsupported thread_policy")
     return signature
 
 

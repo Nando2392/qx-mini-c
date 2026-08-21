@@ -3384,18 +3384,168 @@ typedef struct {
     uint64_t norm_raw_checksum;
     uint64_t lm_head_raw_checksum;
     const char *lm_head_kernel;
+    const char *thread_policy;
+    const char *thread_disabled_reason;
+    uint32_t requested_threads;
+    uint32_t workers_used;
+    uint64_t parallel_jobs;
+    uint64_t serial_jobs;
+    uint64_t fallback_jobs;
     uint32_t activation_quantizations;
     qx_dequant_dot_profile dequant_profile;
     qx_top_token top[32];
 } qx_real_head_result;
 
+#if defined(_WIN32)
+typedef struct {
+    const unsigned char *raw;
+    const float *normalized;
+    uint64_t row_bytes;
+    uint64_t block_size;
+    uint64_t blocks_per_row;
+    uint32_t start_row;
+    uint32_t end_row;
+    int use_fused_f32;
+    float *logits_out;
+    double *logits64_out;
+    volatile LONG failed;
+} qx_final_head_pool_task;
+
+static DWORD WINAPI qx_final_head_pool_worker(LPVOID arg) {
+    qx_final_head_pool_task *task = (qx_final_head_pool_task *)arg;
+    for (uint32_t row_index = task->start_row; row_index < task->end_row; ++row_index) {
+        const unsigned char *row = task->raw + (uint64_t)row_index * task->row_bytes;
+        double logit = 0.0;
+        for (uint64_t block = 0; block < task->blocks_per_row; ++block) {
+            const float *input = task->normalized + block * 256u;
+            const unsigned char *block_raw = row + block * task->block_size;
+            if (task->use_fused_f32) {
+                logit += qx_dot_q6_k_f32_fused_block(block_raw, input);
+            } else {
+                float weights[256];
+                if (!qx_decode_supported_block(14u, block_raw, weights)) {
+                    InterlockedExchange(&task->failed, 1); return 1u;
+                }
+                for (uint32_t i = 0; i < 256u; ++i) logit += (double)weights[i] * (double)input[i];
+            }
+        }
+        if (!isfinite(logit)) { InterlockedExchange(&task->failed, 1); return 1u; }
+        task->logits64_out[row_index] = logit;
+        if (task->logits_out) task->logits_out[row_index] = (float)logit;
+    }
+    return 0u;
+}
+
+static void qx_join_final_head_pool_workers(HANDLE *handles, qx_final_head_pool_task *tasks, uint32_t workers, int *failed) {
+    if (workers == 0u) return;
+    DWORD wait_result = WaitForMultipleObjects(workers, handles, TRUE, INFINITE);
+    if (wait_result < WAIT_OBJECT_0 || wait_result >= WAIT_OBJECT_0 + workers) {
+        if (failed) *failed = 1;
+    }
+    for (uint32_t worker = 0; worker < workers; ++worker) {
+        if (tasks && tasks[worker].failed && failed) *failed = 1;
+        if (handles[worker]) CloseHandle(handles[worker]);
+    }
+}
+#endif
+
 static int qx_compute_real_final_head_q8_k(qx_file *file, const qx_tensor_dir_entry *lm,
         const float *normalized, uint32_t dims, uint64_t row_bytes, float *logits_out,
         qx_real_head_result *result, char *err, uint64_t err_len);
 
+static void qx_reduce_final_head_logits(const unsigned char *raw, uint64_t row_bytes, const double *logits,
+        uint32_t vocab, qx_real_head_result *result) {
+    double logits_sumsq = 0.0;
+    result->logits_checksum = 1469598103934665603ull;
+    result->logits_min = 1.0e300;
+    result->logits_max = -1.0e300;
+    for (uint32_t row_index = 0; row_index < vocab; ++row_index) {
+        double logit = logits[row_index];
+        float stored_logit = (float)logit;
+        result->logits_checksum = qx_fnv1a64_update(result->logits_checksum, &stored_logit, sizeof(stored_logit));
+        logits_sumsq += logit * logit;
+        if (logit < result->logits_min) result->logits_min = logit;
+        if (logit > result->logits_max) result->logits_max = logit;
+        for (uint32_t rank = 0; rank < result->top_n; ++rank) {
+            if (logit > result->top[rank].logit) {
+                for (uint32_t move = result->top_n - 1u; move > rank; --move) result->top[move] = result->top[move - 1u];
+                result->top[rank].token = row_index;
+                result->top[rank].logit = logit;
+                result->top[rank].checksum = qx_fnv1a64(raw + (uint64_t)row_index * row_bytes, row_bytes);
+                break;
+            }
+        }
+    }
+    result->logits_computed = vocab;
+    result->logits_rms = sqrt(logits_sumsq / (double)vocab);
+}
+
+static int qx_compute_real_final_head_pool_f32(qx_file *file, const qx_tensor_dir_entry *lm,
+        const float *normalized, uint64_t row_bytes, uint64_t block_size, uint64_t blocks_per_row,
+        int use_fused_f32, float *logits_out, qx_real_head_result *result, char *err, uint64_t err_len) {
+#if defined(_WIN32)
+    uint32_t vocab = result->vocab_size;
+    if (lm->byte_size > (uint64_t)SIZE_MAX) { qx_set_err(err, err_len, "final head tensor too large for pool"); return 0; }
+    double *logits64 = (double *)malloc((size_t)vocab * sizeof(double));
+    if (!logits64) { qx_set_err(err, err_len, "out of memory"); return 0; }
+    unsigned char *raw = NULL;
+    if (!qx_read_raw_span(file, lm->offset, lm->byte_size, &raw, err, err_len)) { free(logits64); return 0; }
+    uint32_t workers = result->requested_threads;
+    if (workers == 0u) workers = 1u;
+    if (workers > vocab) workers = vocab;
+    HANDLE handles[64];
+    qx_final_head_pool_task tasks[64];
+    memset(handles, 0, sizeof(handles));
+    memset(tasks, 0, sizeof(tasks));
+    for (uint32_t worker = 0; worker < workers; ++worker) {
+        uint32_t start = (uint32_t)(((uint64_t)vocab * worker) / workers);
+        uint32_t end = (uint32_t)(((uint64_t)vocab * (worker + 1u)) / workers);
+        tasks[worker].raw = raw;
+        tasks[worker].normalized = normalized;
+        tasks[worker].row_bytes = row_bytes;
+        tasks[worker].block_size = block_size;
+        tasks[worker].blocks_per_row = blocks_per_row;
+        tasks[worker].start_row = start;
+        tasks[worker].end_row = end;
+        tasks[worker].use_fused_f32 = use_fused_f32;
+        tasks[worker].logits_out = logits_out;
+        tasks[worker].logits64_out = logits64;
+        handles[worker] = CreateThread(NULL, 0, qx_final_head_pool_worker, &tasks[worker], 0, NULL);
+        if (!handles[worker]) {
+            int join_failed = 1;
+            qx_join_final_head_pool_workers(handles, tasks, worker, &join_failed);
+            free(raw); free(logits64); qx_set_err(err, err_len, "failed to create final head worker"); return 0;
+        }
+    }
+    int failed = 0;
+    qx_join_final_head_pool_workers(handles, tasks, workers, &failed);
+    if (failed) { free(raw); free(logits64); qx_set_err(err, err_len, "final head pool worker failed"); return 0; }
+    uint64_t blocks = (uint64_t)vocab * blocks_per_row;
+    result->dequant_profile.final_head_q6_k_blocks += blocks;
+    if (use_fused_f32) result->dequant_profile.fused_dot_calls += blocks;
+    else {
+        result->dequant_profile.temporary_blocks_decoded += blocks;
+        result->dequant_profile.temporary_floats_materialized += blocks * 256ull;
+        result->dequant_profile.temporary_bytes_materialized += blocks * 256ull * (uint64_t)sizeof(float);
+        result->dequant_profile.fallback_dot_calls += blocks;
+    }
+    result->workers_used = workers;
+    result->parallel_jobs = (uint64_t)workers;
+    result->serial_jobs = 0u;
+    result->fallback_jobs = 0u;
+    qx_reduce_final_head_logits(raw, row_bytes, logits64, vocab, result);
+    free(logits64);
+    free(raw);
+    return 1;
+#else
+    (void)file; (void)lm; (void)normalized; (void)row_bytes; (void)block_size; (void)blocks_per_row; (void)use_fused_f32; (void)logits_out; (void)result;
+    qx_set_err(err, err_len, "thread pool policy is only implemented on Windows"); return 0;
+#endif
+}
+
 static int qx_compute_real_final_head(qx_file *file, const float *residual, float *normalized,
                                       uint32_t dims, uint32_t top_n, const char *activation_mode,
-                                      const char *kernel_policy,
+                                      const char *kernel_policy, const char *thread_policy, uint32_t threads,
                                       float *logits_out, uint32_t logits_capacity, qx_real_head_result *result,
                                       char *err, uint64_t err_len) {
     if (!file || !residual || !normalized || !dims || !result) {
@@ -3412,6 +3562,21 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     if (strcmp(kernel_policy, "fused") == 0) use_fused_f32 = !use_q8_k;
     else if (strcmp(kernel_policy, "baseline") != 0) {
         qx_set_err(err, err_len, "unsupported kernel policy"); return 0;
+    }
+    int use_thread_pool = 0;
+    if (!thread_policy) thread_policy = "serial";
+    if (strcmp(thread_policy, "pool") == 0) use_thread_pool = 1;
+    else if (strcmp(thread_policy, "serial") != 0) {
+        qx_set_err(err, err_len, "unsupported thread policy"); return 0;
+    }
+    if (use_thread_pool && use_q8_k) {
+        qx_set_err(err, err_len, "thread pool policy currently requires F32 activation"); return 0;
+    }
+    if (use_thread_pool && threads < 2u) {
+        qx_set_err(err, err_len, "thread pool policy requires --threads >= 2"); return 0;
+    }
+    if (use_thread_pool && threads > 64u) {
+        qx_set_err(err, err_len, "thread pool policy supports at most 64 threads"); return 0;
     }
     const qx_tensor_dir_entry *norm = qx_find_tensor(file, "output_norm.weight");
     const qx_tensor_dir_entry *lm = qx_find_tensor(file, "output.weight");
@@ -3447,6 +3612,13 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     result->activation_quantizations = use_q8_k ? 1u : 0u;
     result->norm_raw_checksum = norm->checksum;
     result->lm_head_raw_checksum = lm->checksum;
+    result->thread_policy = use_thread_pool ? "pool" : "serial";
+    result->thread_disabled_reason = use_thread_pool ? NULL : "serial_policy";
+    result->requested_threads = use_thread_pool ? threads : 1u;
+    result->workers_used = 1u;
+    result->parallel_jobs = 0u;
+    result->serial_jobs = vocab;
+    result->fallback_jobs = use_thread_pool ? 0u : vocab;
     result->residual_checksum = qx_fnv1a64(residual, (uint64_t)dims * sizeof(float));
     if (!qx_apply_f32_rmsnorm(file, norm, residual, normalized, dims, &result->input_rms, err, err_len)) return 0;
     result->normalized_checksum = qx_fnv1a64(normalized, (uint64_t)dims * sizeof(float));
@@ -3461,6 +3633,10 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     if (use_q8_k) {
         return qx_compute_real_final_head_q8_k(file, lm, normalized, dims, row_bytes,
             logits_out, result, err, err_len);
+    }
+    if (use_thread_pool) {
+        return qx_compute_real_final_head_pool_f32(file, lm, normalized, row_bytes, block_size,
+            blocks_per_row, use_fused_f32, logits_out, result, err, err_len);
     }
     const uint32_t chunk_rows = 64u;
     for (uint32_t first = 0; first < vocab; first += chunk_rows) {
@@ -5169,7 +5345,7 @@ int qx_dump_final_head_probe_summary(const char *path, const char *residual_path
     qx_real_head_result result;
     int ok = qx_read_exact_f32_sidecar(residual_path, residual, hidden, err, err_len) &&
         qx_compute_real_final_head(&file, residual, normalized, hidden, top_n, activation_mode,
-            "baseline", logits, vocab, &result, err, err_len);
+            "baseline", "serial", 1u, logits, vocab, &result, err, err_len);
     if (ok && !qx_write_final_head_sidecar(output_dir, "final-norm", normalized, hidden, err, err_len)) ok = 0;
     if (ok && !qx_write_final_head_sidecar(output_dir, "logits", logits, vocab, err, err_len)) {
         qx_remove_final_head_sidecar(output_dir, "final-norm");
@@ -5761,12 +5937,16 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     }
     if (!thread_policy) thread_policy = "serial";
     if (threads == 0u) threads = 1u;
-    if (strcmp(thread_policy, "serial") != 0) {
+    int thread_pool_policy = strcmp(thread_policy, "pool") == 0;
+    if (!thread_pool_policy && strcmp(thread_policy, "serial") != 0) {
         qx_set_err(err, err_len, "unsupported thread policy"); return 0;
     }
-    if (threads != 1u) {
+    if (!thread_pool_policy && threads != 1u) {
         qx_set_err(err, err_len, "serial thread policy requires --threads 1"); return 0;
     }
+    if (thread_pool_policy && threads < 2u) { qx_set_err(err, err_len, "thread pool policy requires --threads >= 2"); return 0; }
+    if (thread_pool_policy && threads > 64u) { qx_set_err(err, err_len, "thread pool policy supports at most 64 threads"); return 0; }
+    if (thread_pool_policy && strcmp(activation_format, "f32") != 0) { qx_set_err(err, err_len, "thread pool policy currently requires F32 activation"); return 0; }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
     if ((kv_snapshot_out_path || kv_snapshot_in_path) && !causal_attention) { qx_set_err(err, err_len, "KV snapshot requires causal attention"); return 0; }
@@ -5864,6 +6044,11 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, and temperature 0");
         return 0;
     }
+    if (thread_pool_policy && !final_head) {
+        qx_close_file(&file);
+        qx_set_err(err, err_len, "thread pool policy currently requires --final-head");
+        return 0;
+    }
     if (final_head && (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE || manifest_layers != 48u || file.header.manifest.hidden != 2048u || file.header.manifest.vocab != 151936u || q_heads != 32u || kv_heads != 4u || head_dim != 128u)) {
         qx_close_file(&file);
         qx_set_err(err, err_len, "--final-head requires exact Qwen3-30B-A3B manifest dimensions");
@@ -5933,6 +6118,10 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     uint64_t k_mix = 1469598103934665603ull;
     uint64_t v_mix = 1469598103934665603ull;
     qx_dequant_dot_profile dequant_profile = {0};
+    uint32_t thread_workers_used = thread_pool_policy ? threads : 1u;
+    uint64_t thread_parallel_jobs = 0u;
+    uint64_t thread_serial_jobs = 0u;
+    uint64_t thread_fallback_jobs = 0u;
     char generated[32768];
     generated[0] = 0;
     size_t generated_len = 0;
@@ -6289,13 +6478,17 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             float *normalized = residual_vec + residual_values;
             float *logits_dump = residual_dump_dir && *residual_dump_dir ? (float *)malloc((size_t)file.header.manifest.vocab * sizeof(float)) : NULL;
             if (residual_dump_dir && *residual_dump_dir && !logits_dump) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
-            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, kernel_policy, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
+            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, kernel_policy, thread_policy, threads, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
             dequant_profile.temporary_blocks_decoded += head_result.dequant_profile.temporary_blocks_decoded;
             dequant_profile.temporary_floats_materialized += head_result.dequant_profile.temporary_floats_materialized;
             dequant_profile.temporary_bytes_materialized += head_result.dequant_profile.temporary_bytes_materialized;
             dequant_profile.fused_dot_calls += head_result.dequant_profile.fused_dot_calls;
             dequant_profile.fallback_dot_calls += head_result.dequant_profile.fallback_dot_calls;
             dequant_profile.final_head_q6_k_blocks += head_result.dequant_profile.final_head_q6_k_blocks;
+            thread_workers_used = head_result.workers_used;
+            thread_parallel_jobs += head_result.parallel_jobs;
+            thread_serial_jobs += head_result.serial_jobs;
+            thread_fallback_jobs += head_result.fallback_jobs;
             if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
             free(logits_dump);
             memcpy(top, head_result.top, (size_t)head_result.top_n * sizeof(qx_top_token));
@@ -6394,9 +6587,13 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         (unsigned long long)dequant_profile.fused_dot_calls,
         (unsigned long long)dequant_profile.fallback_dot_calls,
         (unsigned long long)dequant_profile.final_head_q6_k_blocks);
-    uint64_t serial_jobs = (uint64_t)steps * (uint64_t)(layers - start_layer);
-    fprintf(out, "  \"thread_profile\": {\"enabled\": true, \"policy\": \"%s\", \"requested_threads\": %u, \"workers_used\": 1, \"parallel_jobs\": 0, \"serial_jobs\": %llu, \"fallback_jobs\": %llu, \"disabled_reason\": \"serial_policy\"},\n",
-        thread_policy, threads, (unsigned long long)serial_jobs, (unsigned long long)serial_jobs);
+    if (!thread_pool_policy && thread_serial_jobs == 0u) thread_serial_jobs = (uint64_t)steps * (uint64_t)(layers - start_layer);
+    if (!thread_pool_policy && thread_fallback_jobs == 0u) thread_fallback_jobs = thread_serial_jobs;
+    fprintf(out, "  \"thread_profile\": {\"enabled\": true, \"policy\": \"%s\", \"requested_threads\": %u, \"workers_used\": %u, \"parallel_jobs\": %llu, \"serial_jobs\": %llu, \"fallback_jobs\": %llu",
+        thread_policy, threads, thread_workers_used, (unsigned long long)thread_parallel_jobs,
+        (unsigned long long)thread_serial_jobs, (unsigned long long)thread_fallback_jobs);
+    if (!thread_pool_policy) fprintf(out, ", \"disabled_reason\": \"serial_policy\"");
+    fprintf(out, "},\n");
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16

@@ -447,6 +447,22 @@ chat_fail:
             else { usage(argv[0]); return 2; }
         }
         if (!in_path || !tokenizer_path || !text_path || !full_moe || !final_head) { usage(argv[0]); return 2; }
+        int thread_pool_policy = strcmp(thread_policy, "pool") == 0;
+        if (!thread_pool_policy && strcmp(thread_policy, "serial") != 0) {
+            fprintf(stderr, "prompt-state-loop-probe failed: unsupported thread policy\n"); return 2;
+        }
+        if (!thread_pool_policy && threads != 1u) {
+            fprintf(stderr, "prompt-state-loop-probe failed: serial thread policy requires --threads 1\n"); return 2;
+        }
+        if (thread_pool_policy && threads < 2u) {
+            fprintf(stderr, "prompt-state-loop-probe failed: thread pool policy requires --threads >= 2\n"); return 2;
+        }
+        if (thread_pool_policy && threads > 64u) {
+            fprintf(stderr, "prompt-state-loop-probe failed: thread pool policy supports at most 64 threads\n"); return 2;
+        }
+        if (thread_pool_policy && strcmp(activation_format, "f32") != 0) {
+            fprintf(stderr, "prompt-state-loop-probe failed: thread pool policy currently requires F32 activation\n"); return 2;
+        }
         if (!qx_set_io_backend(io_backend, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;
         }

@@ -1,0 +1,203 @@
+{
+  "claim_scope": "Opt-in Windows thread pool only for F32 final-head Q6_K vocabulary row loop; serial remains default; no default promotion; MoE/expert parallelism remains out of scope.",
+  "created_utc": "2026-08-21T21:49:01Z",
+  "fail_closed": {
+    "pool_q8k": {
+      "args": [
+        "--activation",
+        "q8_k_compat",
+        "--thread-policy",
+        "pool",
+        "--threads",
+        "2"
+      ],
+      "returncode": 2,
+      "stderr_tail": "prompt-state-loop-probe failed: thread pool policy currently requires F32 activation\n"
+    },
+    "pool_threads_1": {
+      "args": [
+        "--activation",
+        "f32",
+        "--thread-policy",
+        "pool",
+        "--threads",
+        "1"
+      ],
+      "returncode": 2,
+      "stderr_tail": "prompt-state-loop-probe failed: thread pool policy requires --threads >= 2\n"
+    },
+    "pool_threads_65": {
+      "args": [
+        "--activation",
+        "f32",
+        "--thread-policy",
+        "pool",
+        "--threads",
+        "65"
+      ],
+      "returncode": 2,
+      "stderr_tail": "prompt-state-loop-probe failed: thread pool policy supports at most 64 threads\n"
+    },
+    "serial_threads_2": {
+      "args": [
+        "--activation",
+        "f32",
+        "--thread-policy",
+        "serial",
+        "--threads",
+        "2"
+      ],
+      "returncode": 2,
+      "stderr_tail": "prompt-state-loop-probe failed: serial thread policy requires --threads 1\n"
+    }
+  },
+  "gates": {
+    "final_head_exact_equal": true,
+    "generated_text_equal": true,
+    "kv_checksums_equal": true,
+    "no_default_promotion": true,
+    "pool_fallback_jobs_zero": true,
+    "pool_opt_in_only": true,
+    "pool_parallel_jobs_positive": true,
+    "pool_serial_jobs_zero": true,
+    "pool_workers_used_4": true,
+    "selected_tokens_equal": true,
+    "serial_default": true
+  },
+  "issue": 28,
+  "measurement": "thread-pool-final-head-opt-in-baseline",
+  "provenance": {
+    "artifacts": {
+      "model_qxf": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+        "size": 10860081152
+      },
+      "prompt": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+        "sha256": "334d016f755cd6dc58c53a86e183882f8ec14f52fb05345887c8a5edd42c87b7",
+        "size": 6
+      },
+      "qx_exe": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+        "sha256": "a7d2f7e1e8a1246f21068c090795e119c036b5f522e970be97d08dab4831f796",
+        "size": 621056
+      },
+      "tokenizer_qxt": {
+        "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt",
+        "sha256": "8ec26e5ae058b271c0e17ee28aea3cf4d2b9ae9a4cd8f68f7aac81e9380761c6",
+        "size": 5168466
+      }
+    },
+    "fixed_arguments": {
+      "activation": "f32",
+      "ctx": 16,
+      "final_head": true,
+      "full_moe": true,
+      "generation_steps": 1,
+      "kernel_policy": "baseline",
+      "kv": "int8",
+      "layers": 48,
+      "seed": 7,
+      "temperature": 0
+    },
+    "platform": {
+      "machine": "AMD64",
+      "python": "3.11.15",
+      "release": "10",
+      "system": "Windows"
+    },
+    "source_state": {
+      "revision": "29645159f856f04d059daa25af0b93fcc3966f65",
+      "working_tree_diff_sha256": "b79c5fe009e6f4c19c50a461206f3eedbd6b809ace685c9c1f45203794f94858",
+      "working_tree_dirty": true
+    }
+  },
+  "runs": {
+    "pool_4": {
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 1215488,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 0,
+        "kernel_policy": "baseline",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 1215488,
+        "temporary_bytes_materialized": 1244659712,
+        "temporary_floats_materialized": 311164928
+      },
+      "final_head": {
+        "activation_quantizations": 0,
+        "argmax_logit": 23.25199819684119,
+        "argmax_token": 358,
+        "lm_head_kernel": "dequant_f32",
+        "logits_checksum": 13347842135191822952,
+        "logits_computed": 151936,
+        "logits_max": 23.25199819684119,
+        "logits_min": -5.977374059317871,
+        "logits_rms": 5.471897412944437
+      },
+      "generated_text": "<tok_358>",
+      "k_cache_checksum": 2757613331181102236,
+      "policy": "pool",
+      "selected_tokens": [
+        358
+      ],
+      "stdout_sha256": "5cc242cdeb8cc02ecd8d7de4c87c697f8b359877c6b17e791ff7a1d2fe099b3a",
+      "thread_profile": {
+        "enabled": true,
+        "fallback_jobs": 0,
+        "parallel_jobs": 4,
+        "policy": "pool",
+        "requested_threads": 4,
+        "serial_jobs": 0,
+        "workers_used": 4
+      },
+      "threads": 4,
+      "v_cache_checksum": 3644865919051889479
+    },
+    "serial": {
+      "dequant_dot_profile": {
+        "enabled": true,
+        "fallback_dot_calls": 1215488,
+        "final_head_q6_k_blocks": 1215488,
+        "fused_dot_calls": 0,
+        "kernel_policy": "baseline",
+        "target": "final_head_q6_k",
+        "temporary_blocks_decoded": 1215488,
+        "temporary_bytes_materialized": 1244659712,
+        "temporary_floats_materialized": 311164928
+      },
+      "final_head": {
+        "activation_quantizations": 0,
+        "argmax_logit": 23.25199819684119,
+        "argmax_token": 358,
+        "lm_head_kernel": "dequant_f32",
+        "logits_checksum": 13347842135191822952,
+        "logits_computed": 151936,
+        "logits_max": 23.25199819684119,
+        "logits_min": -5.977374059317871,
+        "logits_rms": 5.471897412944437
+      },
+      "generated_text": "<tok_358>",
+      "k_cache_checksum": 2757613331181102236,
+      "policy": "serial",
+      "selected_tokens": [
+        358
+      ],
+      "stdout_sha256": "166fec547b0f4203a67c355e6702f7c84a0266b6ee7ed99a253bad8812eafd32",
+      "thread_profile": {
+        "disabled_reason": "serial_policy",
+        "enabled": true,
+        "fallback_jobs": 151936,
+        "parallel_jobs": 0,
+        "policy": "serial",
+        "requested_threads": 1,
+        "serial_jobs": 151936,
+        "workers_used": 1
+      },
+      "threads": 1,
+      "v_cache_checksum": 3644865919051889479
+    }
+  }
+}
