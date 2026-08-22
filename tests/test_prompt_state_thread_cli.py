@@ -19,6 +19,7 @@ def prompt_state_command(
     kv2_policy: str = "none",
     sampling_policy: str = "none",
     long_context_policy: str = "none",
+    ctx: str = "16",
 ) -> list[str]:
     return [
         str(QXQXF),
@@ -34,7 +35,7 @@ def prompt_state_command(
         "--layers",
         "48",
         "--ctx",
-        "16",
+        ctx,
         "--kv",
         "int8",
         "--activation",
@@ -230,5 +231,20 @@ def test_prompt_state_loop_probe_rejects_long_context_policy_contract_before_fil
 
     assert result.returncode == 2
     assert "unsupported long-context policy" in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+def test_prompt_state_loop_probe_requires_ctx4k_policy_contract_before_file_io():
+    result = subprocess.run(
+        prompt_state_command("1", long_context_policy="ctx4k-smoke", ctx="16"),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "ctx4k-smoke long-context policy requires --ctx >= 4096" in result.stderr
     assert "text file read failed" not in result.stderr
     assert "failed to open" not in result.stderr

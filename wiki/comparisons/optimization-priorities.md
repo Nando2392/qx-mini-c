@@ -23,6 +23,7 @@ confidence: medium
 | 9 | speculative/KV2 | Issue #33 añade superficies fail-closed `--speculative-policy none` y `--kv2-policy none` con provenance explícita antes de draft decode/KV2 real | greedy/current KV default; fake draft/KV2 counters rechazados; sin speedup no medido |
 | 10 | sampling policy | Issue #34 añade superficie fail-closed `--sampling-policy none` y `sampling_profile` para separar greedy determinístico de futuros top-p/min-p/beam samplers | greedy default; fake stochastic/top-p counters rechazados; sin sampler real ni speedup/calidad no medida |
 | 11 | long-context gate | Issue #35 añade superficie fail-closed `--long-context-policy none` y `long_context_profile` para separar baseline actual de futuros gates 4K/RSS/KV-quality/soak | ctx actual default; fake 4K/RSS/calidad/soak counters rechazados; sin benchmark 4K ni claim |
+| 12 | ctx4k admission | Issue #36 añade `--long-context-policy ctx4k-smoke` como gate opt-in que exige `--ctx >= 4096` y reporta target 4096 | default sigue none; no RSS/KV-quality/soak; sin speedup/calidad |
 
 ## No priorizar todavía
 
@@ -51,6 +52,8 @@ La prioridad 9 empieza en Issue #33 como contrato de provenance speculative/KV2:
 
 La prioridad 10 empieza en Issue #34 como contrato de provenance de sampling: `--sampling-policy none` es el único valor soportado, queda default, y el payload nativo expone `sampling_profile` con modo `greedy`, sin muestras estocásticas, sin evaluaciones top-p y `beam_width=1`. Este slice no implementa top-p/min-p/beam search ni calidad/speedup; sólo bloquea claims falsos y prepara el gate futuro de samplers.
 
-La prioridad 11 empieza en Issue #35 como contrato de provenance long-context: `--long-context-policy none` es el único valor soportado, queda default, y el payload nativo expone `long_context_profile` con `target_ctx_tokens=0`, `rss_limit_bytes=0`, `kv_quality_checks=0` y `soak_seconds=0`. Este slice no ejecuta benchmark 4K, no aplica límite RSS, no mide calidad KV ni soak 8h; sólo bloquea claims falsos y prepara esos gates.
+La prioridad 11 empieza en Issue #35 como contrato de provenance long-context: `--long-context-policy none` es default y el payload nativo expone `long_context_profile` con `target_ctx_tokens=0`, `rss_limit_bytes=0`, `kv_quality_checks=0` y `soak_seconds=0`. Ese slice no ejecuta benchmark 4K, no aplica límite RSS, no mide calidad KV ni soak 8h; sólo bloquea claims falsos y prepara esos gates.
+
+La prioridad 12 empieza en Issue #36 como primer gate de admisión 4K: `--long-context-policy ctx4k-smoke` es opt-in, exige `--ctx >= 4096` antes de prompt/model/tokenizer I/O y reporta `target_ctx_tokens=4096` manteniendo `rss_limit_bytes=0`, `kv_quality_checks=0` y `soak_seconds=0`. No mide throughput 4K, no aplica RSS, no valida calidad KV y no promueve default.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

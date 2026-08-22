@@ -197,7 +197,7 @@ def native_payload(
         "long_context_profile": {
             "enabled": True,
             "policy": long_context_policy,
-            "target_ctx_tokens": 0,
+            "target_ctx_tokens": 4096 if long_context_policy == "ctx4k-smoke" else 0,
             "rss_limit_bytes": 0,
             "kv_quality_checks": 0,
             "soak_seconds": 0,
@@ -822,6 +822,46 @@ def test_validate_native_payload_rejects_fake_long_context_profile():
         PERF.validate_native_payload(
             payload, activation="f32", io_backend="buffered", scratch_policy="ephemeral",
             kernel_policy="baseline", long_context_policy="none", kv="int8", layers=48, ctx=16, generation_steps=2,
+        )
+
+
+def test_validate_native_payload_accepts_ctx4k_smoke_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+
+    signature = PERF.validate_native_payload(
+        payload,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="ctx4k-smoke",
+        kv="int8",
+        layers=48,
+        ctx=4096,
+        generation_steps=2,
+    )
+
+    assert signature["selected_tokens"] == [358, 1184]
+
+
+def test_validate_native_payload_rejects_ctx4k_smoke_without_target_ctx():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    payload["long_context_profile"]["target_ctx_tokens"] = 0
+
+    with pytest.raises(ValueError, match="long_context_profile.target_ctx_tokens"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            long_context_policy="ctx4k-smoke",
+            kv="int8",
+            layers=48,
+            ctx=4096,
+            generation_steps=2,
         )
 
 

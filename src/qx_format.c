@@ -6012,7 +6012,9 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     if (!sampling_policy) sampling_policy = "none";
     if (strcmp(sampling_policy, "none") != 0) { qx_set_err(err, err_len, "unsupported sampling policy"); return 0; }
     if (!long_context_policy) long_context_policy = "none";
-    if (strcmp(long_context_policy, "none") != 0) { qx_set_err(err, err_len, "unsupported long-context policy"); return 0; }
+    int ctx4k_smoke_policy = strcmp(long_context_policy, "ctx4k-smoke") == 0;
+    if (!ctx4k_smoke_policy && strcmp(long_context_policy, "none") != 0) { qx_set_err(err, err_len, "unsupported long-context policy"); return 0; }
+    if (ctx4k_smoke_policy && ctx_tokens < 4096u) { qx_set_err(err, err_len, "ctx4k-smoke long-context policy requires --ctx >= 4096"); return 0; }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
     if ((kv_snapshot_out_path || kv_snapshot_in_path) && !causal_attention) { qx_set_err(err, err_len, "KV snapshot requires causal attention"); return 0; }
@@ -6683,7 +6685,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"speculative_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"draft_tokens\": 0, \"accepted_tokens\": 0, \"rejected_tokens\": 0, \"target_verifications\": 0, \"disabled_reason\": \"none_policy\"},\n", speculative_policy);
     fprintf(out, "  \"kv2_profile\": {\"enabled\": true, \"policy\": \"%s\", \"format\": \"none\", \"packed_bytes\": 0, \"read_ops\": 0, \"write_ops\": 0, \"fallback_reads\": 0, \"disabled_reason\": \"none_policy\"},\n", kv2_policy);
     fprintf(out, "  \"sampling_profile\": {\"enabled\": true, \"policy\": \"%s\", \"mode\": \"greedy\", \"stochastic_samples\": 0, \"top_p_evaluations\": 0, \"beam_width\": 1, \"disabled_reason\": \"none_policy\"},\n", sampling_policy);
-    fprintf(out, "  \"long_context_profile\": {\"enabled\": true, \"policy\": \"%s\", \"target_ctx_tokens\": 0, \"rss_limit_bytes\": 0, \"kv_quality_checks\": 0, \"soak_seconds\": 0, \"disabled_reason\": \"none_policy\"},\n", long_context_policy);
+    fprintf(out, "  \"long_context_profile\": {\"enabled\": true, \"policy\": \"%s\", \"target_ctx_tokens\": %u, \"rss_limit_bytes\": 0, \"kv_quality_checks\": 0, \"soak_seconds\": 0, \"disabled_reason\": %s},\n", long_context_policy, ctx4k_smoke_policy ? 4096u : 0u, ctx4k_smoke_policy ? "null" : "\"none_policy\"");
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16

@@ -510,8 +510,12 @@ chat_fail:
         if (strcmp(sampling_policy, "none") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported sampling policy\n"); return 2;
         }
-        if (strcmp(long_context_policy, "none") != 0) {
+        int ctx4k_smoke_policy = strcmp(long_context_policy, "ctx4k-smoke") == 0;
+        if (!ctx4k_smoke_policy && strcmp(long_context_policy, "none") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported long-context policy\n"); return 2;
+        }
+        if (ctx4k_smoke_policy && ctx < 4096u) {
+            fprintf(stderr, "prompt-state-loop-probe failed: ctx4k-smoke long-context policy requires --ctx >= 4096\n"); return 2;
         }
         if (!qx_set_io_backend(io_backend, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;

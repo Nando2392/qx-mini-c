@@ -443,6 +443,16 @@ def validate_native_payload(
         for field in ("target_ctx_tokens", "rss_limit_bytes", "kv_quality_checks", "soak_seconds"):
             if _require_exact_int(long_context_profile.get(field), f"long_context_profile.{field}") != 0:
                 raise ValueError(f"long_context_profile.{field} must be 0 for none policy")
+    elif long_context_policy == "ctx4k-smoke":
+        if ctx < 4096:
+            raise ValueError("ctx4k-smoke long_context_policy requires ctx >= 4096")
+        if _require_exact_int(long_context_profile.get("target_ctx_tokens"), "long_context_profile.target_ctx_tokens") != 4096:
+            raise ValueError("long_context_profile.target_ctx_tokens must be 4096 for ctx4k-smoke policy")
+        if long_context_profile.get("disabled_reason") is not None:
+            raise ValueError("long_context_profile.disabled_reason must be null for ctx4k-smoke policy")
+        for field in ("rss_limit_bytes", "kv_quality_checks", "soak_seconds"):
+            if _require_exact_int(long_context_profile.get(field), f"long_context_profile.{field}") != 0:
+                raise ValueError(f"long_context_profile.{field} must be 0 for ctx4k-smoke policy")
     else:
         raise ValueError("unsupported long_context_policy")
     return signature

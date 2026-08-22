@@ -56,6 +56,12 @@ The complete-head measurement includes final RMSNorm and all 151936 logits for o
 
 CUDA is planned but **not implemented**.
 
+Long-context experimentation is opt-in and gated. The default remains
+`--long-context-policy none`; `--long-context-policy ctx4k-smoke` is only an
+admission/provenance gate and requires `--ctx >= 4096`. It records
+`target_ctx_tokens=4096` but does not enforce RSS limits, run KV-quality checks,
+run soak tests, promote defaults or claim speed/quality.
+
 ## Repository map
 
 ```text
