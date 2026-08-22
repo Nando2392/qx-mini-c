@@ -1,0 +1,52 @@
+{
+  "artifact": {
+    "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+    "sha256": "c23b4d4f2bcf574146cc29af613d8d90fa670dbdcc183d9e2d0b05ccf4e273f3",
+    "size": 627712
+  },
+  "fail_closed_cases": [
+    {
+      "before_model_io": true,
+      "expected_stderr": "unsupported sampling policy",
+      "matched": true,
+      "name": "unsupported_sampling_policy",
+      "returncode": 2
+    }
+  ],
+  "gates": {
+    "beam_width_one": true,
+    "no_default_promotion": true,
+    "no_stochastic_samples": true,
+    "no_top_p_evaluations": true,
+    "sampling_fail_closed_before_model_io": true,
+    "sampling_mode_greedy": true,
+    "sampling_none_default": true,
+    "sampling_profile_present": true
+  },
+  "issue": 34,
+  "model": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+  "payload": {
+    "final_head": {
+      "argmax_logit": 23.25199819684119,
+      "argmax_token": 358,
+      "final_norm_checksum": 648938303818007011,
+      "final_residual_checksum": 11401753417758216440,
+      "logits_checksum": 13347842135191822952
+    },
+    "sampling_policy": "none",
+    "sampling_profile": {
+      "beam_width": 1,
+      "disabled_reason": "none_policy",
+      "enabled": true,
+      "mode": "greedy",
+      "policy": "none",
+      "stochastic_samples": 0,
+      "top_p_evaluations": 0
+    },
+    "selected": [
+      358
+    ]
+  },
+  "prompt": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+  "tokenizer": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt"
+}

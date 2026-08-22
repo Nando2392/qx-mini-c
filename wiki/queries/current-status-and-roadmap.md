@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-08-21
+updated: 2026-08-22
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -58,6 +58,7 @@ snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + rep
 baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
 QXF mmap read-only opt-in: GREEN local WSL2; gate 2x2 exacto por modalidad, buffered permanece default
 scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend, ephemeral permanece default
+policy provenance gates #27–#34: GREEN local/CI hasta #33; sampling policy #34 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -92,6 +93,8 @@ La comparación externa secuencial fija queda GREEN post-Q5_K: QX F32/INT8 coinc
 [[qxf-mmap-io]] añade un backend QXF read-only explícitamente opt-in sin alterar kernels. El JSON final de Issue #24 (`wiki/evidence/issue-24-qxf-mmap-baseline.json`) supersede números antiguos: el gate 2×2 preserva exactamente outputs buffered/mmap dentro de F32 y `q8_k_compat`; observa ratios de wall-clock total `2.12548×` y `1.96456×`, respectivamente, mientras mmap añade aproximadamente `2.35 GB` de peak RSS y prefill/decode nativos no demuestran mejora material. Buffered sigue siendo default y la evidencia no autoriza inferencias de throughput global.
 
 [[persistent-scratch-buffers]] completa Issue #25 para la prioridad CPU 2. La política `--scratch-policy persistent` queda opt-in; `ephemeral` sigue default/control. En la matriz 2×2×2 con 1 warm-up y 3 mediciones por celda, persistent reduce `480` malloc y `672` frees medianos por activación/backend, retiene `65,536` bytes de scratch, conserva outputs exactos por modalidad/backend y no muestra mejora wall-clock material. No se inicia prioridad 3 desde este resultado.
+
+Issue #34 añade `--sampling-policy none` como contrato fail-closed de provenance para separar greedy determinístico de futuros samplers. `none` queda default, `sampling_profile` reporta `mode=greedy`, `stochastic_samples=0`, `top_p_evaluations=0` y `beam_width=1`; políticas no soportadas fallan antes de prompt/model/tokenizer I/O. No implementa top-p/min-p/beam, no promueve default y no afirma speedup/calidad.
 
 ## Después
 

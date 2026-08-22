@@ -17,6 +17,7 @@ def prompt_state_command(
     prefill_gemm_policy: str = "none",
     speculative_policy: str = "none",
     kv2_policy: str = "none",
+    sampling_policy: str = "none",
 ) -> list[str]:
     return [
         str(QXQXF),
@@ -55,6 +56,8 @@ def prompt_state_command(
         speculative_policy,
         "--kv2-policy",
         kv2_policy,
+        "--sampling-policy",
+        sampling_policy,
         "--temperature",
         "0",
         "--seed",
@@ -196,5 +199,19 @@ def test_prompt_state_loop_probe_rejects_speculative_kv2_policy_contract_before_
 
     assert result.returncode == 2
     assert message in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+def test_prompt_state_loop_probe_rejects_sampling_policy_contract_before_file_io():
+    result = subprocess.run(
+        prompt_state_command("1", sampling_policy="top-p"),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "unsupported sampling policy" in result.stderr
     assert "text file read failed" not in result.stderr
     assert "failed to open" not in result.stderr

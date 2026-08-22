@@ -178,6 +178,7 @@ def validate_native_payload(
     prefill_gemm_policy: str = "none",
     speculative_policy: str = "none",
     kv2_policy: str = "none",
+    sampling_policy: str = "none",
 ) -> dict[str, Any]:
     """Validate native timing, modality and output evidence fail-closed."""
     expected = {
@@ -191,6 +192,7 @@ def validate_native_payload(
         "prefill_gemm_policy": prefill_gemm_policy,
         "speculative_policy": speculative_policy,
         "kv2_policy": kv2_policy,
+        "sampling_policy": sampling_policy,
         "kv_format": kv, "layers": layers, "ctx_tokens": ctx,
         "generation_steps": generation_steps,
     }
@@ -403,6 +405,27 @@ def validate_native_payload(
                 raise ValueError(f"kv2_profile.{field} must be 0 for none policy")
     else:
         raise ValueError("unsupported kv2_policy")
+    sampling_profile = _require_object(payload.get("sampling_profile"), "sampling_profile")
+    if sampling_profile.get("enabled") is not True:
+        raise ValueError("sampling_profile.enabled must be true")
+    if sampling_profile.get("policy") != sampling_policy:
+        raise ValueError("sampling_profile.policy does not match fixed benchmark contract")
+    for field in ("stochastic_samples", "top_p_evaluations", "beam_width"):
+        value = _require_exact_int(sampling_profile.get(field), f"sampling_profile.{field}")
+        if value < 0:
+            raise ValueError(f"sampling_profile.{field} must be non-negative")
+    if sampling_policy == "none":
+        if sampling_profile.get("mode") != "greedy":
+            raise ValueError("sampling_profile.mode must be greedy for none policy")
+        if sampling_profile.get("disabled_reason") != "none_policy":
+            raise ValueError("sampling_profile.disabled_reason must record none_policy")
+        for field in ("stochastic_samples", "top_p_evaluations"):
+            if _require_exact_int(sampling_profile.get(field), f"sampling_profile.{field}") != 0:
+                raise ValueError(f"sampling_profile.{field} must be 0 for none policy")
+        if _require_exact_int(sampling_profile.get("beam_width"), "sampling_profile.beam_width") != 1:
+            raise ValueError("sampling_profile.beam_width must be 1 for none policy")
+    else:
+        raise ValueError("unsupported sampling_policy")
     return signature
 
 
@@ -468,6 +491,7 @@ def build_inference_command(
     prefill_gemm_policy: str = "none",
     speculative_policy: str = "none",
     kv2_policy: str = "none",
+    sampling_policy: str = "none",
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -485,6 +509,7 @@ def build_inference_command(
         "--prefill-gemm-policy", prefill_gemm_policy,
         "--speculative-policy", speculative_policy,
         "--kv2-policy", kv2_policy,
+        "--sampling-policy", sampling_policy,
         "--temperature", "0", "--seed", str(seed),
         "--full-moe", "--final-head", "--bench", "--dequant-profile",
     ]
