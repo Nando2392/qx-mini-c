@@ -23,6 +23,7 @@ def native_payload(
     kernel_policy: str = "baseline",
     thread_policy: str = "serial",
     threads: int = 1,
+    simd_policy: str = "scalar",
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -62,6 +63,7 @@ def native_payload(
         "kernel_policy": kernel_policy,
         "thread_policy": thread_policy,
         "threads": threads,
+        "simd_policy": simd_policy,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -111,6 +113,14 @@ def native_payload(
             "serial_jobs": 96,
             "fallback_jobs": 96,
             "disabled_reason": "serial_policy",
+        },
+        "simd_profile": {
+            "enabled": True,
+            "policy": simd_policy,
+            "kernel": "avx2_fma_q6_k_f32" if simd_policy == "avx2-fma" else "scalar",
+            "fma_dot_calls": 1215488 if simd_policy == "avx2-fma" else 0,
+            "fallback_dot_calls": 0 if simd_policy == "avx2-fma" else 1215488,
+            "disabled_reason": "scalar_policy" if simd_policy == "scalar" else None,
         },
     }
 
@@ -457,6 +467,43 @@ def test_compare_kernel_policy_requires_fused_to_reduce_f32_temporaries():
 
     with pytest.raises(ValueError, match="did not reduce"):
         PERF.compare_kernel_policy_effects({"baseline": [baseline, baseline, baseline], "fused": [baseline, baseline, baseline]})
+
+
+def test_validate_native_payload_requires_avx2_fma_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), kernel_policy="fused", simd_policy="avx2-fma")
+    payload["simd_profile"]["fma_dot_calls"] = 0
+    with pytest.raises(ValueError, match="simd_profile.fma_dot_calls"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="fused",
+            thread_policy="serial",
+            threads=1,
+            simd_policy="avx2-fma",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+    payload["simd_profile"]["fma_dot_calls"] = 1215488
+    signature = PERF.validate_native_payload(
+        payload,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="fused",
+        thread_policy="serial",
+        threads=1,
+        simd_policy="avx2-fma",
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+    )
+    assert signature["selected_tokens"] == [358, 1184]
 
 
 def test_validate_native_payload_rejects_scratch_policy_drift():

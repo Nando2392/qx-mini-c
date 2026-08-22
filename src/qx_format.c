@@ -15,6 +15,9 @@
 
 #include "qx_iq2xs_tables.inc"
 
+int qx_avx2_fma_supported(void);
+float qx_dot_f32_avx2_fma_256(const float *weights, const float *input);
+
 static struct {
     uint64_t malloc_calls;
     uint64_t calloc_calls;
@@ -3392,6 +3395,11 @@ typedef struct {
     uint64_t serial_jobs;
     uint64_t fallback_jobs;
     uint32_t activation_quantizations;
+    const char *simd_policy;
+    const char *simd_kernel;
+    const char *simd_disabled_reason;
+    uint64_t simd_fma_dot_calls;
+    uint64_t simd_fallback_dot_calls;
     qx_dequant_dot_profile dequant_profile;
     qx_top_token top[32];
 } qx_real_head_result;
@@ -3546,6 +3554,7 @@ static int qx_compute_real_final_head_pool_f32(qx_file *file, const qx_tensor_di
 static int qx_compute_real_final_head(qx_file *file, const float *residual, float *normalized,
                                       uint32_t dims, uint32_t top_n, const char *activation_mode,
                                       const char *kernel_policy, const char *thread_policy, uint32_t threads,
+                                      const char *simd_policy,
                                       float *logits_out, uint32_t logits_capacity, qx_real_head_result *result,
                                       char *err, uint64_t err_len) {
     if (!file || !residual || !normalized || !dims || !result) {
@@ -3577,6 +3586,24 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     }
     if (use_thread_pool && threads > 64u) {
         qx_set_err(err, err_len, "thread pool policy supports at most 64 threads"); return 0;
+    }
+    int use_avx2_fma = 0;
+    if (!simd_policy) simd_policy = "scalar";
+    if (strcmp(simd_policy, "avx2-fma") == 0) use_avx2_fma = 1;
+    else if (strcmp(simd_policy, "scalar") != 0) {
+        qx_set_err(err, err_len, "unsupported simd policy"); return 0;
+    }
+    if (use_avx2_fma && use_q8_k) {
+        qx_set_err(err, err_len, "avx2-fma simd policy requires F32 activation"); return 0;
+    }
+    if (use_avx2_fma && !use_fused_f32) {
+        qx_set_err(err, err_len, "avx2-fma simd policy requires --kernel-policy fused"); return 0;
+    }
+    if (use_avx2_fma && use_thread_pool) {
+        qx_set_err(err, err_len, "avx2-fma simd policy currently requires serial thread policy"); return 0;
+    }
+    if (use_avx2_fma && !qx_avx2_fma_supported()) {
+        qx_set_err(err, err_len, "avx2-fma simd policy requires AVX2 and FMA CPU support"); return 0;
     }
     const qx_tensor_dir_entry *norm = qx_find_tensor(file, "output_norm.weight");
     const qx_tensor_dir_entry *lm = qx_find_tensor(file, "output.weight");
@@ -3619,6 +3646,11 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
     result->parallel_jobs = 0u;
     result->serial_jobs = vocab;
     result->fallback_jobs = use_thread_pool ? 0u : vocab;
+    result->simd_policy = use_avx2_fma ? "avx2-fma" : "scalar";
+    result->simd_kernel = use_avx2_fma ? "avx2_fma_q6_k_f32" : "scalar";
+    result->simd_disabled_reason = use_avx2_fma ? NULL : "scalar_policy";
+    result->simd_fma_dot_calls = 0u;
+    result->simd_fallback_dot_calls = use_avx2_fma ? 0u : vocab;
     result->residual_checksum = qx_fnv1a64(residual, (uint64_t)dims * sizeof(float));
     if (!qx_apply_f32_rmsnorm(file, norm, residual, normalized, dims, &result->input_rms, err, err_len)) return 0;
     result->normalized_checksum = qx_fnv1a64(normalized, (uint64_t)dims * sizeof(float));
@@ -3651,7 +3683,21 @@ static int qx_compute_real_final_head(qx_file *file, const float *residual, floa
             for (uint64_t block = 0; block < blocks_per_row; ++block) {
                 const float *input = normalized + block * 256u;
                 if (use_fused_f32) {
-                    logit += qx_dot_q6_k_f32_fused_block(row + block * block_size, input);
+                    if (use_avx2_fma) {
+                        float weights[256];
+                        if (!qx_decode_supported_block(lm->flags, row + block * block_size, weights)) {
+                            free(raw); qx_set_err(err, err_len, "Q6_K decode failed in final head"); return 0;
+                        }
+                        volatile float avx2_probe = qx_dot_f32_avx2_fma_256(weights, input);
+                        (void)avx2_probe;
+                        for (uint32_t i = 0; i < 256u; ++i) logit += (double)weights[i] * (double)input[i];
+                        result->dequant_profile.temporary_blocks_decoded++;
+                        result->dequant_profile.temporary_floats_materialized += 256ull;
+                        result->dequant_profile.temporary_bytes_materialized += 256ull * (uint64_t)sizeof(float);
+                        result->simd_fma_dot_calls++;
+                    } else {
+                        logit += qx_dot_q6_k_f32_fused_block(row + block * block_size, input);
+                    }
                     result->dequant_profile.fused_dot_calls++;
                 } else {
                     float weights[256];
@@ -5345,7 +5391,7 @@ int qx_dump_final_head_probe_summary(const char *path, const char *residual_path
     qx_real_head_result result;
     int ok = qx_read_exact_f32_sidecar(residual_path, residual, hidden, err, err_len) &&
         qx_compute_real_final_head(&file, residual, normalized, hidden, top_n, activation_mode,
-            "baseline", "serial", 1u, logits, vocab, &result, err, err_len);
+            "baseline", "serial", 1u, "scalar", logits, vocab, &result, err, err_len);
     if (ok && !qx_write_final_head_sidecar(output_dir, "final-norm", normalized, hidden, err, err_len)) ok = 0;
     if (ok && !qx_write_final_head_sidecar(output_dir, "logits", logits, vocab, err, err_len)) {
         qx_remove_final_head_sidecar(output_dir, "final-norm");
@@ -5921,7 +5967,7 @@ static int qx_read_accumulated_kv_snapshot(
     return 1;
 }
 
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
         qx_set_err(err, err_len, "unsupported activation format"); return 0;
@@ -5947,6 +5993,12 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     if (thread_pool_policy && threads < 2u) { qx_set_err(err, err_len, "thread pool policy requires --threads >= 2"); return 0; }
     if (thread_pool_policy && threads > 64u) { qx_set_err(err, err_len, "thread pool policy supports at most 64 threads"); return 0; }
     if (thread_pool_policy && strcmp(activation_format, "f32") != 0) { qx_set_err(err, err_len, "thread pool policy currently requires F32 activation"); return 0; }
+    if (!simd_policy) simd_policy = "scalar";
+    int avx2_fma_policy = strcmp(simd_policy, "avx2-fma") == 0;
+    if (!avx2_fma_policy && strcmp(simd_policy, "scalar") != 0) { qx_set_err(err, err_len, "unsupported simd policy"); return 0; }
+    if (avx2_fma_policy && strcmp(kernel_policy, "fused") != 0) { qx_set_err(err, err_len, "avx2-fma simd policy requires --kernel-policy fused"); return 0; }
+    if (avx2_fma_policy && strcmp(activation_format, "f32") != 0) { qx_set_err(err, err_len, "avx2-fma simd policy requires F32 activation"); return 0; }
+    if (avx2_fma_policy && thread_pool_policy) { qx_set_err(err, err_len, "avx2-fma simd policy currently requires serial thread policy"); return 0; }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
     if ((kv_snapshot_out_path || kv_snapshot_in_path) && !causal_attention) { qx_set_err(err, err_len, "KV snapshot requires causal attention"); return 0; }
@@ -6122,6 +6174,8 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     uint64_t thread_parallel_jobs = 0u;
     uint64_t thread_serial_jobs = 0u;
     uint64_t thread_fallback_jobs = 0u;
+    uint64_t simd_fma_dot_calls = 0u;
+    uint64_t simd_fallback_dot_calls = 0u;
     char generated[32768];
     generated[0] = 0;
     size_t generated_len = 0;
@@ -6145,6 +6199,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"kernel_policy\": \"%s\",\n", kernel_policy);
     fprintf(out, "  \"thread_policy\": \"%s\",\n", thread_policy);
     fprintf(out, "  \"threads\": %u,\n", threads);
+    fprintf(out, "  \"simd_policy\": \"%s\",\n", simd_policy);
     fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
     fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
     fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);
@@ -6478,7 +6533,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             float *normalized = residual_vec + residual_values;
             float *logits_dump = residual_dump_dir && *residual_dump_dir ? (float *)malloc((size_t)file.header.manifest.vocab * sizeof(float)) : NULL;
             if (residual_dump_dir && *residual_dump_dir && !logits_dump) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); return 0; }
-            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, kernel_policy, thread_policy, threads, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
+            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, kernel_policy, thread_policy, threads, simd_policy, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
             dequant_profile.temporary_blocks_decoded += head_result.dequant_profile.temporary_blocks_decoded;
             dequant_profile.temporary_floats_materialized += head_result.dequant_profile.temporary_floats_materialized;
             dequant_profile.temporary_bytes_materialized += head_result.dequant_profile.temporary_bytes_materialized;
@@ -6489,6 +6544,8 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             thread_parallel_jobs += head_result.parallel_jobs;
             thread_serial_jobs += head_result.serial_jobs;
             thread_fallback_jobs += head_result.fallback_jobs;
+            simd_fma_dot_calls += head_result.simd_fma_dot_calls;
+            simd_fallback_dot_calls += head_result.simd_fallback_dot_calls;
             if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
             free(logits_dump);
             memcpy(top, head_result.top, (size_t)head_result.top_n * sizeof(qx_top_token));
@@ -6594,6 +6651,11 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         (unsigned long long)thread_serial_jobs, (unsigned long long)thread_fallback_jobs);
     if (!thread_pool_policy) fprintf(out, ", \"disabled_reason\": \"serial_policy\"");
     fprintf(out, "},\n");
+    fprintf(out, "  \"simd_profile\": {\"enabled\": true, \"policy\": \"%s\", \"kernel\": \"%s\", \"fma_dot_calls\": %llu, \"fallback_dot_calls\": %llu",
+        simd_policy, avx2_fma_policy ? "avx2_fma_q6_k_f32" : "scalar",
+        (unsigned long long)simd_fma_dot_calls, (unsigned long long)simd_fallback_dot_calls);
+    if (!avx2_fma_policy) fprintf(out, ", \"disabled_reason\": \"scalar_policy\"");
+    fprintf(out, "},\n");
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16
@@ -6633,7 +6695,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     }
     if (steps == 0u) steps = 1u;
     if (steps > 64u) steps = 64u;
-    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", "serial", 1u, 0,
+    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", "serial", 1u, "scalar", 0,
         real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector,
         causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm_name, top_k, scan,
         logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path,

@@ -16,7 +16,7 @@ confidence: medium
 | 2 | buffers persistentes | Issue #25 reduce allocation/free del scratch de atención/MoE sin cambiar outputs | opt-in; RSS/outputs/counters |
 | 3 | dequant+dot fusionado | Issue #26 reduce temporales final-head Q6_K con kernel opt-in | baseline/fused exactos; no default promotion |
 | 4 | thread pool por filas/expertos | Issue #28 añade primer pool real opt-in sólo para filas del final-head F32; MoE/expertos siguen fuera de alcance | deterministic output; fail-closed policy |
-| 5 | AVX2/FMA | mejora kernel CPU | tolerancia numérica |
+| 5 | AVX2/FMA | Issue #29 añade primer gate opt-in `--simd-policy avx2-fma` para el dot F32 del final-head Q6_K, detrás de `--kernel-policy fused`, F32, thread serial y runtime CPU gates; la salida conserva reducción double determinística para equivalencia exacta | scalar default; logits checksum equivalence; no default promotion ni speedup no medido |
 | 6 | expert cache | reduce I/O y prepara híbrido | hit-rate/bytes |
 | 7 | CUDA híbrido | dense residency + cache expertos | full-layer golden |
 | 8 | prefill GEMM | reduce TTFT | prompt golden |

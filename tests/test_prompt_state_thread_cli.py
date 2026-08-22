@@ -10,7 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 QXQXF = ROOT / "build" / "qxqxf.exe"
 
 
-def prompt_state_command(threads: str, *, thread_policy: str = "serial", activation: str = "f32") -> list[str]:
+def prompt_state_command(
+    threads: str, *, thread_policy: str = "serial", activation: str = "f32",
+    kernel_policy: str = "baseline", simd_policy: str = "scalar",
+) -> list[str]:
     return [
         str(QXQXF),
         "prompt-state-loop-probe",
@@ -30,10 +33,14 @@ def prompt_state_command(threads: str, *, thread_policy: str = "serial", activat
         "int8",
         "--activation",
         activation,
+        "--kernel-policy",
+        kernel_policy,
         "--thread-policy",
         thread_policy,
         "--threads",
         threads,
+        "--simd-policy",
+        simd_policy,
         "--temperature",
         "0",
         "--seed",
@@ -69,6 +76,38 @@ def test_prompt_state_loop_probe_rejects_thread_policy_contract_before_file_io(
 ):
     result = subprocess.run(
         prompt_state_command(threads, thread_policy=thread_policy, activation=activation),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert message in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+@pytest.mark.parametrize(
+    ("kernel_policy", "activation", "thread_policy", "threads", "simd_policy", "message"),
+    [
+        ("baseline", "f32", "serial", "1", "avx2-fma", "avx2-fma simd policy requires --kernel-policy fused"),
+        ("fused", "q8_k_compat", "serial", "1", "avx2-fma", "avx2-fma simd policy requires F32 activation"),
+        ("fused", "f32", "pool", "2", "avx2-fma", "avx2-fma simd policy currently requires serial thread policy"),
+        ("fused", "f32", "serial", "1", "neon", "unsupported simd policy"),
+    ],
+)
+def test_prompt_state_loop_probe_rejects_simd_policy_contract_before_file_io(
+    kernel_policy: str, activation: str, thread_policy: str, threads: str, simd_policy: str, message: str
+):
+    result = subprocess.run(
+        prompt_state_command(
+            threads,
+            thread_policy=thread_policy,
+            activation=activation,
+            kernel_policy=kernel_policy,
+            simd_policy=simd_policy,
+        ),
         cwd=ROOT,
         capture_output=True,
         text=True,

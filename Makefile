@@ -4,7 +4,7 @@ LDFLAGS ?=
 
 BUILD := build
 FIT_SRC := src/qxfit.c src/qx_main.c
-QXF_SRC := src/qx_format.c src/qx_gguf.c src/qx_tokenizer.c src/qx_qxf_main.c
+QXF_SRC := src/qx_format.c src/qx_gguf.c src/qx_tokenizer.c src/qx_avx2.c src/qx_qxf_main.c
 FIT_BIN := $(BUILD)/qxfit
 QXF_BIN := $(BUILD)/qxqxf
 

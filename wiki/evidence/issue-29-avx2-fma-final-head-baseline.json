@@ -1,0 +1,109 @@
+{
+  "artifact": {
+    "build_reproducible": "verified by two consecutive build_msvc.bat runs with identical qxqxf.exe SHA256",
+    "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+    "sha256": "3bf8dae736a16692072b6b266a9c1c427d0184ce5b905b3bf57cd5ed1c7c8f07",
+    "size": 624128
+  },
+  "avx2_fma": {
+    "dequant_dot_profile": {
+      "enabled": true,
+      "fallback_dot_calls": 0,
+      "final_head_q6_k_blocks": 1215488,
+      "fused_dot_calls": 1215488,
+      "kernel_policy": "fused",
+      "target": "final_head_q6_k",
+      "temporary_blocks_decoded": 1215488,
+      "temporary_bytes_materialized": 1244659712,
+      "temporary_floats_materialized": 311164928
+    },
+    "final_head": {
+      "argmax_logit": 23.25199819684119,
+      "logits_checksum": 13347842135191822952,
+      "selected_token": 358
+    },
+    "selected": [
+      358
+    ],
+    "simd_profile": {
+      "enabled": true,
+      "fallback_dot_calls": 0,
+      "fma_dot_calls": 1215488,
+      "kernel": "avx2_fma_q6_k_f32",
+      "policy": "avx2-fma"
+    }
+  },
+  "fail_closed_cases": [
+    {
+      "before_model_io": true,
+      "expected_stderr": "avx2-fma simd policy requires --kernel-policy fused",
+      "matched": true,
+      "name": "baseline_avx2",
+      "returncode": 2
+    },
+    {
+      "before_model_io": true,
+      "expected_stderr": "avx2-fma simd policy requires F32 activation",
+      "matched": true,
+      "name": "q8k_avx2",
+      "returncode": 2
+    },
+    {
+      "before_model_io": true,
+      "expected_stderr": "avx2-fma simd policy currently requires serial thread policy",
+      "matched": true,
+      "name": "pool_avx2",
+      "returncode": 2
+    },
+    {
+      "before_model_io": true,
+      "expected_stderr": "unsupported simd policy",
+      "matched": true,
+      "name": "unsupported_simd",
+      "returncode": 2
+    }
+  ],
+  "gates": {
+    "avx2_fma_no_fallback": true,
+    "avx2_fma_opt_in": true,
+    "fail_closed_before_model_io": true,
+    "final_head_logits_checksum_match": true,
+    "no_default_promotion": true,
+    "reproducible_build_hash_checked": true,
+    "scalar_default_preserved": true,
+    "selected_tokens_match": true
+  },
+  "issue": 29,
+  "model": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+  "prompt": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+  "scalar": {
+    "dequant_dot_profile": {
+      "enabled": true,
+      "fallback_dot_calls": 0,
+      "final_head_q6_k_blocks": 1215488,
+      "fused_dot_calls": 1215488,
+      "kernel_policy": "fused",
+      "target": "final_head_q6_k",
+      "temporary_blocks_decoded": 0,
+      "temporary_bytes_materialized": 0,
+      "temporary_floats_materialized": 0
+    },
+    "final_head": {
+      "argmax_logit": 23.251998196841193,
+      "logits_checksum": 13347842135191822952,
+      "selected_token": 358
+    },
+    "selected": [
+      358
+    ],
+    "simd_profile": {
+      "disabled_reason": "scalar_policy",
+      "enabled": true,
+      "fallback_dot_calls": 151936,
+      "fma_dot_calls": 0,
+      "kernel": "scalar",
+      "policy": "scalar"
+    }
+  },
+  "tokenizer": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt"
+}

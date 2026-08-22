@@ -172,7 +172,7 @@ def extract_output_signature(payload: dict[str, Any]) -> dict[str, Any]:
 def validate_native_payload(
     payload: dict[str, Any], *, activation: str, io_backend: str, scratch_policy: str,
     kv: str, layers: int, ctx: int, generation_steps: int, kernel_policy: str = "baseline",
-    thread_policy: str = "serial", threads: int = 1,
+    thread_policy: str = "serial", threads: int = 1, simd_policy: str = "scalar",
 ) -> dict[str, Any]:
     """Validate native timing, modality and output evidence fail-closed."""
     expected = {
@@ -180,6 +180,7 @@ def validate_native_payload(
         "io_backend": io_backend,
         "scratch_policy": scratch_policy, "kernel_policy": kernel_policy,
         "thread_policy": thread_policy, "threads": threads,
+        "simd_policy": simd_policy,
         "kv_format": kv, "layers": layers, "ctx_tokens": ctx,
         "generation_steps": generation_steps,
     }
@@ -272,6 +273,33 @@ def validate_native_payload(
             raise ValueError("thread_profile.disabled_reason must be absent for pool policy")
     else:
         raise ValueError("unsupported thread_policy")
+    simd_profile = _require_object(payload.get("simd_profile"), "simd_profile")
+    if simd_profile.get("enabled") is not True:
+        raise ValueError("simd_profile.enabled must be true")
+    if simd_profile.get("policy") != simd_policy:
+        raise ValueError("simd_profile.policy does not match fixed benchmark contract")
+    for field in ("fma_dot_calls", "fallback_dot_calls"):
+        value = _require_exact_int(simd_profile.get(field), f"simd_profile.{field}")
+        if value < 0:
+            raise ValueError(f"simd_profile.{field} must be non-negative")
+    if simd_policy == "scalar":
+        if simd_profile.get("kernel") != "scalar":
+            raise ValueError("simd_profile.kernel must be scalar for scalar policy")
+        if simd_profile.get("disabled_reason") != "scalar_policy":
+            raise ValueError("simd_profile.disabled_reason must record scalar_policy")
+        if _require_exact_int(simd_profile.get("fma_dot_calls"), "simd_profile.fma_dot_calls") != 0:
+            raise ValueError("simd_profile.fma_dot_calls must be 0 for scalar policy")
+    elif simd_policy == "avx2-fma":
+        if simd_profile.get("kernel") != "avx2_fma_q6_k_f32":
+            raise ValueError("simd_profile.kernel must record avx2_fma_q6_k_f32")
+        if _require_exact_int(simd_profile.get("fma_dot_calls"), "simd_profile.fma_dot_calls") <= 0:
+            raise ValueError("simd_profile.fma_dot_calls must be positive for avx2-fma policy")
+        if _require_exact_int(simd_profile.get("fallback_dot_calls"), "simd_profile.fallback_dot_calls") != 0:
+            raise ValueError("simd_profile.fallback_dot_calls must be 0 for avx2-fma policy")
+        if simd_profile.get("disabled_reason"):
+            raise ValueError("simd_profile.disabled_reason must be absent for avx2-fma policy")
+    else:
+        raise ValueError("unsupported simd_policy")
     return signature
 
 
@@ -331,7 +359,7 @@ def build_inference_command(
     *, qx_exe: Path, model: Path, tokenizer: Path, prompt_file: Path,
     activation: str, kv: str, layers: int, ctx: int,
     generation_steps: int, seed: int, io_backend: str, scratch_policy: str, kernel_policy: str,
-    thread_policy: str = "serial", threads: int = 1,
+    thread_policy: str = "serial", threads: int = 1, simd_policy: str = "scalar",
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -343,6 +371,7 @@ def build_inference_command(
         "--scratch-policy", scratch_policy,
         "--kernel-policy", kernel_policy,
         "--thread-policy", thread_policy, "--threads", str(threads),
+        "--simd-policy", simd_policy,
         "--temperature", "0", "--seed", str(seed), "--full-moe",
         "--final-head", "--bench", "--dequant-profile",
     ]
