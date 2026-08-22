@@ -26,6 +26,7 @@ def native_payload(
     simd_policy: str = "scalar",
     expert_cache_policy: str = "none",
     cuda_policy: str = "none",
+    prefill_gemm_policy: str = "none",
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -68,6 +69,7 @@ def native_payload(
         "simd_policy": simd_policy,
         "expert_cache_policy": expert_cache_policy,
         "cuda_policy": cuda_policy,
+        "prefill_gemm_policy": prefill_gemm_policy,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -144,6 +146,16 @@ def native_payload(
             "device_to_host_bytes": 0,
             "kernel_launches": 0,
             "disabled_reason": "none_policy" if cuda_policy == "none" else None,
+        },
+        "prefill_gemm_profile": {
+            "enabled": True,
+            "policy": prefill_gemm_policy,
+            "backend": "none",
+            "gemm_calls": 0,
+            "batched_tokens": 0,
+            "fused_rows": 0,
+            "temporary_bytes": 0,
+            "disabled_reason": "none_policy" if prefill_gemm_policy == "none" else None,
         },
     }
 
@@ -619,6 +631,41 @@ def test_validate_native_payload_rejects_fake_cuda_profile():
             scratch_policy="ephemeral",
             kernel_policy="baseline",
             cuda_policy="none",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_requires_prefill_gemm_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    del payload["prefill_gemm_profile"]
+    with pytest.raises(ValueError, match="prefill_gemm_profile"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_rejects_fake_prefill_gemm_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), prefill_gemm_policy="none")
+    payload["prefill_gemm_profile"]["gemm_calls"] = 1
+    with pytest.raises(ValueError, match="prefill_gemm_profile.gemm_calls"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            prefill_gemm_policy="none",
             kv="int8",
             layers=48,
             ctx=16,

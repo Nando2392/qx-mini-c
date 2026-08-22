@@ -1,0 +1,54 @@
+{
+  "artifact": {
+    "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+    "sha256": "0aea735e82d43dbd78a77a6c9b2bd78a80fdeef6a24ea99b95da0dba971ed67e",
+    "size": 625664
+  },
+  "fail_closed_cases": [
+    {
+      "before_model_io": true,
+      "expected_stderr": "unsupported prefill GEMM policy",
+      "matched": true,
+      "name": "unsupported_prefill_gemm_policy",
+      "returncode": 2
+    }
+  ],
+  "gates": {
+    "fail_closed_before_model_io": true,
+    "no_batched_tokens": true,
+    "no_default_promotion": true,
+    "no_fused_rows": true,
+    "no_gemm_calls": true,
+    "no_temporary_bytes": true,
+    "prefill_gemm_backend_none": true,
+    "prefill_gemm_none_default": true,
+    "prefill_gemm_profile_present": true
+  },
+  "issue": 32,
+  "model": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+  "payload": {
+    "final_head": {
+      "argmax_logit": 23.25199819684119,
+      "argmax_token": 358,
+      "final_norm_checksum": 648938303818007011,
+      "final_residual_checksum": 11401753417758216440,
+      "logits_checksum": 13347842135191822952
+    },
+    "prefill_gemm_policy": "none",
+    "prefill_gemm_profile": {
+      "backend": "none",
+      "batched_tokens": 0,
+      "disabled_reason": "none_policy",
+      "enabled": true,
+      "fused_rows": 0,
+      "gemm_calls": 0,
+      "policy": "none",
+      "temporary_bytes": 0
+    },
+    "selected": [
+      358
+    ]
+  },
+  "prompt": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+  "tokenizer": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt"
+}

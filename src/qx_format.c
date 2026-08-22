@@ -5967,7 +5967,7 @@ static int qx_read_accumulated_kv_snapshot(
     return 1;
 }
 
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
         qx_set_err(err, err_len, "unsupported activation format"); return 0;
@@ -6003,6 +6003,8 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     if (strcmp(expert_cache_policy, "none") != 0) { qx_set_err(err, err_len, "unsupported expert cache policy"); return 0; }
     if (!cuda_policy) cuda_policy = "none";
     if (strcmp(cuda_policy, "none") != 0) { qx_set_err(err, err_len, "unsupported CUDA policy"); return 0; }
+    if (!prefill_gemm_policy) prefill_gemm_policy = "none";
+    if (strcmp(prefill_gemm_policy, "none") != 0) { qx_set_err(err, err_len, "unsupported prefill GEMM policy"); return 0; }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
     if ((kv_snapshot_out_path || kv_snapshot_in_path) && !causal_attention) { qx_set_err(err, err_len, "KV snapshot requires causal attention"); return 0; }
@@ -6206,6 +6208,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"simd_policy\": \"%s\",\n", simd_policy);
     fprintf(out, "  \"expert_cache_policy\": \"%s\",\n", expert_cache_policy);
     fprintf(out, "  \"cuda_policy\": \"%s\",\n", cuda_policy);
+    fprintf(out, "  \"prefill_gemm_policy\": \"%s\",\n", prefill_gemm_policy);
     fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
     fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
     fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);
@@ -6664,6 +6667,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "},\n");
     fprintf(out, "  \"expert_cache_profile\": {\"enabled\": true, \"policy\": \"%s\", \"cache_hits\": 0, \"cache_misses\": 0, \"bytes_cached\": 0, \"expert_weight_reads\": 0, \"disabled_reason\": \"none_policy\"},\n", expert_cache_policy);
     fprintf(out, "  \"cuda_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"device_bytes\": 0, \"host_to_device_bytes\": 0, \"device_to_host_bytes\": 0, \"kernel_launches\": 0, \"disabled_reason\": \"none_policy\"},\n", cuda_policy);
+    fprintf(out, "  \"prefill_gemm_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"gemm_calls\": 0, \"batched_tokens\": 0, \"fused_rows\": 0, \"temporary_bytes\": 0, \"disabled_reason\": \"none_policy\"},\n", prefill_gemm_policy);
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16
@@ -6703,7 +6707,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     }
     if (steps == 0u) steps = 1u;
     if (steps > 64u) steps = 64u;
-    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", "serial", 1u, "scalar", "none", "none", 0,
+    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", "serial", 1u, "scalar", "none", "none", "none", 0,
         real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector,
         causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm_name, top_k, scan,
         logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path,
