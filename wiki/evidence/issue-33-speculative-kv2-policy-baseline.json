@@ -1,0 +1,80 @@
+{
+  "artifact": {
+    "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+    "sha256": "9ee44ece3d963b686ea78048590eab3d59dee1936f816a1c9a5cb5ea46a1fa6a",
+    "size": 626688
+  },
+  "fail_closed_cases": [
+    {
+      "before_model_io": true,
+      "expected_stderr": "unsupported speculative policy",
+      "matched": true,
+      "name": "unsupported_speculative_policy",
+      "returncode": 2
+    },
+    {
+      "before_model_io": true,
+      "expected_stderr": "unsupported KV2 policy",
+      "matched": true,
+      "name": "unsupported_kv2_policy",
+      "returncode": 2
+    }
+  ],
+  "gates": {
+    "kv2_fail_closed_before_model_io": true,
+    "kv2_format_none": true,
+    "kv2_none_default": true,
+    "kv2_profile_present": true,
+    "no_accepted_tokens": true,
+    "no_default_promotion": true,
+    "no_draft_tokens": true,
+    "no_kv2_fallback_reads": true,
+    "no_kv2_packed_bytes": true,
+    "no_kv2_reads": true,
+    "no_kv2_writes": true,
+    "no_rejected_tokens": true,
+    "no_target_verifications": true,
+    "speculative_backend_none": true,
+    "speculative_fail_closed_before_model_io": true,
+    "speculative_none_default": true,
+    "speculative_profile_present": true
+  },
+  "issue": 33,
+  "model": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+  "payload": {
+    "final_head": {
+      "argmax_logit": 23.25199819684119,
+      "argmax_token": 358,
+      "final_norm_checksum": 648938303818007011,
+      "final_residual_checksum": 11401753417758216440,
+      "logits_checksum": 13347842135191822952
+    },
+    "kv2_policy": "none",
+    "kv2_profile": {
+      "disabled_reason": "none_policy",
+      "enabled": true,
+      "fallback_reads": 0,
+      "format": "none",
+      "packed_bytes": 0,
+      "policy": "none",
+      "read_ops": 0,
+      "write_ops": 0
+    },
+    "selected": [
+      358
+    ],
+    "speculative_policy": "none",
+    "speculative_profile": {
+      "accepted_tokens": 0,
+      "backend": "none",
+      "disabled_reason": "none_policy",
+      "draft_tokens": 0,
+      "enabled": true,
+      "policy": "none",
+      "rejected_tokens": 0,
+      "target_verifications": 0
+    }
+  },
+  "prompt": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+  "tokenizer": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt"
+}

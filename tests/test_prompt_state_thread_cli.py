@@ -15,6 +15,8 @@ def prompt_state_command(
     kernel_policy: str = "baseline", simd_policy: str = "scalar", expert_cache_policy: str = "none",
     cuda_policy: str = "none",
     prefill_gemm_policy: str = "none",
+    speculative_policy: str = "none",
+    kv2_policy: str = "none",
 ) -> list[str]:
     return [
         str(QXQXF),
@@ -49,6 +51,10 @@ def prompt_state_command(
         cuda_policy,
         "--prefill-gemm-policy",
         prefill_gemm_policy,
+        "--speculative-policy",
+        speculative_policy,
+        "--kv2-policy",
+        kv2_policy,
         "--temperature",
         "0",
         "--seed",
@@ -168,5 +174,27 @@ def test_prompt_state_loop_probe_rejects_prefill_gemm_policy_contract_before_fil
 
     assert result.returncode == 2
     assert "unsupported prefill GEMM policy" in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"speculative_policy": "draft"}, "unsupported speculative policy"),
+        ({"kv2_policy": "packed"}, "unsupported KV2 policy"),
+    ],
+)
+def test_prompt_state_loop_probe_rejects_speculative_kv2_policy_contract_before_file_io(kwargs, message: str):
+    result = subprocess.run(
+        prompt_state_command("1", **kwargs),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert message in result.stderr
     assert "text file read failed" not in result.stderr
     assert "failed to open" not in result.stderr

@@ -27,6 +27,8 @@ def native_payload(
     expert_cache_policy: str = "none",
     cuda_policy: str = "none",
     prefill_gemm_policy: str = "none",
+    speculative_policy: str = "none",
+    kv2_policy: str = "none",
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -70,6 +72,8 @@ def native_payload(
         "expert_cache_policy": expert_cache_policy,
         "cuda_policy": cuda_policy,
         "prefill_gemm_policy": prefill_gemm_policy,
+        "speculative_policy": speculative_policy,
+        "kv2_policy": kv2_policy,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -156,6 +160,26 @@ def native_payload(
             "fused_rows": 0,
             "temporary_bytes": 0,
             "disabled_reason": "none_policy" if prefill_gemm_policy == "none" else None,
+        },
+        "speculative_profile": {
+            "enabled": True,
+            "policy": speculative_policy,
+            "backend": "none",
+            "draft_tokens": 0,
+            "accepted_tokens": 0,
+            "rejected_tokens": 0,
+            "target_verifications": 0,
+            "disabled_reason": "none_policy" if speculative_policy == "none" else None,
+        },
+        "kv2_profile": {
+            "enabled": True,
+            "policy": kv2_policy,
+            "format": "none",
+            "packed_bytes": 0,
+            "read_ops": 0,
+            "write_ops": 0,
+            "fallback_reads": 0,
+            "disabled_reason": "none_policy" if kv2_policy == "none" else None,
         },
     }
 
@@ -666,6 +690,57 @@ def test_validate_native_payload_rejects_fake_prefill_gemm_profile():
             scratch_policy="ephemeral",
             kernel_policy="baseline",
             prefill_gemm_policy="none",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_requires_speculative_and_kv2_profiles():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    del payload["speculative_profile"]
+    del payload["kv2_profile"]
+    with pytest.raises(ValueError, match="speculative_profile"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_rejects_fake_speculative_and_kv2_profiles():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    payload["speculative_profile"]["draft_tokens"] = 1
+    with pytest.raises(ValueError, match="speculative_profile.draft_tokens"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            speculative_policy="none",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    payload["kv2_profile"]["packed_bytes"] = 1
+    with pytest.raises(ValueError, match="kv2_profile.packed_bytes"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            kv2_policy="none",
             kv="int8",
             layers=48,
             ctx=16,

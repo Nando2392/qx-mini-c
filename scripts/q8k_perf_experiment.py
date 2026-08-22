@@ -176,6 +176,8 @@ def validate_native_payload(
     expert_cache_policy: str = "none",
     cuda_policy: str = "none",
     prefill_gemm_policy: str = "none",
+    speculative_policy: str = "none",
+    kv2_policy: str = "none",
 ) -> dict[str, Any]:
     """Validate native timing, modality and output evidence fail-closed."""
     expected = {
@@ -187,6 +189,8 @@ def validate_native_payload(
         "expert_cache_policy": expert_cache_policy,
         "cuda_policy": cuda_policy,
         "prefill_gemm_policy": prefill_gemm_policy,
+        "speculative_policy": speculative_policy,
+        "kv2_policy": kv2_policy,
         "kv_format": kv, "layers": layers, "ctx_tokens": ctx,
         "generation_steps": generation_steps,
     }
@@ -361,6 +365,44 @@ def validate_native_payload(
                 raise ValueError(f"prefill_gemm_profile.{field} must be 0 for none policy")
     else:
         raise ValueError("unsupported prefill_gemm_policy")
+    speculative_profile = _require_object(payload.get("speculative_profile"), "speculative_profile")
+    if speculative_profile.get("enabled") is not True:
+        raise ValueError("speculative_profile.enabled must be true")
+    if speculative_profile.get("policy") != speculative_policy:
+        raise ValueError("speculative_profile.policy does not match fixed benchmark contract")
+    for field in ("draft_tokens", "accepted_tokens", "rejected_tokens", "target_verifications"):
+        value = _require_exact_int(speculative_profile.get(field), f"speculative_profile.{field}")
+        if value < 0:
+            raise ValueError(f"speculative_profile.{field} must be non-negative")
+    if speculative_policy == "none":
+        if speculative_profile.get("backend") != "none":
+            raise ValueError("speculative_profile.backend must be none for none policy")
+        if speculative_profile.get("disabled_reason") != "none_policy":
+            raise ValueError("speculative_profile.disabled_reason must record none_policy")
+        for field in ("draft_tokens", "accepted_tokens", "rejected_tokens", "target_verifications"):
+            if _require_exact_int(speculative_profile.get(field), f"speculative_profile.{field}") != 0:
+                raise ValueError(f"speculative_profile.{field} must be 0 for none policy")
+    else:
+        raise ValueError("unsupported speculative_policy")
+    kv2_profile = _require_object(payload.get("kv2_profile"), "kv2_profile")
+    if kv2_profile.get("enabled") is not True:
+        raise ValueError("kv2_profile.enabled must be true")
+    if kv2_profile.get("policy") != kv2_policy:
+        raise ValueError("kv2_profile.policy does not match fixed benchmark contract")
+    for field in ("packed_bytes", "read_ops", "write_ops", "fallback_reads"):
+        value = _require_exact_int(kv2_profile.get(field), f"kv2_profile.{field}")
+        if value < 0:
+            raise ValueError(f"kv2_profile.{field} must be non-negative")
+    if kv2_policy == "none":
+        if kv2_profile.get("format") != "none":
+            raise ValueError("kv2_profile.format must be none for none policy")
+        if kv2_profile.get("disabled_reason") != "none_policy":
+            raise ValueError("kv2_profile.disabled_reason must record none_policy")
+        for field in ("packed_bytes", "read_ops", "write_ops", "fallback_reads"):
+            if _require_exact_int(kv2_profile.get(field), f"kv2_profile.{field}") != 0:
+                raise ValueError(f"kv2_profile.{field} must be 0 for none policy")
+    else:
+        raise ValueError("unsupported kv2_policy")
     return signature
 
 
@@ -424,6 +466,8 @@ def build_inference_command(
     expert_cache_policy: str = "none",
     cuda_policy: str = "none",
     prefill_gemm_policy: str = "none",
+    speculative_policy: str = "none",
+    kv2_policy: str = "none",
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -439,6 +483,8 @@ def build_inference_command(
         "--expert-cache-policy", expert_cache_policy,
         "--cuda-policy", cuda_policy,
         "--prefill-gemm-policy", prefill_gemm_policy,
+        "--speculative-policy", speculative_policy,
+        "--kv2-policy", kv2_policy,
         "--temperature", "0", "--seed", str(seed),
         "--full-moe", "--final-head", "--bench", "--dequant-profile",
     ]
@@ -511,6 +557,8 @@ def compact_run(
     expert_cache = _require_object(payload.get("expert_cache_profile"), "expert_cache_profile")
     cuda = _require_object(payload.get("cuda_profile"), "cuda_profile")
     prefill_gemm = _require_object(payload.get("prefill_gemm_profile"), "prefill_gemm_profile")
+    speculative = _require_object(payload.get("speculative_profile"), "speculative_profile")
+    kv2 = _require_object(payload.get("kv2_profile"), "kv2_profile")
     peak_rss = _require_exact_int(raw.get("peak_rss_bytes"), "peak_rss_bytes")
     if peak_rss <= 0:
         raise ValueError("peak_rss_bytes must be positive")
@@ -536,6 +584,8 @@ def compact_run(
         "expert_cache_profile": expert_cache,
         "cuda_profile": cuda,
         "prefill_gemm_profile": prefill_gemm,
+        "speculative_profile": speculative,
+        "kv2_profile": kv2,
         "dequant_temporary_blocks_decoded": _require_exact_int(dequant.get("temporary_blocks_decoded"), "dequant.temporary_blocks_decoded"),
         "dequant_temporary_floats_materialized": _require_exact_int(dequant.get("temporary_floats_materialized"), "dequant.temporary_floats_materialized"),
         "dequant_temporary_bytes_materialized": _require_exact_int(dequant.get("temporary_bytes_materialized"), "dequant.temporary_bytes_materialized"),
@@ -558,6 +608,14 @@ def compact_run(
         "prefill_gemm_batched_tokens": _require_exact_int(prefill_gemm.get("batched_tokens"), "prefill_gemm.batched_tokens"),
         "prefill_gemm_fused_rows": _require_exact_int(prefill_gemm.get("fused_rows"), "prefill_gemm.fused_rows"),
         "prefill_gemm_temporary_bytes": _require_exact_int(prefill_gemm.get("temporary_bytes"), "prefill_gemm.temporary_bytes"),
+        "speculative_draft_tokens": _require_exact_int(speculative.get("draft_tokens"), "speculative.draft_tokens"),
+        "speculative_accepted_tokens": _require_exact_int(speculative.get("accepted_tokens"), "speculative.accepted_tokens"),
+        "speculative_rejected_tokens": _require_exact_int(speculative.get("rejected_tokens"), "speculative.rejected_tokens"),
+        "speculative_target_verifications": _require_exact_int(speculative.get("target_verifications"), "speculative.target_verifications"),
+        "kv2_packed_bytes": _require_exact_int(kv2.get("packed_bytes"), "kv2.packed_bytes"),
+        "kv2_read_ops": _require_exact_int(kv2.get("read_ops"), "kv2.read_ops"),
+        "kv2_write_ops": _require_exact_int(kv2.get("write_ops"), "kv2.write_ops"),
+        "kv2_fallback_reads": _require_exact_int(kv2.get("fallback_reads"), "kv2.fallback_reads"),
         "output_signature": signature,
     }
 
@@ -578,7 +636,9 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "expert_cache_bytes_cached", "expert_cache_weight_reads", "cuda_device_bytes",
         "cuda_host_to_device_bytes", "cuda_device_to_host_bytes", "cuda_kernel_launches",
         "prefill_gemm_calls", "prefill_gemm_batched_tokens", "prefill_gemm_fused_rows",
-        "prefill_gemm_temporary_bytes",
+        "prefill_gemm_temporary_bytes", "speculative_draft_tokens", "speculative_accepted_tokens",
+        "speculative_rejected_tokens", "speculative_target_verifications", "kv2_packed_bytes",
+        "kv2_read_ops", "kv2_write_ops", "kv2_fallback_reads",
     )
     summary = {field: summarize([float(run[field]) for run in runs]) for field in positive_fields}
     summary.update({field: summarize_non_negative([float(run[field]) for run in runs]) for field in non_negative_fields})

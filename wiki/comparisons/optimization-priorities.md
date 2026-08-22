@@ -20,7 +20,7 @@ confidence: medium
 | 6 | expert cache | Issue #30 añade superficie fail-closed `--expert-cache-policy none` y `expert_cache_profile` para separar baseline sin cache de futuros hits residentes | no-cache default; fake hits rechazados; sin speedup no medido |
 | 7 | CUDA híbrido | Issue #31 añade superficie fail-closed `--cuda-policy none` y `cuda_profile` para separar baseline CPU-only de futuros backends híbridos | CPU-only default; fake kernels/device bytes rechazados; sin speedup no medido |
 | 8 | prefill GEMM | Issue #32 añade superficie fail-closed `--prefill-gemm-policy none` y `prefill_gemm_profile` para separar baseline escalar de futuros kernels GEMM de prefill | scalar/current prefill default; fake GEMM calls rechazados; sin speedup no medido |
-| 9 | speculative/KV2 | sólo tras runtime estable | lossless/PPL |
+| 9 | speculative/KV2 | Issue #33 añade superficies fail-closed `--speculative-policy none` y `--kv2-policy none` con provenance explícita antes de draft decode/KV2 real | greedy/current KV default; fake draft/KV2 counters rechazados; sin speedup no medido |
 
 ## No priorizar todavía
 
@@ -44,5 +44,7 @@ La prioridad 6 empieza en Issue #30 como contrato de provenance: `--expert-cache
 La prioridad 7 empieza en Issue #31 como contrato de provenance CUDA: `--cuda-policy none` es el único valor soportado, queda default, y el payload nativo expone `cuda_profile` con backend `none`, bytes de dispositivo/transferencias y launches en cero. Este slice no implementa CUDA, residency ni scheduler híbrido; sólo bloquea claims falsos y prepara el gate futuro.
 
 La prioridad 8 empieza en Issue #32 como contrato de provenance prefill GEMM: `--prefill-gemm-policy none` es el único valor soportado, queda default, y el payload nativo expone `prefill_gemm_profile` con backend `none`, llamadas GEMM, tokens batched, filas fusionadas y bytes temporales en cero. Este slice no implementa GEMM, BLAS/CUDA ni batching de prefill; sólo bloquea claims falsos y prepara el gate futuro de TTFT.
+
+La prioridad 9 empieza en Issue #33 como contrato de provenance speculative/KV2: `--speculative-policy none` y `--kv2-policy none` son los únicos valores soportados, quedan default, y el payload nativo expone `speculative_profile` y `kv2_profile` con backend/formato `none` y contadores cero. Este slice no implementa draft decode, aceptación speculative, compresión KV2 ni PPL/lossless gate; sólo bloquea claims falsos y prepara el contrato futuro.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].
