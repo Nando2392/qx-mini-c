@@ -30,6 +30,7 @@ def native_payload(
     speculative_policy: str = "none",
     kv2_policy: str = "none",
     sampling_policy: str = "none",
+    long_context_policy: str = "none",
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -76,6 +77,7 @@ def native_payload(
         "speculative_policy": speculative_policy,
         "kv2_policy": kv2_policy,
         "sampling_policy": sampling_policy,
+        "long_context_policy": long_context_policy,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -191,6 +193,15 @@ def native_payload(
             "top_p_evaluations": 0,
             "beam_width": 1,
             "disabled_reason": "none_policy" if sampling_policy == "none" else None,
+        },
+        "long_context_profile": {
+            "enabled": True,
+            "policy": long_context_policy,
+            "target_ctx_tokens": 0,
+            "rss_limit_bytes": 0,
+            "kv_quality_checks": 0,
+            "soak_seconds": 0,
+            "disabled_reason": "none_policy" if long_context_policy == "none" else None,
         },
     }
 
@@ -791,6 +802,26 @@ def test_validate_native_payload_rejects_fake_sampling_profile():
             layers=48,
             ctx=16,
             generation_steps=2,
+        )
+
+
+def test_validate_native_payload_requires_long_context_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    del payload["long_context_profile"]
+    with pytest.raises(ValueError, match="long_context_profile"):
+        PERF.validate_native_payload(
+            payload, activation="f32", io_backend="buffered", scratch_policy="ephemeral",
+            kernel_policy="baseline", kv="int8", layers=48, ctx=16, generation_steps=2,
+        )
+
+
+def test_validate_native_payload_rejects_fake_long_context_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    payload["long_context_profile"]["kv_quality_checks"] = 1
+    with pytest.raises(ValueError, match="long_context_profile.kv_quality_checks"):
+        PERF.validate_native_payload(
+            payload, activation="f32", io_backend="buffered", scratch_policy="ephemeral",
+            kernel_policy="baseline", long_context_policy="none", kv="int8", layers=48, ctx=16, generation_steps=2,
         )
 
 

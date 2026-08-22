@@ -1,7 +1,7 @@
 ---
 title: Optimization Priorities
 created: 2026-08-17
-updated: 2026-08-22
+updated: 2026-08-23
 type: comparison
 tags: [performance, cpu, cuda, memory, roadmap]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -22,6 +22,7 @@ confidence: medium
 | 8 | prefill GEMM | Issue #32 añade superficie fail-closed `--prefill-gemm-policy none` y `prefill_gemm_profile` para separar baseline escalar de futuros kernels GEMM de prefill | scalar/current prefill default; fake GEMM calls rechazados; sin speedup no medido |
 | 9 | speculative/KV2 | Issue #33 añade superficies fail-closed `--speculative-policy none` y `--kv2-policy none` con provenance explícita antes de draft decode/KV2 real | greedy/current KV default; fake draft/KV2 counters rechazados; sin speedup no medido |
 | 10 | sampling policy | Issue #34 añade superficie fail-closed `--sampling-policy none` y `sampling_profile` para separar greedy determinístico de futuros top-p/min-p/beam samplers | greedy default; fake stochastic/top-p counters rechazados; sin sampler real ni speedup/calidad no medida |
+| 11 | long-context gate | Issue #35 añade superficie fail-closed `--long-context-policy none` y `long_context_profile` para separar baseline actual de futuros gates 4K/RSS/KV-quality/soak | ctx actual default; fake 4K/RSS/calidad/soak counters rechazados; sin benchmark 4K ni claim |
 
 ## No priorizar todavía
 
@@ -49,5 +50,7 @@ La prioridad 8 empieza en Issue #32 como contrato de provenance prefill GEMM: `-
 La prioridad 9 empieza en Issue #33 como contrato de provenance speculative/KV2: `--speculative-policy none` y `--kv2-policy none` son los únicos valores soportados, quedan default, y el payload nativo expone `speculative_profile` y `kv2_profile` con backend/formato `none` y contadores cero. Este slice no implementa draft decode, aceptación speculative, compresión KV2 ni PPL/lossless gate; sólo bloquea claims falsos y prepara el contrato futuro.
 
 La prioridad 10 empieza en Issue #34 como contrato de provenance de sampling: `--sampling-policy none` es el único valor soportado, queda default, y el payload nativo expone `sampling_profile` con modo `greedy`, sin muestras estocásticas, sin evaluaciones top-p y `beam_width=1`. Este slice no implementa top-p/min-p/beam search ni calidad/speedup; sólo bloquea claims falsos y prepara el gate futuro de samplers.
+
+La prioridad 11 empieza en Issue #35 como contrato de provenance long-context: `--long-context-policy none` es el único valor soportado, queda default, y el payload nativo expone `long_context_profile` con `target_ctx_tokens=0`, `rss_limit_bytes=0`, `kv_quality_checks=0` y `soak_seconds=0`. Este slice no ejecuta benchmark 4K, no aplica límite RSS, no mide calidad KV ni soak 8h; sólo bloquea claims falsos y prepara esos gates.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

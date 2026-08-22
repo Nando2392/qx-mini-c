@@ -1,0 +1,52 @@
+{
+  "artifact": {
+    "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+    "sha256": "e4070d393971316e7ef04e2bff148392aa162881208dda882c1d256573737185",
+    "size": 628736
+  },
+  "fail_closed_cases": [
+    {
+      "before_model_io": true,
+      "expected_stderr": "unsupported long-context policy",
+      "matched": true,
+      "name": "unsupported_long_context_policy",
+      "returncode": 2
+    }
+  ],
+  "gates": {
+    "long_context_fail_closed_before_model_io": true,
+    "long_context_none_default": true,
+    "long_context_profile_present": true,
+    "no_default_promotion": true,
+    "no_kv_quality_checks": true,
+    "no_rss_limit_bytes": true,
+    "no_soak_seconds": true,
+    "no_target_ctx_tokens": true
+  },
+  "issue": 35,
+  "model": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+  "payload": {
+    "final_head": {
+      "argmax_logit": 23.25199819684119,
+      "argmax_token": 358,
+      "final_norm_checksum": 648938303818007011,
+      "final_residual_checksum": 11401753417758216440,
+      "logits_checksum": 13347842135191822952
+    },
+    "long_context_policy": "none",
+    "long_context_profile": {
+      "disabled_reason": "none_policy",
+      "enabled": true,
+      "kv_quality_checks": 0,
+      "policy": "none",
+      "rss_limit_bytes": 0,
+      "soak_seconds": 0,
+      "target_ctx_tokens": 0
+    },
+    "selected": [
+      358
+    ]
+  },
+  "prompt": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+  "tokenizer": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt"
+}

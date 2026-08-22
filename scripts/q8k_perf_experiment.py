@@ -179,6 +179,7 @@ def validate_native_payload(
     speculative_policy: str = "none",
     kv2_policy: str = "none",
     sampling_policy: str = "none",
+    long_context_policy: str = "none",
 ) -> dict[str, Any]:
     """Validate native timing, modality and output evidence fail-closed."""
     expected = {
@@ -193,6 +194,7 @@ def validate_native_payload(
         "speculative_policy": speculative_policy,
         "kv2_policy": kv2_policy,
         "sampling_policy": sampling_policy,
+        "long_context_policy": long_context_policy,
         "kv_format": kv, "layers": layers, "ctx_tokens": ctx,
         "generation_steps": generation_steps,
     }
@@ -426,6 +428,23 @@ def validate_native_payload(
             raise ValueError("sampling_profile.beam_width must be 1 for none policy")
     else:
         raise ValueError("unsupported sampling_policy")
+    long_context_profile = _require_object(payload.get("long_context_profile"), "long_context_profile")
+    if long_context_profile.get("enabled") is not True:
+        raise ValueError("long_context_profile.enabled must be true")
+    if long_context_profile.get("policy") != long_context_policy:
+        raise ValueError("long_context_profile.policy does not match fixed benchmark contract")
+    for field in ("target_ctx_tokens", "rss_limit_bytes", "kv_quality_checks", "soak_seconds"):
+        value = _require_exact_int(long_context_profile.get(field), f"long_context_profile.{field}")
+        if value < 0:
+            raise ValueError(f"long_context_profile.{field} must be non-negative")
+    if long_context_policy == "none":
+        if long_context_profile.get("disabled_reason") != "none_policy":
+            raise ValueError("long_context_profile.disabled_reason must record none_policy")
+        for field in ("target_ctx_tokens", "rss_limit_bytes", "kv_quality_checks", "soak_seconds"):
+            if _require_exact_int(long_context_profile.get(field), f"long_context_profile.{field}") != 0:
+                raise ValueError(f"long_context_profile.{field} must be 0 for none policy")
+    else:
+        raise ValueError("unsupported long_context_policy")
     return signature
 
 
@@ -492,6 +511,7 @@ def build_inference_command(
     speculative_policy: str = "none",
     kv2_policy: str = "none",
     sampling_policy: str = "none",
+    long_context_policy: str = "none",
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -510,6 +530,7 @@ def build_inference_command(
         "--speculative-policy", speculative_policy,
         "--kv2-policy", kv2_policy,
         "--sampling-policy", sampling_policy,
+        "--long-context-policy", long_context_policy,
         "--temperature", "0", "--seed", str(seed),
         "--full-moe", "--final-head", "--bench", "--dequant-profile",
     ]
