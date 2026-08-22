@@ -1,0 +1,51 @@
+{
+  "artifact": {
+    "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+    "sha256": "4a0f7894dc1d8166440db6377e1d904af21df10bc8720e3ea34bd563abf47c88",
+    "size": 625152
+  },
+  "fail_closed_cases": [
+    {
+      "before_model_io": true,
+      "expected_stderr": "unsupported CUDA policy",
+      "matched": true,
+      "name": "unsupported_cuda_policy",
+      "returncode": 2
+    }
+  ],
+  "gates": {
+    "cuda_backend_none": true,
+    "cuda_none_default": true,
+    "cuda_profile_present": true,
+    "fail_closed_before_model_io": true,
+    "no_default_promotion": true,
+    "no_device_bytes": true,
+    "no_kernel_launches": true,
+    "no_transfers": true
+  },
+  "issue": 31,
+  "model": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+  "payload": {
+    "cuda_policy": "none",
+    "cuda_profile": {
+      "backend": "none",
+      "device_bytes": 0,
+      "device_to_host_bytes": 0,
+      "disabled_reason": "none_policy",
+      "enabled": true,
+      "host_to_device_bytes": 0,
+      "kernel_launches": 0,
+      "policy": "none"
+    },
+    "final_head": {
+      "argmax_logit": 23.25199819684119,
+      "logits_checksum": 13347842135191822952,
+      "selected_token": null
+    },
+    "selected": [
+      358
+    ]
+  },
+  "prompt": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+  "tokenizer": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt"
+}

@@ -405,6 +405,7 @@ chat_fail:
         const char *thread_policy = "serial";
         const char *simd_policy = "scalar";
         const char *expert_cache_policy = "none";
+        const char *cuda_policy = "none";
         const char *kv_snapshot_out_path = NULL;
         uint32_t generation_steps = 0u;
         uint32_t layers = 48u;
@@ -434,6 +435,7 @@ chat_fail:
             else if (strcmp(argv[i], "--thread-policy") == 0 && i + 1 < argc) thread_policy = argv[++i];
             else if (strcmp(argv[i], "--simd-policy") == 0 && i + 1 < argc) simd_policy = argv[++i];
             else if (strcmp(argv[i], "--expert-cache-policy") == 0 && i + 1 < argc) expert_cache_policy = argv[++i];
+            else if (strcmp(argv[i], "--cuda-policy") == 0 && i + 1 < argc) cuda_policy = argv[++i];
             else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
                 if (!qx_cli_parse_u32_arg("--threads", argv[++i], &threads, err, sizeof(err))) {
                     fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;
@@ -483,6 +485,9 @@ chat_fail:
         if (strcmp(expert_cache_policy, "none") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported expert cache policy\n"); return 2;
         }
+        if (strcmp(cuda_policy, "none") != 0) {
+            fprintf(stderr, "prompt-state-loop-probe failed: unsupported CUDA policy\n"); return 2;
+        }
         if (!qx_set_io_backend(io_backend, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;
         }
@@ -509,7 +514,7 @@ chat_fail:
         }
         qx_tokenizer_free(&tokenizer);
         free(input);
-        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format, scratch_policy, kernel_policy, thread_policy, threads, simd_policy, expert_cache_policy, dequant_profile,
+        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format, scratch_policy, kernel_policy, thread_policy, threads, simd_policy, expert_cache_policy, cuda_policy, dequant_profile,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, full_moe, final_head, bench, 2048u, NULL, 8u, 151936u,
                 top_n, temperature, seed, NULL, 0u, NULL, kv_snapshot_out_path, NULL, stdout, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;

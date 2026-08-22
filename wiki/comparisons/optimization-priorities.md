@@ -18,7 +18,7 @@ confidence: medium
 | 4 | thread pool por filas/expertos | Issue #28 añade primer pool real opt-in sólo para filas del final-head F32; MoE/expertos siguen fuera de alcance | deterministic output; fail-closed policy |
 | 5 | AVX2/FMA | Issue #29 añade primer gate opt-in `--simd-policy avx2-fma` para el dot F32 del final-head Q6_K, detrás de `--kernel-policy fused`, F32, thread serial y runtime CPU gates; la salida conserva reducción double determinística para equivalencia exacta | scalar default; logits checksum equivalence; no default promotion ni speedup no medido |
 | 6 | expert cache | Issue #30 añade superficie fail-closed `--expert-cache-policy none` y `expert_cache_profile` para separar baseline sin cache de futuros hits residentes | no-cache default; fake hits rechazados; sin speedup no medido |
-| 7 | CUDA híbrido | dense residency + cache expertos | full-layer golden |
+| 7 | CUDA híbrido | Issue #31 añade superficie fail-closed `--cuda-policy none` y `cuda_profile` para separar baseline CPU-only de futuros backends híbridos | CPU-only default; fake kernels/device bytes rechazados; sin speedup no medido |
 | 8 | prefill GEMM | reduce TTFT | prompt golden |
 | 9 | speculative/KV2 | sólo tras runtime estable | lossless/PPL |
 
@@ -40,5 +40,7 @@ La prioridad 3 se ejecutó en Issue #26 como `--kernel-policy fused` opt-in limi
 La prioridad 4 empezó en Issue #27 con contrato `--thread-policy serial --threads 1`, `thread_profile` y rechazo fail-closed. Issue #28 añade `--thread-policy pool --threads N` como opt-in limitado al row loop independiente de `output.weight` en final-head Q6_K F32. Serial sigue default; `q8_k_compat`, `threads < 2`, `threads > 64`, políticas no soportadas, y rutas sin `--final-head` fallan cerradas. La evidencia mínima está en `wiki/evidence/issue-27-thread-policy-serial-baseline.json` y `wiki/evidence/issue-28-thread-pool-final-head-baseline.json`. No autoriza paralelizar MoE/expertos ni promover defaults.
 
 La prioridad 6 empieza en Issue #30 como contrato de provenance: `--expert-cache-policy none` es el único valor soportado, queda default, y el payload nativo expone `expert_cache_profile` con hits/misses/bytes en cero. Este slice no implementa cache residente ni autoriza speedup; sólo bloquea claims falsos y prepara el A/B futuro.
+
+La prioridad 7 empieza en Issue #31 como contrato de provenance CUDA: `--cuda-policy none` es el único valor soportado, queda default, y el payload nativo expone `cuda_profile` con backend `none`, bytes de dispositivo/transferencias y launches en cero. Este slice no implementa CUDA, residency ni scheduler híbrido; sólo bloquea claims falsos y prepara el gate futuro.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

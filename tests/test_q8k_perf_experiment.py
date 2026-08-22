@@ -25,6 +25,7 @@ def native_payload(
     threads: int = 1,
     simd_policy: str = "scalar",
     expert_cache_policy: str = "none",
+    cuda_policy: str = "none",
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -66,6 +67,7 @@ def native_payload(
         "threads": threads,
         "simd_policy": simd_policy,
         "expert_cache_policy": expert_cache_policy,
+        "cuda_policy": cuda_policy,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -132,6 +134,16 @@ def native_payload(
             "bytes_cached": 0,
             "expert_weight_reads": 0,
             "disabled_reason": "none_policy" if expert_cache_policy == "none" else None,
+        },
+        "cuda_profile": {
+            "enabled": True,
+            "policy": cuda_policy,
+            "backend": "none",
+            "device_bytes": 0,
+            "host_to_device_bytes": 0,
+            "device_to_host_bytes": 0,
+            "kernel_launches": 0,
+            "disabled_reason": "none_policy" if cuda_policy == "none" else None,
         },
     }
 
@@ -572,6 +584,41 @@ def test_validate_native_payload_rejects_fake_expert_cache_profile():
             scratch_policy="ephemeral",
             kernel_policy="baseline",
             expert_cache_policy="none",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_requires_cuda_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    del payload["cuda_profile"]
+    with pytest.raises(ValueError, match="cuda_profile"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_rejects_fake_cuda_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), cuda_policy="none")
+    payload["cuda_profile"]["kernel_launches"] = 1
+    with pytest.raises(ValueError, match="cuda_profile.kernel_launches"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            cuda_policy="none",
             kv="int8",
             layers=48,
             ctx=16,

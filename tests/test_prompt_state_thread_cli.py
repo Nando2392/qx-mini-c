@@ -13,6 +13,7 @@ QXQXF = ROOT / "build" / "qxqxf.exe"
 def prompt_state_command(
     threads: str, *, thread_policy: str = "serial", activation: str = "f32",
     kernel_policy: str = "baseline", simd_policy: str = "scalar", expert_cache_policy: str = "none",
+    cuda_policy: str = "none",
 ) -> list[str]:
     return [
         str(QXQXF),
@@ -43,6 +44,8 @@ def prompt_state_command(
         simd_policy,
         "--expert-cache-policy",
         expert_cache_policy,
+        "--cuda-policy",
+        cuda_policy,
         "--temperature",
         "0",
         "--seed",
@@ -132,5 +135,20 @@ def test_prompt_state_loop_probe_rejects_expert_cache_policy_contract_before_fil
 
     assert result.returncode == 2
     assert "unsupported expert cache policy" in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+def test_prompt_state_loop_probe_rejects_cuda_policy_contract_before_file_io():
+    result = subprocess.run(
+        prompt_state_command("1", cuda_policy="hybrid"),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "unsupported CUDA policy" in result.stderr
     assert "text file read failed" not in result.stderr
     assert "failed to open" not in result.stderr
