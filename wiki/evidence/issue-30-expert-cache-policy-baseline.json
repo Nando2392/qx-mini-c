@@ -1,0 +1,49 @@
+{
+  "artifact": {
+    "path": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\build\\qxqxf.exe",
+    "sha256": "3b604deaa1294e89af42632caf4913d741f0fc420b51c09f5640951ca83b1962",
+    "size": 624640
+  },
+  "fail_closed_cases": [
+    {
+      "before_model_io": true,
+      "expected_stderr": "unsupported expert cache policy",
+      "matched": true,
+      "name": "unsupported_expert_cache_policy",
+      "returncode": 2
+    }
+  ],
+  "gates": {
+    "expert_cache_none_default": true,
+    "expert_cache_profile_present": true,
+    "fail_closed_before_model_io": true,
+    "no_bytes_cached": true,
+    "no_cache_hits": true,
+    "no_cache_misses": true,
+    "no_default_promotion": true
+  },
+  "issue": 30,
+  "model": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+  "payload": {
+    "expert_cache_policy": "none",
+    "expert_cache_profile": {
+      "bytes_cached": 0,
+      "cache_hits": 0,
+      "cache_misses": 0,
+      "disabled_reason": "none_policy",
+      "enabled": true,
+      "expert_weight_reads": 0,
+      "policy": "none"
+    },
+    "final_head": {
+      "argmax_logit": 23.25199819684119,
+      "logits_checksum": 13347842135191822952,
+      "selected_token": null
+    },
+    "selected": [
+      358
+    ]
+  },
+  "prompt": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\tests\\fixtures\\q8k_perf_prompt.txt",
+  "tokenizer": "C:\\Users\\fjmn2\\Dev\\qx-mini-c\\models\\Qwen3-30B-A3B.qxt"
+}

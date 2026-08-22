@@ -173,6 +173,7 @@ def validate_native_payload(
     payload: dict[str, Any], *, activation: str, io_backend: str, scratch_policy: str,
     kv: str, layers: int, ctx: int, generation_steps: int, kernel_policy: str = "baseline",
     thread_policy: str = "serial", threads: int = 1, simd_policy: str = "scalar",
+    expert_cache_policy: str = "none",
 ) -> dict[str, Any]:
     """Validate native timing, modality and output evidence fail-closed."""
     expected = {
@@ -181,6 +182,7 @@ def validate_native_payload(
         "scratch_policy": scratch_policy, "kernel_policy": kernel_policy,
         "thread_policy": thread_policy, "threads": threads,
         "simd_policy": simd_policy,
+        "expert_cache_policy": expert_cache_policy,
         "kv_format": kv, "layers": layers, "ctx_tokens": ctx,
         "generation_steps": generation_steps,
     }
@@ -300,6 +302,23 @@ def validate_native_payload(
             raise ValueError("simd_profile.disabled_reason must be absent for avx2-fma policy")
     else:
         raise ValueError("unsupported simd_policy")
+    expert_cache_profile = _require_object(payload.get("expert_cache_profile"), "expert_cache_profile")
+    if expert_cache_profile.get("enabled") is not True:
+        raise ValueError("expert_cache_profile.enabled must be true")
+    if expert_cache_profile.get("policy") != expert_cache_policy:
+        raise ValueError("expert_cache_profile.policy does not match fixed benchmark contract")
+    for field in ("cache_hits", "cache_misses", "bytes_cached", "expert_weight_reads"):
+        value = _require_exact_int(expert_cache_profile.get(field), f"expert_cache_profile.{field}")
+        if value < 0:
+            raise ValueError(f"expert_cache_profile.{field} must be non-negative")
+    if expert_cache_policy == "none":
+        if expert_cache_profile.get("disabled_reason") != "none_policy":
+            raise ValueError("expert_cache_profile.disabled_reason must record none_policy")
+        for field in ("cache_hits", "cache_misses", "bytes_cached"):
+            if _require_exact_int(expert_cache_profile.get(field), f"expert_cache_profile.{field}") != 0:
+                raise ValueError(f"expert_cache_profile.{field} must be 0 for none policy")
+    else:
+        raise ValueError("unsupported expert_cache_policy")
     return signature
 
 
@@ -360,6 +379,7 @@ def build_inference_command(
     activation: str, kv: str, layers: int, ctx: int,
     generation_steps: int, seed: int, io_backend: str, scratch_policy: str, kernel_policy: str,
     thread_policy: str = "serial", threads: int = 1, simd_policy: str = "scalar",
+    expert_cache_policy: str = "none",
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -372,8 +392,9 @@ def build_inference_command(
         "--kernel-policy", kernel_policy,
         "--thread-policy", thread_policy, "--threads", str(threads),
         "--simd-policy", simd_policy,
-        "--temperature", "0", "--seed", str(seed), "--full-moe",
-        "--final-head", "--bench", "--dequant-profile",
+        "--expert-cache-policy", expert_cache_policy,
+        "--temperature", "0", "--seed", str(seed),
+        "--full-moe", "--final-head", "--bench", "--dequant-profile",
     ]
 
 
@@ -441,6 +462,7 @@ def compact_run(
     scratch = _require_object(payload.get("scratch_profile"), "scratch_profile")
     dequant = _require_object(payload.get("dequant_dot_profile"), "dequant_dot_profile")
     thread_profile = _require_object(payload.get("thread_profile"), "thread_profile")
+    expert_cache = _require_object(payload.get("expert_cache_profile"), "expert_cache_profile")
     peak_rss = _require_exact_int(raw.get("peak_rss_bytes"), "peak_rss_bytes")
     if peak_rss <= 0:
         raise ValueError("peak_rss_bytes must be positive")
@@ -463,6 +485,7 @@ def compact_run(
         "scratch_profile": scratch,
         "dequant_dot_profile": dequant,
         "thread_profile": thread_profile,
+        "expert_cache_profile": expert_cache,
         "dequant_temporary_blocks_decoded": _require_exact_int(dequant.get("temporary_blocks_decoded"), "dequant.temporary_blocks_decoded"),
         "dequant_temporary_floats_materialized": _require_exact_int(dequant.get("temporary_floats_materialized"), "dequant.temporary_floats_materialized"),
         "dequant_temporary_bytes_materialized": _require_exact_int(dequant.get("temporary_bytes_materialized"), "dequant.temporary_bytes_materialized"),
@@ -473,6 +496,10 @@ def compact_run(
         "thread_parallel_jobs": _require_exact_int(thread_profile.get("parallel_jobs"), "thread.parallel_jobs"),
         "thread_serial_jobs": _require_exact_int(thread_profile.get("serial_jobs"), "thread.serial_jobs"),
         "thread_fallback_jobs": _require_exact_int(thread_profile.get("fallback_jobs"), "thread.fallback_jobs"),
+        "expert_cache_hits": _require_exact_int(expert_cache.get("cache_hits"), "expert_cache.cache_hits"),
+        "expert_cache_misses": _require_exact_int(expert_cache.get("cache_misses"), "expert_cache.cache_misses"),
+        "expert_cache_bytes_cached": _require_exact_int(expert_cache.get("bytes_cached"), "expert_cache.bytes_cached"),
+        "expert_cache_weight_reads": _require_exact_int(expert_cache.get("expert_weight_reads"), "expert_cache.expert_weight_reads"),
         "output_signature": signature,
     }
 
@@ -489,7 +516,8 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "scratch_growth_events", "dequant_temporary_blocks_decoded", "dequant_temporary_floats_materialized",
         "dequant_temporary_bytes_materialized", "dequant_fused_dot_calls", "dequant_fallback_dot_calls",
         "dequant_final_head_q6_k_blocks", "thread_workers_used", "thread_parallel_jobs",
-        "thread_serial_jobs", "thread_fallback_jobs",
+        "thread_serial_jobs", "thread_fallback_jobs", "expert_cache_hits", "expert_cache_misses",
+        "expert_cache_bytes_cached", "expert_cache_weight_reads",
     )
     summary = {field: summarize([float(run[field]) for run in runs]) for field in positive_fields}
     summary.update({field: summarize_non_negative([float(run[field]) for run in runs]) for field in non_negative_fields})

@@ -24,6 +24,7 @@ def native_payload(
     thread_policy: str = "serial",
     threads: int = 1,
     simd_policy: str = "scalar",
+    expert_cache_policy: str = "none",
 ) -> dict:
     tokens = [
         {"phase": "prefill", "input_token": 9707, "selected_token": None},
@@ -64,6 +65,7 @@ def native_payload(
         "thread_policy": thread_policy,
         "threads": threads,
         "simd_policy": simd_policy,
+        "expert_cache_policy": expert_cache_policy,
         "layers": 48,
         "cache_readback_ok": True,
         "tokens": tokens,
@@ -121,6 +123,15 @@ def native_payload(
             "fma_dot_calls": 1215488 if simd_policy == "avx2-fma" else 0,
             "fallback_dot_calls": 0 if simd_policy == "avx2-fma" else 1215488,
             "disabled_reason": "scalar_policy" if simd_policy == "scalar" else None,
+        },
+        "expert_cache_profile": {
+            "enabled": True,
+            "policy": expert_cache_policy,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "bytes_cached": 0,
+            "expert_weight_reads": 0,
+            "disabled_reason": "none_policy" if expert_cache_policy == "none" else None,
         },
     }
 
@@ -526,6 +537,41 @@ def test_validate_native_payload_rejects_scratch_policy_drift():
             activation="f32",
             io_backend="buffered",
             scratch_policy="ephemeral",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_requires_expert_cache_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    del payload["expert_cache_profile"]
+    with pytest.raises(ValueError, match="expert_cache_profile"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            kv="int8",
+            layers=48,
+            ctx=16,
+            generation_steps=2,
+        )
+
+
+def test_validate_native_payload_rejects_fake_expert_cache_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), expert_cache_policy="none")
+    payload["expert_cache_profile"]["cache_hits"] = 1
+    with pytest.raises(ValueError, match="expert_cache_profile.cache_hits"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            expert_cache_policy="none",
             kv="int8",
             layers=48,
             ctx=16,

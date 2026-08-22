@@ -17,7 +17,7 @@ confidence: medium
 | 3 | dequant+dot fusionado | Issue #26 reduce temporales final-head Q6_K con kernel opt-in | baseline/fused exactos; no default promotion |
 | 4 | thread pool por filas/expertos | Issue #28 añade primer pool real opt-in sólo para filas del final-head F32; MoE/expertos siguen fuera de alcance | deterministic output; fail-closed policy |
 | 5 | AVX2/FMA | Issue #29 añade primer gate opt-in `--simd-policy avx2-fma` para el dot F32 del final-head Q6_K, detrás de `--kernel-policy fused`, F32, thread serial y runtime CPU gates; la salida conserva reducción double determinística para equivalencia exacta | scalar default; logits checksum equivalence; no default promotion ni speedup no medido |
-| 6 | expert cache | reduce I/O y prepara híbrido | hit-rate/bytes |
+| 6 | expert cache | Issue #30 añade superficie fail-closed `--expert-cache-policy none` y `expert_cache_profile` para separar baseline sin cache de futuros hits residentes | no-cache default; fake hits rechazados; sin speedup no medido |
 | 7 | CUDA híbrido | dense residency + cache expertos | full-layer golden |
 | 8 | prefill GEMM | reduce TTFT | prompt golden |
 | 9 | speculative/KV2 | sólo tras runtime estable | lossless/PPL |
@@ -38,5 +38,7 @@ La prioridad 2 se ejecuta en [[persistent-scratch-buffers]] como política `--sc
 La prioridad 3 se ejecutó en Issue #26 como `--kernel-policy fused` opt-in limitado al final-head Q6_K F32. El default sigue `baseline`; la evidencia está en `wiki/evidence/issue-26-fused-dequant-dot-baseline.json` y no autoriza fusionar projection/MoE ni promover default.
 
 La prioridad 4 empezó en Issue #27 con contrato `--thread-policy serial --threads 1`, `thread_profile` y rechazo fail-closed. Issue #28 añade `--thread-policy pool --threads N` como opt-in limitado al row loop independiente de `output.weight` en final-head Q6_K F32. Serial sigue default; `q8_k_compat`, `threads < 2`, `threads > 64`, políticas no soportadas, y rutas sin `--final-head` fallan cerradas. La evidencia mínima está en `wiki/evidence/issue-27-thread-policy-serial-baseline.json` y `wiki/evidence/issue-28-thread-pool-final-head-baseline.json`. No autoriza paralelizar MoE/expertos ni promover defaults.
+
+La prioridad 6 empieza en Issue #30 como contrato de provenance: `--expert-cache-policy none` es el único valor soportado, queda default, y el payload nativo expone `expert_cache_profile` con hits/misses/bytes en cero. Este slice no implementa cache residente ni autoriza speedup; sólo bloquea claims falsos y prepara el A/B futuro.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].
