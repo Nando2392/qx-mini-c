@@ -1,0 +1,47 @@
+{
+  "issue": 48,
+  "title": "Reject malformed RSS summaries in long-context measurement metadata",
+  "updated_utc": "2026-08-23T20:18:48+00:00",
+  "contract": {
+    "change": "long_context_measurement rejects peak_rss_bytes without count before reporting measured_run_count",
+    "scope": "report-level fail-closed metadata hardening only",
+    "out_of_scope": [
+      "no OS RSS hard limit",
+      "no allocator change",
+      "no heavy 4K benchmark in CI",
+      "no KV-quality sweep",
+      "no soak runner",
+      "no default promotion",
+      "no speed/quality/stability claims"
+    ]
+  },
+  "behavioral_tests": [
+    "tests/test_q8k_perf_experiment.py::test_build_long_context_measurement_gate_rejects_missing_rss_count"
+  ],
+  "gates": {
+    "red": "1 failed because missing peak_rss_bytes.count raised generic integer validation instead of explicit required-count rejection",
+    "focused_green": "1 passed",
+    "q8k_perf_experiment_tests": "54 passed",
+    "msvc_build": "PASS",
+    "smoke_check": "PASS",
+    "wiki_lint": "PASS",
+    "diff_check": "PASS"
+  },
+  "files": {
+    "scripts/q8k_perf_experiment.py": {
+      "sha256_staged_blob": "7eb255684691735c983537092205f61857636413e63b67fee5f23a1400427af6"
+    },
+    "tests/test_q8k_perf_experiment.py": {
+      "sha256_staged_blob": "cff76afca09f34dfaa09d55885950a04f58b5e006d14aca514fb07d6eb0df797"
+    },
+    "README.md": {
+      "sha256_staged_blob": "772613c006649d8d6ea3a13ffa85c682a844fbfb17249dcc1ab4987f90627fa3"
+    },
+    "wiki/comparisons/optimization-priorities.md": {
+      "sha256_staged_blob": "60d5b1011538c075f6ef154b11416aca893f860d930e5861a8df8335779a86e7"
+    },
+    "wiki/queries/current-status-and-roadmap.md": {
+      "sha256_staged_blob": "7e797f7c9749442d10e730c334998566670e7e963620793cfdbc4b49eae9cd9e"
+    }
+  }
+}

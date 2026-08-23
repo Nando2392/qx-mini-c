@@ -63,6 +63,7 @@ long-context measurement inactive counters: Issue #44 en verificación local
 long-context measurement RSS metadata: Issue #45 en verificación local
 long-context measurement RSS negative-limit hardening: Issue #46 en verificación local
 long-context measurement run-count hardening: Issue #47 en verificación local
+long-context measurement RSS count presence hardening: Issue #48 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -125,6 +126,8 @@ Issue #45 añade `rss_limit_bytes` y `rss_limit_active` a `long_context_measurem
 Issue #46 endurece `long_context_measurement` para rechazar `rss_limit_bytes` negativo antes de marcar el límite como activo. Es sólo hardening report-level: no instala límite duro de OS, no cambia allocator y no afirma estabilidad.
 
 Issue #47 endurece `long_context_measurement` para rechazar summaries RSS con `count <= 0` antes de reportar `measured_run_count`. Es sólo hardening report-level: no ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
+
+Issue #48 endurece `long_context_measurement` para rechazar summaries RSS sin `count` antes de reportar `measured_run_count`. Es sólo hardening report-level: no ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
 
 ## Después
 

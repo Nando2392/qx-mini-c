@@ -78,6 +78,8 @@ was active; negative report-level RSS limits fail closed, and this does not
 install an OS-level hard limit.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
+RSS summaries that omit the sample count fail closed with an explicit validation
+error too.
 Inactive future counters remain fail-closed at report level too: non-zero
 KV-quality checks or soak seconds are rejected until real sweeps/runners exist.
 
