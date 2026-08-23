@@ -66,7 +66,9 @@ sampled `peak_rss_bytes` exceeds `N`. `--long-context-kv-quality-checks` remains
 `--long-context-soak-seconds` also remains `0` only and non-zero values fail
 closed until a real soak runner exists. This is not an OS hard limit and does
 not run KV-quality checks, run soak tests, promote defaults or claim
-speed/quality.
+speed/quality. Benchmark compact-run records preserve the validated
+`long_context_profile` for each measured run so evidence keeps the active
+contract attached to the timings.
 
 ## Repository map
 

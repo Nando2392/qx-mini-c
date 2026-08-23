@@ -909,6 +909,64 @@ def test_compact_run_rejects_peak_rss_above_long_context_limit():
         )
 
 
+def test_compact_run_preserves_validated_long_context_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    payload["long_context_profile"]["rss_limit_bytes"] = 4096
+    raw = {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 1024, "payload": payload}
+
+    run = PERF.compact_run(
+        raw,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="ctx4k-smoke",
+        kv="int8",
+        layers=48,
+        ctx=4096,
+        generation_steps=2,
+    )
+
+    assert run["long_context_profile"] == {
+        "enabled": True,
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 4096,
+        "rss_limit_bytes": 4096,
+        "kv_quality_checks": 0,
+        "soak_seconds": 0,
+        "disabled_reason": None,
+    }
+
+
+def test_compact_run_preserves_default_long_context_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="none")
+    raw = {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 1024, "payload": payload}
+
+    run = PERF.compact_run(
+        raw,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="none",
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+    )
+
+    assert run["long_context_profile"] == {
+        "enabled": True,
+        "policy": "none",
+        "target_ctx_tokens": 0,
+        "rss_limit_bytes": 0,
+        "kv_quality_checks": 0,
+        "soak_seconds": 0,
+        "disabled_reason": "none_policy",
+    }
+
+
 def test_validate_native_payload_rejects_ctx4k_smoke_kv_quality_checks_until_implemented():
     payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
     payload["ctx_tokens"] = 4096

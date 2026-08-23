@@ -674,6 +674,7 @@ def compact_run(
         "prefill_gemm_profile": prefill_gemm,
         "speculative_profile": speculative,
         "kv2_profile": kv2,
+        "long_context_profile": long_context,
         "dequant_temporary_blocks_decoded": _require_exact_int(dequant.get("temporary_blocks_decoded"), "dequant.temporary_blocks_decoded"),
         "dequant_temporary_floats_materialized": _require_exact_int(dequant.get("temporary_floats_materialized"), "dequant.temporary_floats_materialized"),
         "dequant_temporary_bytes_materialized": _require_exact_int(dequant.get("temporary_bytes_materialized"), "dequant.temporary_bytes_materialized"),

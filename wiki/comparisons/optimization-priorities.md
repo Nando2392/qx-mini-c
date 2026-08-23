@@ -26,6 +26,8 @@ confidence: medium
 | 12 | ctx4k admission | Issue #36 añade `--long-context-policy ctx4k-smoke` como gate opt-in que exige `--ctx >= 4096` y reporta target 4096 | default sigue none; no RSS/KV-quality/soak; sin speedup/calidad |
 | 13 | long-context RSS limit | Issue #37 añade `--long-context-rss-limit-bytes` como límite opt-in para el sampler RSS del harness cuando `ctx4k-smoke` está activo | default 0/deshabilitado; fail-closed si peak RSS muestreado supera el límite; sin límite OS duro ni speedup/calidad |
 | 14 | long-context KV quality contract | Issue #38 añade `--long-context-kv-quality-checks` como contrato explícito fail-closed | default 0; non-zero rechazado antes de I/O; sin sweep KV, soak ni claim de calidad |
+| 15 | long-context soak contract | Issue #39 añade `--long-context-soak-seconds` como contrato explícito fail-closed | default 0; non-zero rechazado antes de I/O; sin runner soak ni claim de estabilidad |
+| 16 | long-context profile in benchmark runs | Issue #40 conserva el `long_context_profile` validado dentro de cada compact-run del harness | provenance por medición; sin benchmark 4K nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -63,5 +65,7 @@ La prioridad 13 empieza en Issue #37 como gate RSS opt-in para long-context: `--
 La prioridad 14 empieza en Issue #38 como contrato explícito de calidad KV: `--long-context-kv-quality-checks` queda default `0` y cualquier valor non-zero falla cerrado antes de prompt/model/tokenizer I/O hasta que exista un sweep real. No mide calidad KV, no corre soak, no promueve defaults y no autoriza claims de calidad.
 
 La prioridad 15 empieza en Issue #39 como contrato explícito de soak: `--long-context-soak-seconds` queda default `0` y cualquier valor non-zero falla cerrado antes de prompt/model/tokenizer I/O hasta que exista un runner de soak real. No corre soak 8h, no promueve defaults y no autoriza claims de estabilidad.
+
+La prioridad 16 empieza en Issue #40 como persistencia de provenance long-context en el harness: cada compact-run preserva el `long_context_profile` validado junto a la medición. No ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

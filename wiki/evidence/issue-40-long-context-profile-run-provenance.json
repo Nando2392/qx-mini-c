@@ -1,0 +1,38 @@
+{
+  "issue": 40,
+  "title": "Persist long-context profile in benchmark runs",
+  "created_utc": "2026-08-23T11:32:47+00:00",
+  "contract": {
+    "change": "scripts/q8k_perf_experiment.py compact_run preserves the validated long_context_profile on each run record",
+    "default_policy": "none",
+    "ctx4k_smoke_contract": "existing admission/provenance only; requires ctx >= 4096",
+    "out_of_scope": [
+      "no new 4K throughput benchmark",
+      "no real KV-quality sweep",
+      "no soak runner",
+      "no default promotion",
+      "no speed/stability/quality claim"
+    ]
+  },
+  "behavioral_tests": [
+    "tests/test_q8k_perf_experiment.py::test_compact_run_preserves_validated_long_context_profile",
+    "tests/test_q8k_perf_experiment.py::test_compact_run_preserves_default_long_context_profile"
+  ],
+  "files": {
+    "scripts/q8k_perf_experiment.py": {
+      "sha256": "9cefa06c8eaeb94088def68ed943e04aa7e54ac95f23d487acd3c59f3a0fb7c9"
+    },
+    "tests/test_q8k_perf_experiment.py": {
+      "sha256": "92a58ed4abcce5f21258139486fda877ca7ba0f258ef4e15be07fc8daf097cc6"
+    },
+    "README.md": {
+      "sha256": "093054173aa41fa73fc880ebf52fd9ae7ac4da80face3f60ee9b96ad4452b043"
+    },
+    "wiki/comparisons/optimization-priorities.md": {
+      "sha256": "e8ef9a943ecfe9d16670397a78cb37fb64324ef83cb24d4c3549c1e4fba181c6"
+    },
+    "wiki/queries/current-status-and-roadmap.md": {
+      "sha256": "657a9bbd88ab4a3d3cfd604e3ce6aa4f0162139e99e8fde8d24e0d6d0bffa4f3"
+    }
+  }
+}
