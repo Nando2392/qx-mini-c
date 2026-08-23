@@ -759,6 +759,12 @@ def build_long_context_measurement_gate(cells: list[dict[str, Any]], *, ctx: int
     profile = summarize_cells_long_context_profile(cells)
     policy = profile.get("policy")
     target_ctx_tokens = _require_exact_int(profile.get("target_ctx_tokens"), "long_context_profile.target_ctx_tokens")
+    kv_quality_checks = _require_exact_int(profile.get("kv_quality_checks"), "long_context_profile.kv_quality_checks")
+    soak_seconds = _require_exact_int(profile.get("soak_seconds"), "long_context_profile.soak_seconds")
+    if kv_quality_checks != 0:
+        raise ValueError("long_context_profile.kv_quality_checks must be 0 for measurement")
+    if soak_seconds != 0:
+        raise ValueError("long_context_profile.soak_seconds must be 0 for measurement")
     measured_run_count = 0
     for cell in cells:
         summary = _require_object(cell.get("summary"), "cell.summary")

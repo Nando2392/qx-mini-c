@@ -73,6 +73,8 @@ measured runs agree, and the top-level report preserves it only when all cells
 agree. The report also records a `long_context_measurement` gate with measured
 ctx, cell count, run count and RSS-summary presence; this is measurement
 metadata, not a throughput or stability claim.
+Inactive future counters remain fail-closed at report level too: non-zero
+KV-quality checks or soak seconds are rejected until real sweeps/runners exist.
 
 ## Repository map
 

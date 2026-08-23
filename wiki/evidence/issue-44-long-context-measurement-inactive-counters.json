@@ -1,0 +1,51 @@
+{
+  "issue": 44,
+  "title": "Reject inactive long-context measurement counters",
+  "updated_utc": "2026-08-23T15:57:01+00:00",
+  "contract": {
+    "change": "long_context_measurement rejects inactive future counters when non-zero",
+    "rejected_counters": [
+      "kv_quality_checks",
+      "soak_seconds"
+    ],
+    "scope": "report-level metadata hardening only",
+    "out_of_scope": [
+      "no KV-quality sweep",
+      "no soak runner",
+      "no heavy 4K benchmark in CI",
+      "no OS RSS hard limit",
+      "no default promotion",
+      "no speed/quality/stability claims"
+    ]
+  },
+  "behavioral_tests": [
+    "tests/test_q8k_perf_experiment.py::test_build_long_context_measurement_gate_rejects_kv_quality_checks_until_implemented",
+    "tests/test_q8k_perf_experiment.py::test_build_long_context_measurement_gate_rejects_soak_seconds_until_implemented"
+  ],
+  "gates": {
+    "red": "2 failed because ValueError was not raised",
+    "focused_green": "2 passed",
+    "q8k_perf_experiment_tests": "50 passed",
+    "msvc_build": "PASS",
+    "smoke_check": "PASS",
+    "wiki_lint": "PASS",
+    "diff_check": "PASS"
+  },
+  "files": {
+    "scripts/q8k_perf_experiment.py": {
+      "sha256_staged_blob": "cb97b7a6ed592dc1ddf1fdb3dbba313b7b510503f9e262bf2bc89887262105d6"
+    },
+    "tests/test_q8k_perf_experiment.py": {
+      "sha256_staged_blob": "77ce16d7c11b1460e31608877cea4ccfef75ad00549365d2a387cc23ba9d7509"
+    },
+    "README.md": {
+      "sha256_staged_blob": "253b4b0c63cf0d4f56fc6e45820d676f065473db383d89113542b5483400505b"
+    },
+    "wiki/comparisons/optimization-priorities.md": {
+      "sha256_staged_blob": "8d22e5f94e16cc989832ac6bfb294ee1f9e539e112fbeb6cfe4579abf8430091"
+    },
+    "wiki/queries/current-status-and-roadmap.md": {
+      "sha256_staged_blob": "44b2927b3e5cd512e4c3e1d9e03b45be765cb2feb94837e5b1215ee4dfd31107"
+    }
+  }
+}

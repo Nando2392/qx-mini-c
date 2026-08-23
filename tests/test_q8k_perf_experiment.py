@@ -1172,6 +1172,38 @@ def test_build_long_context_measurement_gate_rejects_missing_rss_summary():
         PERF.build_long_context_measurement_gate(cells, ctx=4096)
 
 
+def test_build_long_context_measurement_gate_rejects_kv_quality_checks_until_implemented():
+    profile = {
+        "enabled": True,
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 4096,
+        "rss_limit_bytes": 0,
+        "kv_quality_checks": 1,
+        "soak_seconds": 0,
+        "disabled_reason": None,
+    }
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="long_context_profile.kv_quality_checks must be 0 for measurement"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
+def test_build_long_context_measurement_gate_rejects_soak_seconds_until_implemented():
+    profile = {
+        "enabled": True,
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 4096,
+        "rss_limit_bytes": 0,
+        "kv_quality_checks": 0,
+        "soak_seconds": 1,
+        "disabled_reason": None,
+    }
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="long_context_profile.soak_seconds must be 0 for measurement"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
 def test_validate_native_payload_rejects_ctx4k_smoke_kv_quality_checks_until_implemented():
     payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
     payload["ctx_tokens"] = 4096
