@@ -773,7 +773,7 @@ def build_long_context_measurement_gate(cells: list[dict[str, Any]], *, ctx: int
         summary = _require_object(cell.get("summary"), "cell.summary")
         if "peak_rss_bytes" not in summary:
             raise ValueError("peak_rss_bytes summary is required")
-        peak_rss = _require_object(summary.get("peak_rss_bytes"), "cell.summary.peak_rss_bytes")
+        peak_rss = _require_object(summary.get("peak_rss_bytes"), "peak_rss_bytes summary")
         if "count" not in peak_rss:
             raise ValueError("peak_rss_bytes count is required")
         count = _require_exact_int(peak_rss.get("count"), "cell.summary.peak_rss_bytes.count")

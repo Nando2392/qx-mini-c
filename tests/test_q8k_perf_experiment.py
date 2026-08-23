@@ -1250,6 +1250,22 @@ def test_build_long_context_measurement_gate_rejects_missing_rss_count():
         PERF.build_long_context_measurement_gate(cells, ctx=4096)
 
 
+def test_build_long_context_measurement_gate_rejects_non_object_rss_summary():
+    profile = {
+        "enabled": True,
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 4096,
+        "rss_limit_bytes": 0,
+        "kv_quality_checks": 0,
+        "soak_seconds": 0,
+        "disabled_reason": None,
+    }
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": "not-a-summary"}}]
+
+    with pytest.raises(ValueError, match="peak_rss_bytes summary must be an object"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
 def test_build_long_context_measurement_gate_rejects_kv_quality_checks_until_implemented():
     profile = {
         "enabled": True,

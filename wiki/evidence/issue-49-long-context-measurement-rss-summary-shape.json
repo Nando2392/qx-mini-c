@@ -1,0 +1,47 @@
+{
+  "issue": 49,
+  "title": "Reject non-object RSS summaries in long-context measurement metadata",
+  "updated_utc": "2026-08-23T22:34:30+00:00",
+  "contract": {
+    "change": "long_context_measurement rejects non-object peak_rss_bytes before reading count or reporting measured_run_count",
+    "scope": "report-level fail-closed metadata hardening only",
+    "out_of_scope": [
+      "no OS RSS hard limit",
+      "no allocator change",
+      "no heavy 4K benchmark in CI",
+      "no KV-quality sweep",
+      "no soak runner",
+      "no default promotion",
+      "no speed/quality/stability claims"
+    ]
+  },
+  "behavioral_tests": [
+    "tests/test_q8k_perf_experiment.py::test_build_long_context_measurement_gate_rejects_non_object_rss_summary"
+  ],
+  "gates": {
+    "red": "1 failed because non-object peak_rss_bytes raised internal label instead of explicit RSS summary object rejection",
+    "focused_green": "1 passed",
+    "q8k_perf_experiment_tests": "55 passed",
+    "msvc_build": "PASS",
+    "smoke_check": "PASS",
+    "wiki_lint": "PASS",
+    "diff_check": "PASS"
+  },
+  "files": {
+    "scripts/q8k_perf_experiment.py": {
+      "sha256_staged_blob": "29ac81bda19adee6d1a0e7f08e8aaeec7c5790c258c8b2d4838fcd189479bfb4"
+    },
+    "tests/test_q8k_perf_experiment.py": {
+      "sha256_staged_blob": "cfd458427777d74cd5e555523901f5b24719a3bcabf00934cb0fd76929b4c2b4"
+    },
+    "README.md": {
+      "sha256_staged_blob": "a071c09df6ec3b5e55467252f02eaec1096c73c4265e792436af45f2e941f638"
+    },
+    "wiki/comparisons/optimization-priorities.md": {
+      "sha256_staged_blob": "3ce08b05b3d81472abca181df3380bc16413db3b6b664eb1e39a5c58e8748d41"
+    },
+    "wiki/queries/current-status-and-roadmap.md": {
+      "sha256_staged_blob": "89a4b165108a1f76acef9bc759530feddb90217d3c8d2e8d699e420a95c94166"
+    }
+  }
+}

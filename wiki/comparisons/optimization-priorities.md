@@ -36,6 +36,7 @@ confidence: medium
 | 22 | long-context RSS metadata hardening | Issue #46 rechaza `rss_limit_bytes` negativo dentro de `long_context_measurement` | fail-closed report-level; sin límite OS duro ni cambio allocator |
 | 23 | long-context measured-run count hardening | Issue #47 rechaza RSS summary con `count <= 0` dentro de `long_context_measurement` | fail-closed report-level; sin benchmark nuevo ni claims |
 | 24 | long-context RSS count presence hardening | Issue #48 rechaza RSS summary sin `count` dentro de `long_context_measurement` | fail-closed report-level; sin benchmark nuevo ni claims |
+| 25 | long-context RSS summary shape hardening | Issue #49 rechaza `peak_rss_bytes` no-objeto dentro de `long_context_measurement` | fail-closed report-level; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -91,5 +92,7 @@ La prioridad 22 empieza en Issue #46 como hardening de esa provenance RSS: `long
 La prioridad 23 empieza en Issue #47 como hardening del conteo medido: `long_context_measurement` rechaza summaries RSS con `count <= 0` antes de sumar `measured_run_count`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
 
 La prioridad 24 empieza en Issue #48 como hardening de presencia del conteo RSS: `long_context_measurement` rechaza summaries RSS sin `count` antes de leer o reportar `measured_run_count`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
+
+La prioridad 25 empieza en Issue #49 como hardening de forma del summary RSS: `long_context_measurement` rechaza `peak_rss_bytes` no-objeto antes de leer `count` o reportar `measured_run_count`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].
