@@ -20,6 +20,7 @@ def prompt_state_command(
     sampling_policy: str = "none",
     long_context_policy: str = "none",
     long_context_rss_limit_bytes: str = "0",
+    long_context_kv_quality_checks: str = "0",
     ctx: str = "16",
 ) -> list[str]:
     return [
@@ -65,6 +66,8 @@ def prompt_state_command(
         long_context_policy,
         "--long-context-rss-limit-bytes",
         long_context_rss_limit_bytes,
+        "--long-context-kv-quality-checks",
+        long_context_kv_quality_checks,
         "--temperature",
         "0",
         "--seed",
@@ -284,5 +287,45 @@ def test_prompt_state_loop_probe_requires_ctx4k_policy_for_rss_limit_before_file
 
     assert result.returncode == 2
     assert "long-context RSS limit requires ctx4k-smoke policy" in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+def test_prompt_state_loop_probe_rejects_malformed_long_context_kv_quality_checks_before_file_io():
+    result = subprocess.run(
+        prompt_state_command(
+            "1",
+            long_context_policy="ctx4k-smoke",
+            long_context_kv_quality_checks="not-checks",
+            ctx="4096",
+        ),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "invalid --long-context-kv-quality-checks" in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+def test_prompt_state_loop_probe_rejects_nonzero_long_context_kv_quality_checks_before_file_io():
+    result = subprocess.run(
+        prompt_state_command(
+            "1",
+            long_context_policy="ctx4k-smoke",
+            long_context_kv_quality_checks="1",
+            ctx="4096",
+        ),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "long-context KV quality checks are not implemented" in result.stderr
     assert "text file read failed" not in result.stderr
     assert "failed to open" not in result.stderr

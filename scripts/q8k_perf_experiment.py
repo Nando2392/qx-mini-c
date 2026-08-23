@@ -523,6 +523,7 @@ def build_inference_command(
     sampling_policy: str = "none",
     long_context_policy: str = "none",
     long_context_rss_limit_bytes: int = 0,
+    long_context_kv_quality_checks: int = 0,
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -543,6 +544,7 @@ def build_inference_command(
         "--sampling-policy", sampling_policy,
         "--long-context-policy", long_context_policy,
         "--long-context-rss-limit-bytes", str(long_context_rss_limit_bytes),
+        "--long-context-kv-quality-checks", str(long_context_kv_quality_checks),
         "--temperature", "0", "--seed", str(seed),
         "--full-moe", "--final-head", "--bench", "--dequant-profile",
     ]
@@ -572,6 +574,22 @@ def build_artifact_provenance(
         "tokenizer_qxt": artifact_provenance(tokenizer_qxt),
         "prompt": artifact_provenance(prompt),
     }
+
+
+def validate_long_context_cli_policy(
+    parser: argparse.ArgumentParser, *, long_context_policy: str, ctx: int,
+    long_context_rss_limit_bytes: int, long_context_kv_quality_checks: int,
+) -> None:
+    if long_context_rss_limit_bytes < 0:
+        parser.error("long-context RSS limit must be non-negative")
+    if long_context_kv_quality_checks < 0:
+        parser.error("long-context KV quality checks must be non-negative")
+    if long_context_policy == "ctx4k-smoke" and ctx < 4096:
+        parser.error("ctx4k-smoke long-context policy requires ctx >= 4096")
+    if long_context_policy == "none" and long_context_rss_limit_bytes != 0:
+        parser.error("long-context RSS limit requires ctx4k-smoke policy")
+    if long_context_kv_quality_checks != 0:
+        parser.error("long-context KV quality checks are not implemented")
 
 
 def source_state() -> dict[str, Any]:
@@ -750,6 +768,7 @@ def main() -> int:
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--long-context-policy", choices=("none", "ctx4k-smoke"), default="none")
     parser.add_argument("--long-context-rss-limit-bytes", type=int, default=0)
+    parser.add_argument("--long-context-kv-quality-checks", type=int, default=0)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
@@ -766,12 +785,13 @@ def main() -> int:
         parser.error("this final-head baseline requires exactly 48 layers")
     if args.ctx < 2 or args.generate < 1 or args.seed < 0:
         parser.error("ctx must be >= 2, generate >= 1, and seed >= 0")
-    if args.long_context_rss_limit_bytes < 0:
-        parser.error("long-context RSS limit must be non-negative")
-    if args.long_context_policy == "ctx4k-smoke" and args.ctx < 4096:
-        parser.error("ctx4k-smoke long-context policy requires ctx >= 4096")
-    if args.long_context_policy == "none" and args.long_context_rss_limit_bytes != 0:
-        parser.error("long-context RSS limit requires ctx4k-smoke policy")
+    validate_long_context_cli_policy(
+        parser,
+        long_context_policy=args.long_context_policy,
+        ctx=args.ctx,
+        long_context_rss_limit_bytes=args.long_context_rss_limit_bytes,
+        long_context_kv_quality_checks=args.long_context_kv_quality_checks,
+    )
     if args.output.exists() and not args.overwrite:
         parser.error(f"output already exists (use --overwrite): {args.output}")
 

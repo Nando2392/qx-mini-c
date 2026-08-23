@@ -1,0 +1,69 @@
+{
+  "created_utc": "2026-08-23T01:27:46Z",
+  "explicit_non_claims": [
+    "no real KV-quality sweep",
+    "no PPL/logit/greedy quality claim",
+    "no soak 8h",
+    "no benchmark 4K throughput claim",
+    "no default promotion",
+    "no speedup claim"
+  ],
+  "file_sha256": {
+    "README.md": "a23c684e64d493a84845640db87bb3470efc0b3bfca2fe257faed0d29c3d0426",
+    "include/qx_format.h": "f5b9d64e40cbcd164c79fbb5961335552ce92102b101744f578671f03c8d2b66",
+    "scripts/q8k_perf_experiment.py": "fc3649e695bebb7f5fcbb83831e47e238cb667534b284034589b407f2526c849",
+    "src/qx_format.c": "08d904c6a7e9c7a813290f71787f7b35783c44e322f562c9592939f3890baff8",
+    "src/qx_qxf_main.c": "fc3b2d6c5739c3781d483f5494ba170064439357f299008d021aca94d00297dc",
+    "tests/test_prompt_state_thread_cli.py": "b3e30c00e4fc3c5c5b96580391296f19aef7e2e19b6d35a4f6325992862d0c43",
+    "tests/test_q8k_perf_experiment.py": "dc08bec9c5e3977f0e712033fdb4f9a32a3885674b074c2f23d3ae91796d6b34",
+    "wiki/comparisons/optimization-priorities.md": "9aa9daee74a1bad063662e6c69c9c0f642f358424751e6265296cde0aa1ffa4c",
+    "wiki/queries/current-status-and-roadmap.md": "aae287acdcf4c96e67fe4845c6c94fa753d017897bc8904033495a8ba97f123b"
+  },
+  "issue": 38,
+  "local_verification": {
+    "green_partial_observed": {
+      "commands": [
+        "cmd.exe /c build_msvc.bat && python -m pytest tests/test_q8k_perf_experiment.py -q && python smoke_check.py && python scripts/lint_wiki.py && git diff --check",
+        "python -m pytest tests/test_q8k_perf_experiment.py -q"
+      ],
+      "exit_code": 0,
+      "git_diff_check": "PASS",
+      "msvc_build": "PASS",
+      "pytest_q8k_perf_experiment": "33 passed",
+      "smoke_check": "PASS",
+      "wiki_lint": "PASS"
+    },
+    "host_policy_blocker": {
+      "applies_to": "local execution of rebuilt build/qxqxf.exe from pytest subprocess",
+      "error": "WinError 4551: An Application Control policy has blocked this file",
+      "impact": "CLI GREEN must be verified by CI Windows after push; do not claim local CLI pass"
+    },
+    "prompt_state_cli_tests_blocked_by_host_policy": {
+      "blocked_failures": 23,
+      "command": "python -m pytest tests/test_prompt_state_thread_cli.py tests/test_q8k_perf_experiment.py -q",
+      "error": "WinError 4551: An Application Control policy has blocked this file",
+      "exit_code": 1,
+      "passing_tests_before_blocked_module": 33,
+      "scope": "local Windows App Control blocked Python subprocess execution of build/qxqxf.exe; CI Windows must verify the CLI tests after push"
+    },
+    "red_observed": {
+      "command": "cmd.exe /c build_msvc.bat && python -m pytest <5 focused tests> -q",
+      "exit_code": 1,
+      "expected_failures": [
+        "unknown CLI flag before implementation",
+        "missing --long-context-kv-quality-checks in harness command builder",
+        "missing validate_long_context_cli_policy helper"
+      ]
+    }
+  },
+  "scope": {
+    "ctx4k_smoke_preserved": true,
+    "long_context_kv_quality_checks_default": 0,
+    "nonzero_behavior": "fail-closed before prompt/model/tokenizer I/O",
+    "rss_limit_gate_preserved": true
+  },
+  "source_revision_before_commit": "a06c5c90260803669acf49e9218d818cca3e8cc7",
+  "title": "Add long-context KV quality gate",
+  "tracked_evidence_only": true,
+  "updated_utc": "2026-08-23T01:29:53Z"
+}
