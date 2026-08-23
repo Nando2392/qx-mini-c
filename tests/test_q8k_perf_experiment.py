@@ -1077,6 +1077,101 @@ def test_summarize_cells_rejects_empty_benchmark_cells():
         PERF.summarize_cells_long_context_profile([])
 
 
+def test_build_long_context_measurement_gate_records_ctx4k_measured_cells():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    run = PERF.compact_run(
+        {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 2048, "payload": payload},
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="ctx4k-smoke",
+        kv="int8",
+        layers=48,
+        ctx=4096,
+        generation_steps=2,
+    )
+    summary = PERF.summarize_runs([run, dict(run), dict(run)])
+    cells = [{"summary": summary} for _ in range(16)]
+
+    gate = PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+    assert gate == {
+        "status": "pass",
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 4096,
+        "measured_ctx_tokens": 4096,
+        "measured_cell_count": 16,
+        "measured_run_count": 48,
+        "peak_rss_summary_present": True,
+    }
+
+
+def test_build_long_context_measurement_gate_rejects_ctx_below_target():
+    profile = {
+        "enabled": True,
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 4096,
+        "rss_limit_bytes": 0,
+        "kv_quality_checks": 0,
+        "soak_seconds": 0,
+        "disabled_reason": None,
+    }
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="ctx4k-smoke measurement requires ctx >= target_ctx_tokens"):
+        PERF.build_long_context_measurement_gate(cells, ctx=2048)
+
+
+def test_build_long_context_measurement_gate_rejects_invalid_ctx4k_target():
+    profile = {
+        "enabled": True,
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 2048,
+        "rss_limit_bytes": 0,
+        "kv_quality_checks": 0,
+        "soak_seconds": 0,
+        "disabled_reason": None,
+    }
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="ctx4k-smoke measurement must record target_ctx_tokens=4096"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
+def test_build_long_context_measurement_gate_rejects_unsupported_policy():
+    profile = {
+        "enabled": True,
+        "policy": "ctx8k-smoke",
+        "target_ctx_tokens": 8192,
+        "rss_limit_bytes": 0,
+        "kv_quality_checks": 0,
+        "soak_seconds": 0,
+        "disabled_reason": None,
+    }
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="unsupported long-context measurement policy"):
+        PERF.build_long_context_measurement_gate(cells, ctx=8192)
+
+
+def test_build_long_context_measurement_gate_rejects_missing_rss_summary():
+    profile = {
+        "enabled": True,
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 4096,
+        "rss_limit_bytes": 0,
+        "kv_quality_checks": 0,
+        "soak_seconds": 0,
+        "disabled_reason": None,
+    }
+    cells = [{"summary": {"long_context_profile": profile}}]
+
+    with pytest.raises(ValueError, match="peak_rss_bytes summary is required"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
 def test_validate_native_payload_rejects_ctx4k_smoke_kv_quality_checks_until_implemented():
     payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
     payload["ctx_tokens"] = 4096

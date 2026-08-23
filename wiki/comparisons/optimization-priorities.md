@@ -30,6 +30,7 @@ confidence: medium
 | 16 | long-context profile in benchmark runs | Issue #40 conserva el `long_context_profile` validado dentro de cada compact-run del harness | provenance por medición; sin benchmark 4K nuevo ni claims |
 | 17 | long-context profile in benchmark summaries | Issue #41 conserva `long_context_profile` en summaries sólo si todas las mediciones acuerdan | fail-closed ante perfiles mixtos; sin benchmark nuevo ni claims |
 | 18 | long-context profile in benchmark reports | Issue #42 conserva `long_context_profile` a nivel report sólo si todas las celdas acuerdan | fail-closed ante celdas mixtas; sin benchmark nuevo ni claims |
+| 19 | long-context measurement metadata | Issue #43 añade `long_context_measurement` al reporte para registrar ctx medido, celdas, runs y presencia de RSS summary | metadata de medición; sin nuevo benchmark 4K pesado ni claims |
 
 ## No priorizar todavía
 
@@ -73,5 +74,7 @@ La prioridad 16 empieza en Issue #40 como persistencia de provenance long-contex
 La prioridad 17 empieza en Issue #41 como consistencia de summaries long-context: `summarize_runs` preserva el `long_context_profile` común y falla cerrado si las mediciones mezclan perfiles. No ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
 
 La prioridad 18 empieza en Issue #42 como consistencia report-level long-context: el reporte conserva el `long_context_profile` común sólo si todas las celdas del benchmark acuerdan y falla cerrado si una matriz mezcla perfiles. No ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
+
+La prioridad 19 empieza en Issue #43 como metadata de medición long-context: el reporte añade `long_context_measurement` con `measured_ctx_tokens`, `measured_cell_count`, `measured_run_count` y presencia de summary RSS. Para `ctx4k-smoke` exige `ctx >= target_ctx_tokens`; no ejecuta benchmark 4K pesado nuevo en CI, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

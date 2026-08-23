@@ -58,7 +58,7 @@ snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + rep
 baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
 QXF mmap read-only opt-in: GREEN local WSL2; gate 2x2 exacto por modalidad, buffered permanece default
 scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend, ephemeral permanece default
-policy provenance gates #27–#41: GREEN local/CI; Issue #42 long-context report consistency en verificación local
+policy provenance gates #27–#42: GREEN local/CI; Issue #43 long-context measurement metadata en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -111,6 +111,8 @@ Issue #40 conserva el `long_context_profile` validado dentro de cada compact-run
 Issue #41 conserva el `long_context_profile` común dentro de cada summary del harness y falla cerrado si las mediciones de una celda mezclan perfiles. Es sólo consistencia de provenance: no ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no afirma rendimiento, calidad o estabilidad.
 
 Issue #42 conserva el `long_context_profile` común a nivel top-level report y falla cerrado si las celdas de una matriz mezclan perfiles. Es sólo consistencia de provenance: no ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no afirma rendimiento, calidad o estabilidad.
+
+Issue #43 añade `long_context_measurement` al reporte del harness para registrar ctx medido, número de celdas, número de runs y presencia de summary RSS. Para `ctx4k-smoke` exige `ctx >= target_ctx_tokens`. Es sólo metadata de medición reproducible: no ejecuta benchmark 4K pesado en CI, no cambia defaults, no implementa quality sweep/soak y no afirma rendimiento, calidad o estabilidad.
 
 ## Después
 

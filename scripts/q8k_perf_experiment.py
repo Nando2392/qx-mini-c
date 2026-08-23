@@ -754,6 +754,42 @@ def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[st
     return json.loads(json.dumps(first_profile))
 
 
+def build_long_context_measurement_gate(cells: list[dict[str, Any]], *, ctx: int) -> dict[str, Any]:
+    """Summarize the measured long-context contract for the completed benchmark report."""
+    profile = summarize_cells_long_context_profile(cells)
+    policy = profile.get("policy")
+    target_ctx_tokens = _require_exact_int(profile.get("target_ctx_tokens"), "long_context_profile.target_ctx_tokens")
+    measured_run_count = 0
+    for cell in cells:
+        summary = _require_object(cell.get("summary"), "cell.summary")
+        if "peak_rss_bytes" not in summary:
+            raise ValueError("peak_rss_bytes summary is required")
+        peak_rss = _require_object(summary.get("peak_rss_bytes"), "cell.summary.peak_rss_bytes")
+        count = _require_exact_int(peak_rss.get("count"), "cell.summary.peak_rss_bytes.count")
+        if count <= 0:
+            raise ValueError("peak_rss_bytes summary is required")
+        measured_run_count += count
+    if policy == "none":
+        if target_ctx_tokens != 0:
+            raise ValueError("none long-context measurement must not record target ctx tokens")
+    elif policy == "ctx4k-smoke":
+        if target_ctx_tokens != 4096:
+            raise ValueError("ctx4k-smoke measurement must record target_ctx_tokens=4096")
+        if ctx < target_ctx_tokens:
+            raise ValueError("ctx4k-smoke measurement requires ctx >= target_ctx_tokens")
+    else:
+        raise ValueError("unsupported long-context measurement policy")
+    return {
+        "status": "pass",
+        "policy": policy,
+        "target_ctx_tokens": target_ctx_tokens,
+        "measured_ctx_tokens": ctx,
+        "measured_cell_count": len(cells),
+        "measured_run_count": measured_run_count,
+        "peak_rss_summary_present": True,
+    }
+
+
 def compare_kernel_policy_effects(runs_by_policy: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     expected = {"baseline", "fused"}
     if set(runs_by_policy) != expected or any(not runs_by_policy[policy] for policy in expected):
@@ -966,6 +1002,7 @@ def main() -> int:
             "startup_model_load": startup_cells,
             "cells": cells,
             "long_context_profile": summarize_cells_long_context_profile(cells),
+            "long_context_measurement": build_long_context_measurement_gate(cells, ctx=args.ctx),
             "output_contract": output_gate,
             "kernel_policy_effects": kernel_policy_effects,
             "comparisons": comparisons,

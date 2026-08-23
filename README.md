@@ -70,7 +70,9 @@ speed/quality. Benchmark compact-run records preserve the validated
 `long_context_profile` for each measured run so evidence keeps the active
 contract attached to the timings; per-cell summaries preserve it only when all
 measured runs agree, and the top-level report preserves it only when all cells
-agree.
+agree. The report also records a `long_context_measurement` gate with measured
+ctx, cell count, run count and RSS-summary presence; this is measurement
+metadata, not a throughput or stability claim.
 
 ## Repository map
 
