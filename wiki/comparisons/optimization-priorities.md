@@ -34,6 +34,7 @@ confidence: medium
 | 20 | long-context inactive measurement counters | Issue #44 endurece `long_context_measurement` para rechazar contadores futuros activos sin backend real | `kv_quality_checks`/`soak_seconds` deben ser 0; sin sweep KV ni soak runner |
 | 21 | long-context RSS metadata | Issue #45 conserva `rss_limit_bytes` y estado activo dentro de `long_context_measurement` | provenance del límite muestreado; sin límite OS duro ni cambio allocator |
 | 22 | long-context RSS metadata hardening | Issue #46 rechaza `rss_limit_bytes` negativo dentro de `long_context_measurement` | fail-closed report-level; sin límite OS duro ni cambio allocator |
+| 23 | long-context measured-run count hardening | Issue #47 rechaza RSS summary con `count <= 0` dentro de `long_context_measurement` | fail-closed report-level; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -85,5 +86,7 @@ La prioridad 20 empieza en Issue #44 como hardening de metadata de medición: `l
 La prioridad 21 empieza en Issue #45 como provenance RSS report-level: `long_context_measurement` registra `rss_limit_bytes` y `rss_limit_active` desde el perfil común. Esto sólo conserva evidencia del límite muestreado del harness; no instala límite duro de OS, no cambia allocator y no autoriza claims de estabilidad.
 
 La prioridad 22 empieza en Issue #46 como hardening de esa provenance RSS: `long_context_measurement` rechaza `rss_limit_bytes` negativo a nivel report antes de derivar `rss_limit_active`. Esto no instala límite duro de OS, no cambia allocator y no autoriza claims de estabilidad.
+
+La prioridad 23 empieza en Issue #47 como hardening del conteo medido: `long_context_measurement` rechaza summaries RSS con `count <= 0` antes de sumar `measured_run_count`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

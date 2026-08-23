@@ -776,7 +776,7 @@ def build_long_context_measurement_gate(cells: list[dict[str, Any]], *, ctx: int
         peak_rss = _require_object(summary.get("peak_rss_bytes"), "cell.summary.peak_rss_bytes")
         count = _require_exact_int(peak_rss.get("count"), "cell.summary.peak_rss_bytes.count")
         if count <= 0:
-            raise ValueError("peak_rss_bytes summary is required")
+            raise ValueError("peak_rss_bytes count must be positive")
         measured_run_count += count
     if policy == "none":
         if target_ctx_tokens != 0:
