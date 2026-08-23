@@ -1143,6 +1143,11 @@ def test_build_long_context_measurement_gate_rejects_empty_cells():
         PERF.build_long_context_measurement_gate([], ctx=4096)
 
 
+def test_build_long_context_measurement_gate_rejects_non_object_cell():
+    with pytest.raises(ValueError, match="benchmark cell must be an object"):
+        PERF.build_long_context_measurement_gate(["not-a-cell"], ctx=4096)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,

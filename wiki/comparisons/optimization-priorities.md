@@ -38,6 +38,7 @@ confidence: medium
 | 24 | long-context RSS count presence hardening | Issue #48 rechaza RSS summary sin `count` dentro de `long_context_measurement` | fail-closed report-level; sin benchmark nuevo ni claims |
 | 25 | long-context RSS summary shape hardening | Issue #49 rechaza `peak_rss_bytes` no-objeto dentro de `long_context_measurement` | fail-closed report-level; sin benchmark nuevo ni claims |
 | 26 | long-context measurement empty-report hardening | Issue #50 rechaza reportes sin celdas dentro de `long_context_measurement` | fail-closed report-level; sin benchmark nuevo ni claims |
+| 27 | long-context benchmark cell shape hardening | Issue #51 rechaza celdas benchmark no-objeto antes de leer profiles/measurement | fail-closed report-level; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -97,5 +98,7 @@ La prioridad 24 empieza en Issue #48 como hardening de presencia del conteo RSS:
 La prioridad 25 empieza en Issue #49 como hardening de forma del summary RSS: `long_context_measurement` rechaza `peak_rss_bytes` no-objeto antes de leer `count` o reportar `measured_run_count`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
 
 La prioridad 26 empieza en Issue #50 como hardening de reportes vacíos: `long_context_measurement` rechaza matrices sin celdas antes de derivar `measured_cell_count` o `measured_run_count`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
+
+La prioridad 27 empieza en Issue #51 como hardening de forma de celda benchmark: la ruta de perfil/medición long-context rechaza entradas de celda no-objeto antes de leer `summary`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

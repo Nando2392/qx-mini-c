@@ -1,0 +1,47 @@
+{
+  "issue": 51,
+  "title": "Reject non-object long-context benchmark cells",
+  "updated_utc": "2026-08-23T23:40:22+00:00",
+  "contract": {
+    "change": "long-context profile/measurement derivation rejects non-object benchmark cells before reading summary",
+    "scope": "report-level fail-closed metadata hardening only",
+    "out_of_scope": [
+      "no OS RSS hard limit",
+      "no allocator change",
+      "no heavy 4K benchmark in CI",
+      "no KV-quality sweep",
+      "no soak runner",
+      "no default promotion",
+      "no speed/quality/stability claims"
+    ]
+  },
+  "behavioral_tests": [
+    "tests/test_q8k_perf_experiment.py::test_build_long_context_measurement_gate_rejects_non_object_cell"
+  ],
+  "gates": {
+    "red": "1 failed with AttributeError because non-object cell was accessed before validation",
+    "focused_green": "1 passed",
+    "q8k_perf_experiment_tests": "57 passed",
+    "msvc_build": "PASS",
+    "smoke_check": "PASS",
+    "wiki_lint": "PASS",
+    "diff_check": "PASS"
+  },
+  "files": {
+    "scripts/q8k_perf_experiment.py": {
+      "sha256_staged_blob": "9a87e5c0be9d40a3605014514dc5290b2c1a6b366106a77308ccc05000836f86"
+    },
+    "tests/test_q8k_perf_experiment.py": {
+      "sha256_staged_blob": "9232ebf7c75ebcc3cdd9517bb3205ccfca1285fddb613e2ab77c7616706ebdcd"
+    },
+    "README.md": {
+      "sha256_staged_blob": "a074f5dcab312430cad4ce1a11488dc3bedbb3e8c98d375031a9ab18b4d4ec29"
+    },
+    "wiki/comparisons/optimization-priorities.md": {
+      "sha256_staged_blob": "ff0800e0ee2fb95826b5c58d4b55bbdf3aafe1e27eb0b81a21d7354c2567c763"
+    },
+    "wiki/queries/current-status-and-roadmap.md": {
+      "sha256_staged_blob": "3c97ee6cb31dcf9f4d05f0c2253083ed3672668572e27ae3f97853718d28b1d5"
+    }
+  }
+}
