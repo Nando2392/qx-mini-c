@@ -61,6 +61,7 @@ scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend
 policy provenance gates #27–#42: GREEN local/CI; Issue #43 long-context measurement metadata en verificación local
 long-context measurement inactive counters: Issue #44 en verificación local
 long-context measurement RSS metadata: Issue #45 en verificación local
+long-context measurement RSS negative-limit hardening: Issue #46 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -119,6 +120,8 @@ Issue #43 añade `long_context_measurement` al reporte del harness para registra
 Issue #44 endurece `long_context_measurement` para rechazar `kv_quality_checks` y `soak_seconds` non-zero hasta que existan implementaciones reales. Es sólo hardening fail-closed de metadata: no ejecuta sweep KV, no corre soak, no cambia defaults y no afirma calidad o estabilidad.
 
 Issue #45 añade `rss_limit_bytes` y `rss_limit_active` a `long_context_measurement` para conservar la provenance del límite RSS muestreado en reportes. Es sólo metadata report-level: no instala límite duro de OS, no cambia allocator y no afirma estabilidad.
+
+Issue #46 endurece `long_context_measurement` para rechazar `rss_limit_bytes` negativo antes de marcar el límite como activo. Es sólo hardening report-level: no instala límite duro de OS, no cambia allocator y no afirma estabilidad.
 
 ## Después
 

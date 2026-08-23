@@ -1138,6 +1138,22 @@ def test_build_long_context_measurement_gate_records_active_rss_limit():
     assert gate["rss_limit_active"] is True
 
 
+def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
+    profile = {
+        "enabled": True,
+        "policy": "ctx4k-smoke",
+        "target_ctx_tokens": 4096,
+        "rss_limit_bytes": -1,
+        "kv_quality_checks": 0,
+        "soak_seconds": 0,
+        "disabled_reason": None,
+    }
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="long_context_profile.rss_limit_bytes must be non-negative"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
 def test_build_long_context_measurement_gate_rejects_ctx_below_target():
     profile = {
         "enabled": True,

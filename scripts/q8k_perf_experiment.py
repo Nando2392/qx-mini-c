@@ -762,6 +762,8 @@ def build_long_context_measurement_gate(cells: list[dict[str, Any]], *, ctx: int
     rss_limit_bytes = _require_exact_int(profile.get("rss_limit_bytes"), "long_context_profile.rss_limit_bytes")
     kv_quality_checks = _require_exact_int(profile.get("kv_quality_checks"), "long_context_profile.kv_quality_checks")
     soak_seconds = _require_exact_int(profile.get("soak_seconds"), "long_context_profile.soak_seconds")
+    if rss_limit_bytes < 0:
+        raise ValueError("long_context_profile.rss_limit_bytes must be non-negative")
     if kv_quality_checks != 0:
         raise ValueError("long_context_profile.kv_quality_checks must be 0 for measurement")
     if soak_seconds != 0:
