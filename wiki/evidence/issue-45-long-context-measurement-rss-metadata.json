@@ -1,0 +1,48 @@
+{
+  "issue": 45,
+  "title": "Record RSS limit in long-context measurement metadata",
+  "updated_utc": "2026-08-23T17:25:46+00:00",
+  "contract": {
+    "change": "long_context_measurement records rss_limit_bytes and rss_limit_active from the common long_context_profile",
+    "scope": "report-level metadata provenance only",
+    "out_of_scope": [
+      "no OS RSS hard limit",
+      "no allocator change",
+      "no heavy 4K benchmark in CI",
+      "no KV-quality sweep",
+      "no soak runner",
+      "no default promotion",
+      "no speed/quality/stability claims"
+    ]
+  },
+  "behavioral_tests": [
+    "tests/test_q8k_perf_experiment.py::test_build_long_context_measurement_gate_records_ctx4k_measured_cells",
+    "tests/test_q8k_perf_experiment.py::test_build_long_context_measurement_gate_records_active_rss_limit"
+  ],
+  "gates": {
+    "red": "2 failed because rss_limit fields were absent",
+    "focused_green": "2 passed",
+    "q8k_perf_experiment_tests": "51 passed",
+    "msvc_build": "PASS",
+    "smoke_check": "PASS",
+    "wiki_lint": "PASS",
+    "diff_check": "PASS"
+  },
+  "files": {
+    "scripts/q8k_perf_experiment.py": {
+      "sha256_staged_blob": "428fb45e78327a3b2dd030758b0f67ea1fdd0eef0c2b53aa26a62d11a501bd70"
+    },
+    "tests/test_q8k_perf_experiment.py": {
+      "sha256_staged_blob": "23e46cb5ce299ce7c5f273108a1d2f7529694534df4c4df76a6e918efe2c1192"
+    },
+    "README.md": {
+      "sha256_staged_blob": "18cb903dd1fd04e872b7be6647b4a3a4408739cdda817de4e0a85f448ff2b8c4"
+    },
+    "wiki/comparisons/optimization-priorities.md": {
+      "sha256_staged_blob": "e57481082c71e5a8d10eabcf929643b923eee76c4caac6d5d1adc83d3225dc37"
+    },
+    "wiki/queries/current-status-and-roadmap.md": {
+      "sha256_staged_blob": "02c73c681a288969128cd702325ea0043996c5e16b9a6c7ba642a484bf1efd2e"
+    }
+  }
+}

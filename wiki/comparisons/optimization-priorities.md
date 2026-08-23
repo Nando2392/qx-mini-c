@@ -32,6 +32,7 @@ confidence: medium
 | 18 | long-context profile in benchmark reports | Issue #42 conserva `long_context_profile` a nivel report sólo si todas las celdas acuerdan | fail-closed ante celdas mixtas; sin benchmark nuevo ni claims |
 | 19 | long-context measurement metadata | Issue #43 añade `long_context_measurement` al reporte para registrar ctx medido, celdas, runs y presencia de RSS summary | metadata de medición; sin nuevo benchmark 4K pesado ni claims |
 | 20 | long-context inactive measurement counters | Issue #44 endurece `long_context_measurement` para rechazar contadores futuros activos sin backend real | `kv_quality_checks`/`soak_seconds` deben ser 0; sin sweep KV ni soak runner |
+| 21 | long-context RSS metadata | Issue #45 conserva `rss_limit_bytes` y estado activo dentro de `long_context_measurement` | provenance del límite muestreado; sin límite OS duro ni cambio allocator |
 
 ## No priorizar todavía
 
@@ -79,5 +80,7 @@ La prioridad 18 empieza en Issue #42 como consistencia report-level long-context
 La prioridad 19 empieza en Issue #43 como metadata de medición long-context: el reporte añade `long_context_measurement` con `measured_ctx_tokens`, `measured_cell_count`, `measured_run_count` y presencia de summary RSS. Para `ctx4k-smoke` exige `ctx >= target_ctx_tokens`; no ejecuta benchmark 4K pesado nuevo en CI, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
 
 La prioridad 20 empieza en Issue #44 como hardening de metadata de medición: `long_context_measurement` rechaza `kv_quality_checks` o `soak_seconds` non-zero hasta que existan implementaciones reales de sweep KV y soak runner. No ejecuta sweep, no corre soak, no cambia defaults y no autoriza claims de calidad o estabilidad.
+
+La prioridad 21 empieza en Issue #45 como provenance RSS report-level: `long_context_measurement` registra `rss_limit_bytes` y `rss_limit_active` desde el perfil común. Esto sólo conserva evidencia del límite muestreado del harness; no instala límite duro de OS, no cambia allocator y no autoriza claims de estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

@@ -1101,11 +1101,41 @@ def test_build_long_context_measurement_gate_records_ctx4k_measured_cells():
         "status": "pass",
         "policy": "ctx4k-smoke",
         "target_ctx_tokens": 4096,
+        "rss_limit_bytes": 0,
+        "rss_limit_active": False,
         "measured_ctx_tokens": 4096,
         "measured_cell_count": 16,
         "measured_run_count": 48,
         "peak_rss_summary_present": True,
     }
+
+
+def test_build_long_context_measurement_gate_records_active_rss_limit():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    payload["long_context_profile"]["rss_limit_bytes"] = 8192
+    run = PERF.compact_run(
+        {
+            "wall_elapsed_seconds": 0.5,
+            "peak_rss_bytes": 4096,
+            "payload": payload,
+        },
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="ctx4k-smoke",
+        kv="int8",
+        layers=48,
+        ctx=4096,
+        generation_steps=2,
+    )
+    summary = PERF.summarize_runs([run, dict(run), dict(run)])
+
+    gate = PERF.build_long_context_measurement_gate([{"summary": summary}], ctx=4096)
+
+    assert gate["rss_limit_bytes"] == 8192
+    assert gate["rss_limit_active"] is True
 
 
 def test_build_long_context_measurement_gate_rejects_ctx_below_target():

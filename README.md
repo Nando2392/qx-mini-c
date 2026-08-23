@@ -73,6 +73,8 @@ measured runs agree, and the top-level report preserves it only when all cells
 agree. The report also records a `long_context_measurement` gate with measured
 ctx, cell count, run count and RSS-summary presence; this is measurement
 metadata, not a throughput or stability claim.
+The same metadata records `rss_limit_bytes` and whether that sampled RSS gate
+was active; it does not install an OS-level hard limit.
 Inactive future counters remain fail-closed at report level too: non-zero
 KV-quality checks or soak seconds are rejected until real sweeps/runners exist.
 
