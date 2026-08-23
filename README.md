@@ -81,6 +81,8 @@ measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation
 error too.
 RSS summaries must also be objects before count validation runs.
+Empty benchmark reports fail closed before `long_context_measurement` derives
+cell or run counts.
 Inactive future counters remain fail-closed at report level too: non-zero
 KV-quality checks or soak seconds are rejected until real sweeps/runners exist.
 

@@ -65,6 +65,7 @@ long-context measurement RSS negative-limit hardening: Issue #46 en verificació
 long-context measurement run-count hardening: Issue #47 en verificación local
 long-context measurement RSS count presence hardening: Issue #48 en verificación local
 long-context measurement RSS summary shape hardening: Issue #49 en verificación local
+long-context measurement empty-report hardening: Issue #50 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -131,6 +132,8 @@ Issue #47 endurece `long_context_measurement` para rechazar summaries RSS con `c
 Issue #48 endurece `long_context_measurement` para rechazar summaries RSS sin `count` antes de reportar `measured_run_count`. Es sólo hardening report-level: no ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
 
 Issue #49 endurece `long_context_measurement` para rechazar `peak_rss_bytes` no-objeto antes de leer `count` o reportar `measured_run_count`. Es sólo hardening report-level: no ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
+
+Issue #50 endurece `long_context_measurement` para rechazar reportes sin celdas antes de reportar `measured_cell_count` o `measured_run_count`. Es sólo hardening report-level: no ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
 
 ## Después
 

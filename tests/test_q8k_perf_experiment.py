@@ -1138,6 +1138,11 @@ def test_build_long_context_measurement_gate_records_active_rss_limit():
     assert gate["rss_limit_active"] is True
 
 
+def test_build_long_context_measurement_gate_rejects_empty_cells():
+    with pytest.raises(ValueError, match="long_context_measurement requires benchmark cells"):
+        PERF.build_long_context_measurement_gate([], ctx=4096)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,
