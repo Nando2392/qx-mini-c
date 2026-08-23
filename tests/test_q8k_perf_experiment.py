@@ -865,6 +865,48 @@ def test_validate_native_payload_rejects_ctx4k_smoke_without_target_ctx():
         )
 
 
+def test_validate_native_payload_accepts_ctx4k_smoke_rss_limit_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    payload["long_context_profile"]["rss_limit_bytes"] = 8192
+
+    signature = PERF.validate_native_payload(
+        payload,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="ctx4k-smoke",
+        kv="int8",
+        layers=48,
+        ctx=4096,
+        generation_steps=2,
+    )
+
+    assert signature["selected_tokens"] == [358, 1184]
+
+
+def test_compact_run_rejects_peak_rss_above_long_context_limit():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    payload["long_context_profile"]["rss_limit_bytes"] = 100
+    raw = {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 101, "payload": payload}
+
+    with pytest.raises(ValueError, match="peak_rss_bytes exceeds long_context_profile.rss_limit_bytes"):
+        PERF.compact_run(
+            raw,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            long_context_policy="ctx4k-smoke",
+            kv="int8",
+            layers=48,
+            ctx=4096,
+            generation_steps=2,
+        )
+
+
 def test_build_artifact_provenance_pins_source_model_and_runtime_inputs(tmp_path):
     paths = {}
     for name in ("benchmark_script", "qx_exe", "source_model_gguf", "model_qxf", "tokenizer_qxt", "prompt"):

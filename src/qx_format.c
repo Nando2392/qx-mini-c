@@ -5967,7 +5967,7 @@ static int qx_read_accumulated_kv_snapshot(
     return 1;
 }
 
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
         qx_set_err(err, err_len, "unsupported activation format"); return 0;
@@ -6015,6 +6015,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     int ctx4k_smoke_policy = strcmp(long_context_policy, "ctx4k-smoke") == 0;
     if (!ctx4k_smoke_policy && strcmp(long_context_policy, "none") != 0) { qx_set_err(err, err_len, "unsupported long-context policy"); return 0; }
     if (ctx4k_smoke_policy && ctx_tokens < 4096u) { qx_set_err(err, err_len, "ctx4k-smoke long-context policy requires --ctx >= 4096"); return 0; }
+    if (!ctx4k_smoke_policy && long_context_rss_limit_bytes != 0u) { qx_set_err(err, err_len, "long-context RSS limit requires ctx4k-smoke policy"); return 0; }
     if (full_moe && norm_name && *norm_name) { qx_set_err(err, err_len, "--norm cannot be combined with --full-moe"); return 0; }
     if (residual_dump_dir && *residual_dump_dir && !full_moe) { qx_set_err(err, err_len, "--dump-residuals requires --full-moe"); return 0; }
     if ((kv_snapshot_out_path || kv_snapshot_in_path) && !causal_attention) { qx_set_err(err, err_len, "KV snapshot requires causal attention"); return 0; }
@@ -6685,7 +6686,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     fprintf(out, "  \"speculative_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"draft_tokens\": 0, \"accepted_tokens\": 0, \"rejected_tokens\": 0, \"target_verifications\": 0, \"disabled_reason\": \"none_policy\"},\n", speculative_policy);
     fprintf(out, "  \"kv2_profile\": {\"enabled\": true, \"policy\": \"%s\", \"format\": \"none\", \"packed_bytes\": 0, \"read_ops\": 0, \"write_ops\": 0, \"fallback_reads\": 0, \"disabled_reason\": \"none_policy\"},\n", kv2_policy);
     fprintf(out, "  \"sampling_profile\": {\"enabled\": true, \"policy\": \"%s\", \"mode\": \"greedy\", \"stochastic_samples\": 0, \"top_p_evaluations\": 0, \"beam_width\": 1, \"disabled_reason\": \"none_policy\"},\n", sampling_policy);
-    fprintf(out, "  \"long_context_profile\": {\"enabled\": true, \"policy\": \"%s\", \"target_ctx_tokens\": %u, \"rss_limit_bytes\": 0, \"kv_quality_checks\": 0, \"soak_seconds\": 0, \"disabled_reason\": %s},\n", long_context_policy, ctx4k_smoke_policy ? 4096u : 0u, ctx4k_smoke_policy ? "null" : "\"none_policy\"");
+    fprintf(out, "  \"long_context_profile\": {\"enabled\": true, \"policy\": \"%s\", \"target_ctx_tokens\": %u, \"rss_limit_bytes\": %llu, \"kv_quality_checks\": 0, \"soak_seconds\": 0, \"disabled_reason\": %s},\n", long_context_policy, ctx4k_smoke_policy ? 4096u : 0u, (unsigned long long)long_context_rss_limit_bytes, ctx4k_smoke_policy ? "null" : "\"none_policy\"");
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16
@@ -6725,7 +6726,7 @@ int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, 
     }
     if (steps == 0u) steps = 1u;
     if (steps > 64u) steps = 64u;
-    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", "serial", 1u, "scalar", "none", "none", "none", "none", "none", "none", "none", 0,
+    return qx_dump_prompt_state_loop_probe_summary(path, tokens_path, &prompt_token, 1u, steps, layers, ctx_tokens, kv_format, activation_format, "ephemeral", "baseline", "serial", 1u, "scalar", "none", "none", "none", "none", "none", "none", "none", 0u, 0,
         real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas, delta_vectors, attention_output_vector,
         causal_attention, rope_gqa_attention, full_moe, final_head, bench, residual_dims, norm_name, top_k, scan,
         logits_top_n, temperature, seed, residual_dump_dir, start_layer, residual_input_path,

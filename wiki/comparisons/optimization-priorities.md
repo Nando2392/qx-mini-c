@@ -24,6 +24,7 @@ confidence: medium
 | 10 | sampling policy | Issue #34 añade superficie fail-closed `--sampling-policy none` y `sampling_profile` para separar greedy determinístico de futuros top-p/min-p/beam samplers | greedy default; fake stochastic/top-p counters rechazados; sin sampler real ni speedup/calidad no medida |
 | 11 | long-context gate | Issue #35 añade superficie fail-closed `--long-context-policy none` y `long_context_profile` para separar baseline actual de futuros gates 4K/RSS/KV-quality/soak | ctx actual default; fake 4K/RSS/calidad/soak counters rechazados; sin benchmark 4K ni claim |
 | 12 | ctx4k admission | Issue #36 añade `--long-context-policy ctx4k-smoke` como gate opt-in que exige `--ctx >= 4096` y reporta target 4096 | default sigue none; no RSS/KV-quality/soak; sin speedup/calidad |
+| 13 | long-context RSS limit | Issue #37 añade `--long-context-rss-limit-bytes` como límite opt-in para el sampler RSS del harness cuando `ctx4k-smoke` está activo | default 0/deshabilitado; fail-closed si peak RSS muestreado supera el límite; sin límite OS duro ni speedup/calidad |
 
 ## No priorizar todavía
 
@@ -55,5 +56,7 @@ La prioridad 10 empieza en Issue #34 como contrato de provenance de sampling: `-
 La prioridad 11 empieza en Issue #35 como contrato de provenance long-context: `--long-context-policy none` es default y el payload nativo expone `long_context_profile` con `target_ctx_tokens=0`, `rss_limit_bytes=0`, `kv_quality_checks=0` y `soak_seconds=0`. Ese slice no ejecuta benchmark 4K, no aplica límite RSS, no mide calidad KV ni soak 8h; sólo bloquea claims falsos y prepara esos gates.
 
 La prioridad 12 empieza en Issue #36 como primer gate de admisión 4K: `--long-context-policy ctx4k-smoke` es opt-in, exige `--ctx >= 4096` antes de prompt/model/tokenizer I/O y reporta `target_ctx_tokens=4096` manteniendo `rss_limit_bytes=0`, `kv_quality_checks=0` y `soak_seconds=0`. No mide throughput 4K, no aplica RSS, no valida calidad KV y no promueve default.
+
+La prioridad 13 empieza en Issue #37 como gate RSS opt-in para long-context: `--long-context-rss-limit-bytes N` permanece en `0` por default y sólo se acepta con `ctx4k-smoke`; el harness falla cerrado si su `peak_rss_bytes` muestreado supera `N`. No instala límites duros de OS, no cambia allocator, no ejecuta KV-quality sweep ni soak, y no promueve defaults.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

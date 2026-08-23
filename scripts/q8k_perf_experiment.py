@@ -450,7 +450,7 @@ def validate_native_payload(
             raise ValueError("long_context_profile.target_ctx_tokens must be 4096 for ctx4k-smoke policy")
         if long_context_profile.get("disabled_reason") is not None:
             raise ValueError("long_context_profile.disabled_reason must be null for ctx4k-smoke policy")
-        for field in ("rss_limit_bytes", "kv_quality_checks", "soak_seconds"):
+        for field in ("kv_quality_checks", "soak_seconds"):
             if _require_exact_int(long_context_profile.get(field), f"long_context_profile.{field}") != 0:
                 raise ValueError(f"long_context_profile.{field} must be 0 for ctx4k-smoke policy")
     else:
@@ -522,6 +522,7 @@ def build_inference_command(
     kv2_policy: str = "none",
     sampling_policy: str = "none",
     long_context_policy: str = "none",
+    long_context_rss_limit_bytes: int = 0,
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -541,6 +542,7 @@ def build_inference_command(
         "--kv2-policy", kv2_policy,
         "--sampling-policy", sampling_policy,
         "--long-context-policy", long_context_policy,
+        "--long-context-rss-limit-bytes", str(long_context_rss_limit_bytes),
         "--temperature", "0", "--seed", str(seed),
         "--full-moe", "--final-head", "--bench", "--dequant-profile",
     ]
@@ -594,12 +596,13 @@ def source_state() -> dict[str, Any]:
 def compact_run(
     raw: dict[str, Any], *, activation: str, io_backend: str, kv: str, layers: int,
     ctx: int, generation_steps: int, scratch_policy: str, kernel_policy: str,
-    thread_policy: str = "serial", threads: int = 1,
+    thread_policy: str = "serial", threads: int = 1, long_context_policy: str = "none",
 ) -> dict[str, Any]:
     payload = _require_object(raw.get("payload"), "runtime payload")
     signature = validate_native_payload(
         payload, activation=activation, io_backend=io_backend, scratch_policy=scratch_policy,
         kernel_policy=kernel_policy, thread_policy=thread_policy, threads=threads,
+        long_context_policy=long_context_policy,
         kv=kv, layers=layers, ctx=ctx, generation_steps=generation_steps,
     )
     bench = _require_object(payload["bench"], "bench")
@@ -618,6 +621,10 @@ def compact_run(
     peak_rss = _require_exact_int(raw.get("peak_rss_bytes"), "peak_rss_bytes")
     if peak_rss <= 0:
         raise ValueError("peak_rss_bytes must be positive")
+    long_context = _require_object(payload.get("long_context_profile"), "long_context_profile")
+    rss_limit = _require_exact_int(long_context.get("rss_limit_bytes"), "long_context_profile.rss_limit_bytes")
+    if rss_limit and peak_rss > rss_limit:
+        raise ValueError("peak_rss_bytes exceeds long_context_profile.rss_limit_bytes")
     return {
         "total_latency_seconds": _require_positive_number(raw.get("wall_elapsed_seconds"), "wall_elapsed_seconds"),
         "native_process_seconds": _require_positive_number(bench.get("elapsed_sec"), "bench.elapsed_sec"),
@@ -741,6 +748,8 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--repetitions", type=int, default=5)
+    parser.add_argument("--long-context-policy", choices=("none", "ctx4k-smoke"), default="none")
+    parser.add_argument("--long-context-rss-limit-bytes", type=int, default=0)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
@@ -757,6 +766,12 @@ def main() -> int:
         parser.error("this final-head baseline requires exactly 48 layers")
     if args.ctx < 2 or args.generate < 1 or args.seed < 0:
         parser.error("ctx must be >= 2, generate >= 1, and seed >= 0")
+    if args.long_context_rss_limit_bytes < 0:
+        parser.error("long-context RSS limit must be non-negative")
+    if args.long_context_policy == "ctx4k-smoke" and args.ctx < 4096:
+        parser.error("ctx4k-smoke long-context policy requires ctx >= 4096")
+    if args.long_context_policy == "none" and args.long_context_rss_limit_bytes != 0:
+        parser.error("long-context RSS limit requires ctx4k-smoke policy")
     if args.output.exists() and not args.overwrite:
         parser.error(f"output already exists (use --overwrite): {args.output}")
 
@@ -794,19 +809,23 @@ def main() -> int:
                     layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
                     seed=args.seed, io_backend=io_backend, scratch_policy=scratch_policy,
                     kernel_policy=kernel_policy, thread_policy="serial", threads=1,
+                    long_context_policy=args.long_context_policy,
+                    long_context_rss_limit_bytes=args.long_context_rss_limit_bytes,
                 )
                 warmups = [
                     compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
                                 layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
                                 scratch_policy=scratch_policy, kernel_policy=kernel_policy,
-                                thread_policy="serial", threads=1)
+                                thread_policy="serial", threads=1,
+                                long_context_policy=args.long_context_policy)
                     for _ in range(args.warmups)
                 ]
                 measured = [
                     compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
                                 layers=args.layers, ctx=args.ctx, generation_steps=args.generate,
                                 scratch_policy=scratch_policy, kernel_policy=kernel_policy,
-                                thread_policy="serial", threads=1)
+                                thread_policy="serial", threads=1,
+                                long_context_policy=args.long_context_policy)
                     for _ in range(args.repetitions)
                 ]
                 cell_key = f"{scratch_policy}:{io_backend}:{activation}"
@@ -877,6 +896,8 @@ def main() -> int:
                     "io_backends": ["buffered", "mmap"],
                     "kv": args.kv, "layers": args.layers, "ctx": args.ctx,
                     "generation_steps": args.generate, "seed": args.seed,
+                    "long_context_policy": args.long_context_policy,
+                    "long_context_rss_limit_bytes": args.long_context_rss_limit_bytes,
                     "temperature": 0, "warmups": args.warmups,
                     "repetitions": args.repetitions,
                 },

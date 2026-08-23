@@ -58,7 +58,7 @@ snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + rep
 baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
 QXF mmap read-only opt-in: GREEN local WSL2; gate 2x2 exacto por modalidad, buffered permanece default
 scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend, ephemeral permanece default
-policy provenance gates #27–#36: GREEN local/CI hasta #35; ctx4k admission #36 en verificación local
+policy provenance gates #27–#37: GREEN local/CI hasta #36; RSS limit #37 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -99,6 +99,8 @@ Issue #34 añade `--sampling-policy none` como contrato fail-closed de provenanc
 Issue #35 añade `--long-context-policy none` como contrato fail-closed para separar el baseline actual de futuros gates 4K/RSS/KV-quality/soak. `none` queda default, `long_context_profile` reporta contadores inactivos en cero; políticas no soportadas fallan antes de prompt/model/tokenizer I/O. No ejecuta benchmark 4K, no aplica límite RSS, no mide calidad KV/8h y no afirma speedup/calidad.
 
 Issue #36 añade `--long-context-policy ctx4k-smoke` como primer gate de admisión 4K: exige `--ctx >= 4096` antes de prompt/model/tokenizer I/O, reporta `target_ctx_tokens=4096` y conserva RSS/KV-quality/soak inactivos. `none` sigue default. No mide throughput 4K, no promueve default y no afirma speedup/calidad.
+
+Issue #37 añade `--long-context-rss-limit-bytes` como gate RSS opt-in para los experimentos `ctx4k-smoke`: default `0` queda deshabilitado, valores no cero sólo son válidos con `ctx4k-smoke`, y el harness falla cerrado si el `peak_rss_bytes` muestreado excede el límite. No instala límite duro de OS, no cambia allocator, no mide calidad KV/8h y no afirma speedup/calidad.
 
 ## Después
 

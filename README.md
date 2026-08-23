@@ -59,8 +59,10 @@ CUDA is planned but **not implemented**.
 Long-context experimentation is opt-in and gated. The default remains
 `--long-context-policy none`; `--long-context-policy ctx4k-smoke` is only an
 admission/provenance gate and requires `--ctx >= 4096`. It records
-`target_ctx_tokens=4096` but does not enforce RSS limits, run KV-quality checks,
-run soak tests, promote defaults or claim speed/quality.
+`target_ctx_tokens=4096`. `--long-context-rss-limit-bytes N` is also opt-in and
+defaults to `0` (disabled); the Python benchmark harness fails closed when its
+sampled `peak_rss_bytes` exceeds `N`. This is not an OS hard limit and does not
+run KV-quality checks, run soak tests, promote defaults or claim speed/quality.
 
 ## Repository map
 
