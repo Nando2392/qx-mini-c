@@ -62,4 +62,6 @@ La prioridad 13 empieza en Issue #37 como gate RSS opt-in para long-context: `--
 
 La prioridad 14 empieza en Issue #38 como contrato explícito de calidad KV: `--long-context-kv-quality-checks` queda default `0` y cualquier valor non-zero falla cerrado antes de prompt/model/tokenizer I/O hasta que exista un sweep real. No mide calidad KV, no corre soak, no promueve defaults y no autoriza claims de calidad.
 
+La prioridad 15 empieza en Issue #39 como contrato explícito de soak: `--long-context-soak-seconds` queda default `0` y cualquier valor non-zero falla cerrado antes de prompt/model/tokenizer I/O hasta que exista un runner de soak real. No corre soak 8h, no promueve defaults y no autoriza claims de estabilidad.
+
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

@@ -524,6 +524,7 @@ def build_inference_command(
     long_context_policy: str = "none",
     long_context_rss_limit_bytes: int = 0,
     long_context_kv_quality_checks: int = 0,
+    long_context_soak_seconds: int = 0,
 ) -> list[str]:
     """Build the fixed real-prompt inference command for one A/B cell."""
     return [
@@ -545,6 +546,7 @@ def build_inference_command(
         "--long-context-policy", long_context_policy,
         "--long-context-rss-limit-bytes", str(long_context_rss_limit_bytes),
         "--long-context-kv-quality-checks", str(long_context_kv_quality_checks),
+        "--long-context-soak-seconds", str(long_context_soak_seconds),
         "--temperature", "0", "--seed", str(seed),
         "--full-moe", "--final-head", "--bench", "--dequant-profile",
     ]
@@ -579,17 +581,22 @@ def build_artifact_provenance(
 def validate_long_context_cli_policy(
     parser: argparse.ArgumentParser, *, long_context_policy: str, ctx: int,
     long_context_rss_limit_bytes: int, long_context_kv_quality_checks: int,
+    long_context_soak_seconds: int,
 ) -> None:
     if long_context_rss_limit_bytes < 0:
         parser.error("long-context RSS limit must be non-negative")
     if long_context_kv_quality_checks < 0:
         parser.error("long-context KV quality checks must be non-negative")
+    if long_context_soak_seconds < 0:
+        parser.error("long-context soak seconds must be non-negative")
     if long_context_policy == "ctx4k-smoke" and ctx < 4096:
         parser.error("ctx4k-smoke long-context policy requires ctx >= 4096")
     if long_context_policy == "none" and long_context_rss_limit_bytes != 0:
         parser.error("long-context RSS limit requires ctx4k-smoke policy")
     if long_context_kv_quality_checks != 0:
         parser.error("long-context KV quality checks are not implemented")
+    if long_context_soak_seconds != 0:
+        parser.error("long-context soak seconds are not implemented")
 
 
 def source_state() -> dict[str, Any]:
@@ -769,6 +776,7 @@ def main() -> int:
     parser.add_argument("--long-context-policy", choices=("none", "ctx4k-smoke"), default="none")
     parser.add_argument("--long-context-rss-limit-bytes", type=int, default=0)
     parser.add_argument("--long-context-kv-quality-checks", type=int, default=0)
+    parser.add_argument("--long-context-soak-seconds", type=int, default=0)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
@@ -791,6 +799,7 @@ def main() -> int:
         ctx=args.ctx,
         long_context_rss_limit_bytes=args.long_context_rss_limit_bytes,
         long_context_kv_quality_checks=args.long_context_kv_quality_checks,
+        long_context_soak_seconds=args.long_context_soak_seconds,
     )
     if args.output.exists() and not args.overwrite:
         parser.error(f"output already exists (use --overwrite): {args.output}")
@@ -831,6 +840,8 @@ def main() -> int:
                     kernel_policy=kernel_policy, thread_policy="serial", threads=1,
                     long_context_policy=args.long_context_policy,
                     long_context_rss_limit_bytes=args.long_context_rss_limit_bytes,
+                    long_context_kv_quality_checks=args.long_context_kv_quality_checks,
+                    long_context_soak_seconds=args.long_context_soak_seconds,
                 )
                 warmups = [
                     compact_run(one_run(command), activation=activation, io_backend=io_backend, kv=args.kv,
@@ -918,6 +929,8 @@ def main() -> int:
                     "generation_steps": args.generate, "seed": args.seed,
                     "long_context_policy": args.long_context_policy,
                     "long_context_rss_limit_bytes": args.long_context_rss_limit_bytes,
+                    "long_context_kv_quality_checks": args.long_context_kv_quality_checks,
+                    "long_context_soak_seconds": args.long_context_soak_seconds,
                     "temperature": 0, "warmups": args.warmups,
                     "repetitions": args.repetitions,
                 },

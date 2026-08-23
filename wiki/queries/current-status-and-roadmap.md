@@ -58,7 +58,7 @@ snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + rep
 baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
 QXF mmap read-only opt-in: GREEN local WSL2; gate 2x2 exacto por modalidad, buffered permanece default
 scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend, ephemeral permanece default
-policy provenance gates #27–#37: GREEN local/CI; KV quality contract #38 en verificación local
+policy provenance gates #27–#38: GREEN local/CI; soak contract #39 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -104,11 +104,13 @@ Issue #37 añade `--long-context-rss-limit-bytes` como gate RSS opt-in para los 
 
 Issue #38 añade `--long-context-kv-quality-checks` como contrato fail-closed para futuros sweeps de calidad KV: default `0` queda deshabilitado y valores non-zero fallan antes de prompt/model/tokenizer I/O. No ejecuta sweep KV, no corre soak, no promueve defaults y no afirma calidad.
 
+Issue #39 añade `--long-context-soak-seconds` como contrato fail-closed para futuros runners de soak long-context: default `0` queda deshabilitado y valores non-zero fallan antes de prompt/model/tokenizer I/O. No ejecuta soak, no promueve defaults y no afirma estabilidad.
+
 ## Después
 
 1. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
 2. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
-3. Gates 4K, RSS, calidad KV y 8 h.
+3. Convertir contratos 4K/RSS/calidad KV/soak en mediciones reales sólo con gates reproducibles.
 
 ## Riesgos
 

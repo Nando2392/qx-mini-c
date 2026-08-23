@@ -1,0 +1,40 @@
+{
+  "contract": {
+    "default": 0,
+    "flag": "--long-context-soak-seconds",
+    "nonzero_behavior": "fail-closed before prompt/model/tokenizer I/O until a real soak runner exists",
+    "profile_field": "long_context_profile.soak_seconds",
+    "scope_exclusions": [
+      "does not run soak",
+      "does not run 8h stability test",
+      "does not promote defaults",
+      "does not claim stability, quality, or speedup"
+    ]
+  },
+  "created_utc": "2026-08-23T10:46:17+00:00",
+  "files": {
+    "README.md": "4e3ff490792ceea894c69c6ce46c0c30e3efe62d0f5f78ba9792d9e770f594a0",
+    "include/qx_format.h": "bec4b1c74c88a1d365a9985f1120d293a1c4e6f183b2492a63f3d94c488a1259",
+    "scripts/q8k_perf_experiment.py": "73679e0d24bd6b1e463fe70d0b3c7b30aad4c0cfeef3e39798ce8f54075882c6",
+    "src/qx_format.c": "a50483b1187b851916777cee36abc25aeb4753276a85c9c5b1b84f7ed8978f66",
+    "src/qx_qxf_main.c": "935f0349d736bb0f2e1c8aa94d65ecc45fef346c4dba133f11d829d7e2bb08ab",
+    "tests/test_prompt_state_thread_cli.py": "fa6d7b1be44cd00d163d0477379d93b0b378907520e15e3f9eef882df4692cc3",
+    "tests/test_q8k_perf_experiment.py": "ef57c1885913e988ebe340774520e51f9b70ce02a13a4ca43c2ba1a49d34f453",
+    "wiki/comparisons/optimization-priorities.md": "e94fc37d585bd8ac3289a7b4f9072e0d8c1ee0fef4cce8c95bef824f510daa66",
+    "wiki/queries/current-status-and-roadmap.md": "4c8cf05580faf943b9ebc8740fe04d823fd2af1f30042241918d6fc0af8ac761"
+  },
+  "issue": 39,
+  "source_revision": "e9c49564d3bbd6e43974727b7dc24d326ec7de37",
+  "title": "Add long-context soak seconds contract",
+  "working_tree_status": [
+    "M README.md",
+    " M include/qx_format.h",
+    " M scripts/q8k_perf_experiment.py",
+    " M src/qx_format.c",
+    " M src/qx_qxf_main.c",
+    " M tests/test_prompt_state_thread_cli.py",
+    " M tests/test_q8k_perf_experiment.py",
+    " M wiki/comparisons/optimization-priorities.md",
+    " M wiki/queries/current-status-and-roadmap.md"
+  ]
+}

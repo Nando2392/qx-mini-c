@@ -63,8 +63,10 @@ admission/provenance gate and requires `--ctx >= 4096`. It records
 defaults to `0` (disabled); the Python benchmark harness fails closed when its
 sampled `peak_rss_bytes` exceeds `N`. `--long-context-kv-quality-checks` remains
 `0` only and non-zero values fail closed until a real KV-quality sweep exists.
-This is not an OS hard limit and does not run KV-quality checks, run soak tests,
-promote defaults or claim speed/quality.
+`--long-context-soak-seconds` also remains `0` only and non-zero values fail
+closed until a real soak runner exists. This is not an OS hard limit and does
+not run KV-quality checks, run soak tests, promote defaults or claim
+speed/quality.
 
 ## Repository map
 

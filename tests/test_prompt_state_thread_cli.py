@@ -21,6 +21,7 @@ def prompt_state_command(
     long_context_policy: str = "none",
     long_context_rss_limit_bytes: str = "0",
     long_context_kv_quality_checks: str = "0",
+    long_context_soak_seconds: str = "0",
     ctx: str = "16",
 ) -> list[str]:
     return [
@@ -68,6 +69,8 @@ def prompt_state_command(
         long_context_rss_limit_bytes,
         "--long-context-kv-quality-checks",
         long_context_kv_quality_checks,
+        "--long-context-soak-seconds",
+        long_context_soak_seconds,
         "--temperature",
         "0",
         "--seed",
@@ -327,5 +330,45 @@ def test_prompt_state_loop_probe_rejects_nonzero_long_context_kv_quality_checks_
 
     assert result.returncode == 2
     assert "long-context KV quality checks are not implemented" in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+def test_prompt_state_loop_probe_rejects_malformed_long_context_soak_seconds_before_file_io():
+    result = subprocess.run(
+        prompt_state_command(
+            "1",
+            long_context_policy="ctx4k-smoke",
+            long_context_soak_seconds="not-seconds",
+            ctx="4096",
+        ),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "invalid --long-context-soak-seconds" in result.stderr
+    assert "text file read failed" not in result.stderr
+    assert "failed to open" not in result.stderr
+
+
+@pytest.mark.skipif(not QXQXF.exists(), reason="qxqxf.exe must be built before CLI tests")
+def test_prompt_state_loop_probe_rejects_nonzero_long_context_soak_seconds_before_file_io():
+    result = subprocess.run(
+        prompt_state_command(
+            "1",
+            long_context_policy="ctx4k-smoke",
+            long_context_soak_seconds="1",
+            ctx="4096",
+        ),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "long-context soak seconds are not implemented" in result.stderr
     assert "text file read failed" not in result.stderr
     assert "failed to open" not in result.stderr

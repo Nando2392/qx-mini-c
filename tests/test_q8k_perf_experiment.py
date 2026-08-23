@@ -387,6 +387,7 @@ def test_build_inference_command_fixes_real_prompt_and_modal_arguments(tmp_path)
     assert command[command.index("--thread-policy") + 1] == "serial"
     assert command[command.index("--threads") + 1] == "1"
     assert command[command.index("--long-context-kv-quality-checks") + 1] == "0"
+    assert command[command.index("--long-context-soak-seconds") + 1] == "0"
     assert "--dequant-profile" in command
 
 
@@ -938,6 +939,41 @@ def test_q8k_perf_experiment_rejects_nonzero_long_context_kv_quality_checks():
             ctx=4096,
             long_context_rss_limit_bytes=0,
             long_context_kv_quality_checks=1,
+            long_context_soak_seconds=0,
+        )
+
+
+def test_validate_native_payload_rejects_ctx4k_smoke_soak_seconds_until_implemented():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    payload["long_context_profile"]["soak_seconds"] = 1
+
+    with pytest.raises(ValueError, match="long_context_profile.soak_seconds"):
+        PERF.validate_native_payload(
+            payload,
+            activation="f32",
+            io_backend="buffered",
+            scratch_policy="ephemeral",
+            kernel_policy="baseline",
+            long_context_policy="ctx4k-smoke",
+            kv="int8",
+            layers=48,
+            ctx=4096,
+            generation_steps=2,
+        )
+
+
+def test_q8k_perf_experiment_rejects_nonzero_long_context_soak_seconds():
+    parser_error = SimpleNamespace(error=lambda message: (_ for _ in ()).throw(ValueError(message)))
+
+    with pytest.raises(ValueError, match="long-context soak seconds are not implemented"):
+        PERF.validate_long_context_cli_policy(
+            parser_error,
+            long_context_policy="ctx4k-smoke",
+            ctx=4096,
+            long_context_rss_limit_bytes=0,
+            long_context_kv_quality_checks=0,
+            long_context_soak_seconds=1,
         )
 
 
