@@ -28,6 +28,7 @@ confidence: medium
 | 14 | long-context KV quality contract | Issue #38 añade `--long-context-kv-quality-checks` como contrato explícito fail-closed | default 0; non-zero rechazado antes de I/O; sin sweep KV, soak ni claim de calidad |
 | 15 | long-context soak contract | Issue #39 añade `--long-context-soak-seconds` como contrato explícito fail-closed | default 0; non-zero rechazado antes de I/O; sin runner soak ni claim de estabilidad |
 | 16 | long-context profile in benchmark runs | Issue #40 conserva el `long_context_profile` validado dentro de cada compact-run del harness | provenance por medición; sin benchmark 4K nuevo ni claims |
+| 17 | long-context profile in benchmark summaries | Issue #41 conserva `long_context_profile` en summaries sólo si todas las mediciones acuerdan | fail-closed ante perfiles mixtos; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -67,5 +68,7 @@ La prioridad 14 empieza en Issue #38 como contrato explícito de calidad KV: `--
 La prioridad 15 empieza en Issue #39 como contrato explícito de soak: `--long-context-soak-seconds` queda default `0` y cualquier valor non-zero falla cerrado antes de prompt/model/tokenizer I/O hasta que exista un runner de soak real. No corre soak 8h, no promueve defaults y no autoriza claims de estabilidad.
 
 La prioridad 16 empieza en Issue #40 como persistencia de provenance long-context en el harness: cada compact-run preserva el `long_context_profile` validado junto a la medición. No ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
+
+La prioridad 17 empieza en Issue #41 como consistencia de summaries long-context: `summarize_runs` preserva el `long_context_profile` común y falla cerrado si las mediciones mezclan perfiles. No ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

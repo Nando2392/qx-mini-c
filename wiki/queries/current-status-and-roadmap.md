@@ -58,7 +58,7 @@ snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + rep
 baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
 QXF mmap read-only opt-in: GREEN local WSL2; gate 2x2 exacto por modalidad, buffered permanece default
 scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend, ephemeral permanece default
-policy provenance gates #27–#39: GREEN local/CI; Issue #40 long-context profile persistence en verificación local
+policy provenance gates #27–#40: GREEN local/CI; Issue #41 long-context summary consistency en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -107,6 +107,8 @@ Issue #38 añade `--long-context-kv-quality-checks` como contrato fail-closed pa
 Issue #39 añade `--long-context-soak-seconds` como contrato fail-closed para futuros runners de soak long-context: default `0` queda deshabilitado y valores non-zero fallan antes de prompt/model/tokenizer I/O. No ejecuta soak, no promueve defaults y no afirma estabilidad.
 
 Issue #40 conserva el `long_context_profile` validado dentro de cada compact-run del harness de benchmark. Es sólo provenance por medición: no ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no afirma rendimiento, calidad o estabilidad.
+
+Issue #41 conserva el `long_context_profile` común dentro de cada summary del harness y falla cerrado si las mediciones de una celda mezclan perfiles. Es sólo consistencia de provenance: no ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no afirma rendimiento, calidad o estabilidad.
 
 ## Después
 

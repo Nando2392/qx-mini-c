@@ -967,6 +967,73 @@ def test_compact_run_preserves_default_long_context_profile():
     }
 
 
+def test_summarize_runs_preserves_common_long_context_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    payload["long_context_profile"]["rss_limit_bytes"] = 4096
+    raw = {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 1024, "payload": payload}
+    run = PERF.compact_run(
+        raw,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="ctx4k-smoke",
+        kv="int8",
+        layers=48,
+        ctx=4096,
+        generation_steps=2,
+    )
+
+    summary = PERF.summarize_runs([run, dict(run)])
+
+    assert summary["long_context_profile"] == run["long_context_profile"]
+
+
+def test_summarize_runs_preserves_common_long_context_profile_across_many_runs():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    raw = {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 1024, "payload": payload}
+    run = PERF.compact_run(
+        raw,
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="ctx4k-smoke",
+        kv="int8",
+        layers=48,
+        ctx=4096,
+        generation_steps=2,
+    )
+
+    summary = PERF.summarize_runs([dict(run) for _ in range(8)])
+
+    assert summary["long_context_profile"] == run["long_context_profile"]
+    assert summary["total_latency_seconds"]["count"] == 8
+
+
+def test_summarize_runs_rejects_mixed_long_context_profiles():
+    base_payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="none")
+    base_run = PERF.compact_run(
+        {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 1024, "payload": base_payload},
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="none",
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+    )
+    mixed_run = dict(base_run)
+    mixed_run["long_context_profile"] = dict(base_run["long_context_profile"], rss_limit_bytes=1)
+
+    with pytest.raises(ValueError, match="long_context_profile differs across measured runs"):
+        PERF.summarize_runs([base_run, mixed_run])
+
+
 def test_validate_native_payload_rejects_ctx4k_smoke_kv_quality_checks_until_implemented():
     payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
     payload["ctx_tokens"] = 4096

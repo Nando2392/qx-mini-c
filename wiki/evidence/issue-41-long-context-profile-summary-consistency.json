@@ -1,0 +1,38 @@
+{
+  "issue": 41,
+  "title": "Add long-context profile summary consistency gate",
+  "created_utc": "2026-08-23T12:15:28+00:00",
+  "contract": {
+    "change": "summarize_runs preserves the common long_context_profile and rejects mixed profiles across measured runs",
+    "scope": "provenance consistency only",
+    "out_of_scope": [
+      "no new 4K throughput benchmark",
+      "no real KV-quality sweep",
+      "no soak runner",
+      "no default promotion",
+      "no speed/stability/quality claim"
+    ]
+  },
+  "behavioral_tests": [
+    "tests/test_q8k_perf_experiment.py::test_summarize_runs_preserves_common_long_context_profile",
+    "tests/test_q8k_perf_experiment.py::test_summarize_runs_preserves_common_long_context_profile_across_many_runs",
+    "tests/test_q8k_perf_experiment.py::test_summarize_runs_rejects_mixed_long_context_profiles"
+  ],
+  "files": {
+    "scripts/q8k_perf_experiment.py": {
+      "sha256": "072d6ef5765fe898362665bfc4a23d57b1cac67ff828390f92bf4624619e5f8a"
+    },
+    "tests/test_q8k_perf_experiment.py": {
+      "sha256": "4737dfd4efdc22325da7a4e4842f63ee90a66d8eaa2c36a120f3df8b4aa23fdf"
+    },
+    "README.md": {
+      "sha256": "b5adaac0357dfdbc543128d35517eb00ad1de0efadf42fbf3598f6f38ddfa0fd"
+    },
+    "wiki/comparisons/optimization-priorities.md": {
+      "sha256": "544c8c588a8c3c8f1231dc85ce9a48c68e0241410122512f6bed42a0de79cb05"
+    },
+    "wiki/queries/current-status-and-roadmap.md": {
+      "sha256": "395bc2b80c3a8e5d2e1a09d1f67b14677d67e8afc4f49cb6663f94a447aff665"
+    }
+  }
+}
