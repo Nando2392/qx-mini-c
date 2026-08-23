@@ -69,7 +69,8 @@ not run KV-quality checks, run soak tests, promote defaults or claim
 speed/quality. Benchmark compact-run records preserve the validated
 `long_context_profile` for each measured run so evidence keeps the active
 contract attached to the timings; per-cell summaries preserve it only when all
-measured runs agree.
+measured runs agree, and the top-level report preserves it only when all cells
+agree.
 
 ## Repository map
 

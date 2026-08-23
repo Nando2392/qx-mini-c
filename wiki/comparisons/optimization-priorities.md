@@ -29,6 +29,7 @@ confidence: medium
 | 15 | long-context soak contract | Issue #39 añade `--long-context-soak-seconds` como contrato explícito fail-closed | default 0; non-zero rechazado antes de I/O; sin runner soak ni claim de estabilidad |
 | 16 | long-context profile in benchmark runs | Issue #40 conserva el `long_context_profile` validado dentro de cada compact-run del harness | provenance por medición; sin benchmark 4K nuevo ni claims |
 | 17 | long-context profile in benchmark summaries | Issue #41 conserva `long_context_profile` en summaries sólo si todas las mediciones acuerdan | fail-closed ante perfiles mixtos; sin benchmark nuevo ni claims |
+| 18 | long-context profile in benchmark reports | Issue #42 conserva `long_context_profile` a nivel report sólo si todas las celdas acuerdan | fail-closed ante celdas mixtas; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -70,5 +71,7 @@ La prioridad 15 empieza en Issue #39 como contrato explícito de soak: `--long-c
 La prioridad 16 empieza en Issue #40 como persistencia de provenance long-context en el harness: cada compact-run preserva el `long_context_profile` validado junto a la medición. No ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
 
 La prioridad 17 empieza en Issue #41 como consistencia de summaries long-context: `summarize_runs` preserva el `long_context_profile` común y falla cerrado si las mediciones mezclan perfiles. No ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
+
+La prioridad 18 empieza en Issue #42 como consistencia report-level long-context: el reporte conserva el `long_context_profile` común sólo si todas las celdas del benchmark acuerdan y falla cerrado si una matriz mezcla perfiles. No ejecuta benchmark 4K nuevo, no cambia defaults, no implementa quality sweep/soak y no autoriza claims de rendimiento, calidad o estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

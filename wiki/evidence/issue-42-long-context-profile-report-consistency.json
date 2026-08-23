@@ -1,0 +1,52 @@
+{
+  "issue": 42,
+  "title": "Add long-context profile matrix consistency gate",
+  "updated_utc": "2026-08-23T13:43:03+00:00",
+  "contract": {
+    "change": "top-level q8k benchmark reports preserve the common long_context_profile only when all cell summaries agree",
+    "scope": "report-level provenance consistency only",
+    "out_of_scope": [
+      "no new 4K throughput benchmark",
+      "no real KV-quality sweep",
+      "no soak runner",
+      "no OS RSS hard limit",
+      "no default promotion",
+      "no speed/stability/quality claim"
+    ]
+  },
+  "behavioral_tests": [
+    "tests/test_q8k_perf_experiment.py::test_summarize_cells_preserves_common_long_context_profile",
+    "tests/test_q8k_perf_experiment.py::test_summarize_cells_rejects_mixed_long_context_profiles",
+    "tests/test_q8k_perf_experiment.py::test_summarize_cells_rejects_empty_benchmark_cells"
+  ],
+  "gates": {
+    "focused_tests": "3 passed",
+    "q8k_perf_experiment_tests": "43 passed",
+    "msvc_build": "PASS",
+    "smoke_check": "PASS",
+    "wiki_lint": "PASS",
+    "diff_check": "PASS"
+  },
+  "auto_research": {
+    "run": "20260823T133627Z",
+    "status": "ready_for_review",
+    "canUseForProductChange": true
+  },
+  "files": {
+    "scripts/q8k_perf_experiment.py": {
+      "sha256_staged_blob": "22efe75bc7750947305a04fb454c868b3480d10943edd66a093c0dfd04ee6f0b"
+    },
+    "tests/test_q8k_perf_experiment.py": {
+      "sha256_staged_blob": "4d3170dafd471a79f4177fe36b9e2f1d2bb4cd0187866944e7280f67a2e2d993"
+    },
+    "README.md": {
+      "sha256_staged_blob": "67f26fe330e7c9c1eb5e619572b5da135bc47511bd884951a6bfc0ee182db1a9"
+    },
+    "wiki/comparisons/optimization-priorities.md": {
+      "sha256_staged_blob": "c6ab85080487661bc4c2a114e7cffd806ebb0e87f2a81b98c65308c2765df04e"
+    },
+    "wiki/queries/current-status-and-roadmap.md": {
+      "sha256_staged_blob": "ad676df7aaeef0edcd1e0fccb0eb4720b9ffd16012303e84095016763c299fba"
+    }
+  }
+}

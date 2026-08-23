@@ -1034,6 +1034,49 @@ def test_summarize_runs_rejects_mixed_long_context_profiles():
         PERF.summarize_runs([base_run, mixed_run])
 
 
+def test_summarize_cells_preserves_common_long_context_profile():
+    payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
+    payload["ctx_tokens"] = 4096
+    run = PERF.compact_run(
+        {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 1024, "payload": payload},
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="ctx4k-smoke",
+        kv="int8",
+        layers=48,
+        ctx=4096,
+        generation_steps=2,
+    )
+    summary = PERF.summarize_runs([run, dict(run)])
+    cells = [
+        {"scratch_policy": "ephemeral", "io_backend": "buffered", "activation_format": "f32", "summary": summary},
+        {"scratch_policy": "persistent", "io_backend": "mmap", "activation_format": "q8_k_compat", "summary": dict(summary)},
+    ]
+
+    matrix = PERF.summarize_cells_long_context_profile(cells)
+
+    assert matrix == summary["long_context_profile"]
+
+
+def test_summarize_cells_rejects_mixed_long_context_profiles():
+    base_profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    mixed_profile = dict(base_profile, rss_limit_bytes=1)
+    cells = [
+        {"summary": {"long_context_profile": base_profile}},
+        {"summary": {"long_context_profile": mixed_profile}},
+    ]
+
+    with pytest.raises(ValueError, match="long_context_profile differs across benchmark cells"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
+def test_summarize_cells_rejects_empty_benchmark_cells():
+    with pytest.raises(ValueError, match="benchmark cells must be non-empty"):
+        PERF.summarize_cells_long_context_profile([])
+
+
 def test_validate_native_payload_rejects_ctx4k_smoke_kv_quality_checks_until_implemented():
     payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
     payload["ctx_tokens"] = 4096

@@ -740,6 +740,20 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
+def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return the common long-context profile across benchmark cells, fail-closed on drift."""
+    if not cells:
+        raise ValueError("benchmark cells must be non-empty")
+    first_summary = _require_object(cells[0].get("summary"), "cell.summary")
+    first_profile = _require_object(first_summary.get("long_context_profile"), "cell.summary.long_context_profile")
+    for cell in cells[1:]:
+        summary = _require_object(cell.get("summary"), "cell.summary")
+        profile = _require_object(summary.get("long_context_profile"), "cell.summary.long_context_profile")
+        if profile != first_profile:
+            raise ValueError("long_context_profile differs across benchmark cells")
+    return json.loads(json.dumps(first_profile))
+
+
 def compare_kernel_policy_effects(runs_by_policy: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     expected = {"baseline", "fused"}
     if set(runs_by_policy) != expected or any(not runs_by_policy[policy] for policy in expected):
@@ -951,6 +965,7 @@ def main() -> int:
             },
             "startup_model_load": startup_cells,
             "cells": cells,
+            "long_context_profile": summarize_cells_long_context_profile(cells),
             "output_contract": output_gate,
             "kernel_policy_effects": kernel_policy_effects,
             "comparisons": comparisons,
