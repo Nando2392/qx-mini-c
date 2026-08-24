@@ -84,6 +84,8 @@ RSS summaries must also be objects before count validation runs.
 Empty benchmark reports fail closed before `long_context_measurement` derives
 cell or run counts.
 Benchmark cells must be objects before profile or measurement metadata is read.
+Benchmark cells must also include `summary.long_context_profile` explicitly
+before profile or measurement metadata is derived.
 Inactive future counters remain fail-closed at report level too: non-zero
 KV-quality checks or soak seconds are rejected until real sweeps/runners exist.
 

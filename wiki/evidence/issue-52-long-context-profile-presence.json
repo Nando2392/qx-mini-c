@@ -1,0 +1,32 @@
+{
+  "behavior": "benchmark cells missing summary.long_context_profile fail closed before profile/measurement derivation",
+  "created_utc": "2026-08-24T00:13:36Z",
+  "green": "focused pytest passed after explicit missing-profile validation",
+  "issue": 52,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 58 passed in 0.15s",
+    "python smoke_check.py: PASS",
+    "python scripts/lint_wiki.py: PASS",
+    "git diff --check: PASS"
+  ],
+  "out_of_scope": [
+    "OS RSS hard limit",
+    "allocator change",
+    "heavy 4K CI benchmark",
+    "KV-quality sweep",
+    "soak runner",
+    "default promotion",
+    "speed/quality/stability claims"
+  ],
+  "red": "focused pytest failed because missing profile produced generic object-shape validation instead of explicit required-profile error",
+  "scope": "report-level fail-closed metadata hardening only",
+  "staged_blob_sha256": {
+    "README.md": "a6397296e2fe125f8912528af13d8a127db976fe7dc0c02096ef5a008fe1e2ae",
+    "scripts/q8k_perf_experiment.py": "d362b35a502d4600c454f255dd491c4526abb31805314bd39b68999710407393",
+    "tests/test_q8k_perf_experiment.py": "f563834660952fe56a4006e50af2b732b01cb6656d94648c76dc1cc0ad8ced5a",
+    "wiki/comparisons/optimization-priorities.md": "2a05f723e84d06188493954adf98f8e3fb1483cad32619990b405953fcb03c93",
+    "wiki/queries/current-status-and-roadmap.md": "7ce23af73adf2b06b762e4b055d41464d6f51c3c55faafdcf46b0f974763b2d9"
+  },
+  "title": "Reject missing long-context profile in benchmark cells"
+}

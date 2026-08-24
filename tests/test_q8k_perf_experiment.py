@@ -1148,6 +1148,13 @@ def test_build_long_context_measurement_gate_rejects_non_object_cell():
         PERF.build_long_context_measurement_gate(["not-a-cell"], ctx=4096)
 
 
+def test_build_long_context_measurement_gate_rejects_missing_long_context_profile():
+    cells = [{"summary": {"peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="long_context_profile is required"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,
