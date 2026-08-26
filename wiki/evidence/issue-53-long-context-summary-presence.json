@@ -1,0 +1,32 @@
+{
+  "behavior": "benchmark cells missing summary fail closed before profile/measurement derivation",
+  "created_utc": "2026-08-26T13:39:14Z",
+  "green": "two focused pytest cases passed after explicit missing-summary validation for first and later cells",
+  "issue": 53,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 60 passed in 0.21s",
+    "python smoke_check.py: PASS",
+    "python scripts/lint_wiki.py: PASS (30 knowledge pages, 34 total notes)",
+    "git diff --check: PASS"
+  ],
+  "out_of_scope": [
+    "OS RSS hard limit",
+    "allocator change",
+    "heavy 4K CI benchmark",
+    "KV-quality sweep",
+    "soak runner",
+    "default promotion",
+    "speed/quality/stability claims"
+  ],
+  "red": "focused pytest cases failed because a missing summary produced generic object-shape validation instead of the explicit required-summary error",
+  "scope": "report-level fail-closed metadata hardening only",
+  "staged_blob_sha256": {
+    "README.md": "40a675f10c21dffc630da8268a76f23e7cddb1e0ad8fc98024a131fb99fcb9bd",
+    "scripts/q8k_perf_experiment.py": "b9bf2f41b44dd3fd13d9bce388d7456dfe757ff627f0dbed25bfb722c187686f",
+    "tests/test_q8k_perf_experiment.py": "c9cdb5493d2aeaeb8b3e36c5db220de505cc948fedb3806b85fa02b879957ded",
+    "wiki/comparisons/optimization-priorities.md": "36f76c9f98bcac9aaa8b66ea3ab1b760fc15a4ad1bb6f2d82dbd64a8ba2b5040",
+    "wiki/queries/current-status-and-roadmap.md": "0c86f164495039097a35796ae399850c4ada185a1dcd4781d3eeed3abb46a200"
+  },
+  "title": "Reject missing benchmark summaries in long-context reports"
+}

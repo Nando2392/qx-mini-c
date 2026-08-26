@@ -68,6 +68,7 @@ long-context measurement RSS summary shape hardening: Issue #49 en verificación
 long-context measurement empty-report hardening: Issue #50 en verificación local
 long-context benchmark cell shape hardening: Issue #51 en verificación local
 long-context benchmark profile presence hardening: Issue #52 en verificación local
+long-context benchmark summary presence hardening: Issue #53 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -140,6 +141,8 @@ Issue #50 endurece `long_context_measurement` para rechazar reportes sin celdas 
 Issue #51 endurece la ruta de perfil/medición long-context para rechazar celdas benchmark no-objeto antes de leer `summary`. Es sólo hardening report-level: no ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
 
 Issue #52 endurece la ruta de perfil/medición long-context para rechazar celdas benchmark que omiten `summary.long_context_profile` antes de derivar perfiles o metadata de medición. Es sólo hardening report-level: no ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
+
+Issue #53 endurece la ruta de perfil/medición long-context para rechazar celdas benchmark que omiten `summary` antes de derivar perfiles o metadata de medición. Es sólo hardening report-level: no ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
 
 ## Después
 

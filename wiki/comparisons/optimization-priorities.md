@@ -40,6 +40,7 @@ confidence: medium
 | 26 | long-context measurement empty-report hardening | Issue #50 rechaza reportes sin celdas dentro de `long_context_measurement` | fail-closed report-level; sin benchmark nuevo ni claims |
 | 27 | long-context benchmark cell shape hardening | Issue #51 rechaza celdas benchmark no-objeto antes de leer profiles/measurement | fail-closed report-level; sin benchmark nuevo ni claims |
 | 28 | long-context benchmark profile presence hardening | Issue #52 rechaza celdas benchmark sin `summary.long_context_profile` antes de derivar profiles/measurement | fail-closed report-level; sin benchmark nuevo ni claims |
+| 29 | long-context benchmark summary presence hardening | Issue #53 rechaza celdas benchmark sin `summary` antes de derivar profiles/measurement | fail-closed report-level; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -103,5 +104,7 @@ La prioridad 26 empieza en Issue #50 como hardening de reportes vacíos: `long_c
 La prioridad 27 empieza en Issue #51 como hardening de forma de celda benchmark: la ruta de perfil/medición long-context rechaza entradas de celda no-objeto antes de leer `summary`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
 
 La prioridad 28 empieza en Issue #52 como hardening de presencia del perfil por celda: la ruta de perfil/medición long-context rechaza celdas benchmark que omiten `summary.long_context_profile` antes de derivar perfiles o metadata de medición. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
+
+La prioridad 29 empieza en Issue #53 como hardening de presencia del summary por celda: la ruta de perfil/medición long-context rechaza celdas benchmark que omiten `summary` antes de derivar perfiles o metadata de medición. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

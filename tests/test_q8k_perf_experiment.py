@@ -1148,6 +1148,22 @@ def test_build_long_context_measurement_gate_rejects_non_object_cell():
         PERF.build_long_context_measurement_gate(["not-a-cell"], ctx=4096)
 
 
+def test_build_long_context_measurement_gate_rejects_missing_summary():
+    with pytest.raises(ValueError, match="cell.summary is required"):
+        PERF.build_long_context_measurement_gate([{}], ctx=4096)
+
+
+def test_build_long_context_measurement_gate_rejects_later_missing_summary():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    cells = [
+        {"summary": {"long_context_profile": profile}},
+        {},
+    ]
+
+    with pytest.raises(ValueError, match="cell.summary is required"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
 def test_build_long_context_measurement_gate_rejects_missing_long_context_profile():
     cells = [{"summary": {"peak_rss_bytes": {"count": 3}}}]
 
