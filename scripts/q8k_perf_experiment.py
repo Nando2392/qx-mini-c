@@ -751,6 +751,8 @@ def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[st
     if "long_context_profile" not in first_summary:
         raise ValueError("long_context_profile is required")
     first_profile = _require_object(first_summary.get("long_context_profile"), "cell.summary.long_context_profile")
+    if first_profile.get("enabled") is not True:
+        raise ValueError("long_context_profile.enabled must be true")
     for cell in cells[1:]:
         cell_obj = _require_object(cell, "benchmark cell")
         if "summary" not in cell_obj:
@@ -759,6 +761,8 @@ def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[st
         if "long_context_profile" not in summary:
             raise ValueError("long_context_profile is required")
         profile = _require_object(summary.get("long_context_profile"), "cell.summary.long_context_profile")
+        if profile.get("enabled") is not True:
+            raise ValueError("long_context_profile.enabled must be true")
         if profile != first_profile:
             raise ValueError("long_context_profile differs across benchmark cells")
     return json.loads(json.dumps(first_profile))

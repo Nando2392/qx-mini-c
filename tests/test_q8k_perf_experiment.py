@@ -1182,6 +1182,27 @@ def test_build_long_context_measurement_gate_rejects_missing_long_context_profil
         PERF.build_long_context_measurement_gate(cells, ctx=4096)
 
 
+def test_build_long_context_measurement_gate_rejects_disabled_long_context_profile():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile["enabled"] = False
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="long_context_profile.enabled must be true"):
+        PERF.build_long_context_measurement_gate(cells, ctx=16)
+
+
+def test_build_long_context_measurement_gate_rejects_later_non_boolean_enabled_state():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    later_profile = dict(profile, enabled=1)
+    cells = [
+        {"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}},
+        {"summary": {"long_context_profile": later_profile, "peak_rss_bytes": {"count": 3}}},
+    ]
+
+    with pytest.raises(ValueError, match="long_context_profile.enabled must be true"):
+        PERF.build_long_context_measurement_gate(cells, ctx=16)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,

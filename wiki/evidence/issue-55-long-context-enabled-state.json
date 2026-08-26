@@ -1,0 +1,32 @@
+{
+  "behavior": "report-level aggregation rejects benchmark long-context profiles whose enabled flag is not exactly true",
+  "created_utc": "2026-08-26T15:03:07Z",
+  "green": "focused first/later-cell reject cases and enabled=true control passed after identity validation was applied to every profile",
+  "issue": 55,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 64 passed in 0.19s",
+    "python smoke_check.py: PASS (optional real-model probes unavailable in isolated worktree)",
+    "python scripts/lint_wiki.py: PASS (30 knowledge pages, 34 total notes)",
+    "git diff --check: PASS"
+  ],
+  "out_of_scope": [
+    "OS RSS hard limit",
+    "allocator change",
+    "heavy 4K CI benchmark",
+    "KV-quality sweep",
+    "soak runner",
+    "default promotion",
+    "speed/quality/stability claims"
+  ],
+  "red": "focused pytest first failed because enabled=false was accepted; review-driven RED then proved a later enabled=1 bypass through Python equality",
+  "scope": "report-level fail-closed profile hardening only",
+  "staged_blob_sha256": {
+    "README.md": "88277dfec324e599b18cd4fda669a8e8a71bc8ca63497575b2d8f336ca1f5a68",
+    "scripts/q8k_perf_experiment.py": "2f027e3bd72e7c7d10c556f79ec6edcde9033f2cd0026fbf2d6b0f93d95f9551",
+    "tests/test_q8k_perf_experiment.py": "e44e9e73fac09dd9d859645a84a89f83c06bc4db2534c075e81a9499bfd0b050",
+    "wiki/comparisons/optimization-priorities.md": "1735bfab77da5a95f072800194ca39b33d4819fc99f654d0f9a55aa9abef8a5d",
+    "wiki/queries/current-status-and-roadmap.md": "96962d8fc204dc5b5196e595bbb4838dc4444b9b69ded72574168ca66037cd7d"
+  },
+  "title": "Reject disabled long-context benchmark profiles"
+}
