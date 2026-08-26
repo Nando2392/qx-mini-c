@@ -1138,6 +1138,17 @@ def test_build_long_context_measurement_gate_records_active_rss_limit():
     assert gate["rss_limit_active"] is True
 
 
+def test_build_long_context_measurement_gate_keeps_none_policy_rss_limit_inactive():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    gate = PERF.build_long_context_measurement_gate(cells, ctx=16)
+
+    assert gate["policy"] == "none"
+    assert gate["rss_limit_bytes"] == 0
+    assert gate["rss_limit_active"] is False
+
+
 def test_build_long_context_measurement_gate_rejects_empty_cells():
     with pytest.raises(ValueError, match="long_context_measurement requires benchmark cells"):
         PERF.build_long_context_measurement_gate([], ctx=4096)
@@ -1185,6 +1196,15 @@ def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
 
     with pytest.raises(ValueError, match="long_context_profile.rss_limit_bytes must be non-negative"):
         PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
+def test_build_long_context_measurement_gate_rejects_rss_limit_for_none_policy():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile["rss_limit_bytes"] = 1
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="none long-context measurement must not record an RSS limit"):
+        PERF.build_long_context_measurement_gate(cells, ctx=16)
 
 
 def test_build_long_context_measurement_gate_rejects_ctx_below_target():

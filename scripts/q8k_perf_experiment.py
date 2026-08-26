@@ -795,6 +795,8 @@ def build_long_context_measurement_gate(cells: list[dict[str, Any]], *, ctx: int
     if policy == "none":
         if target_ctx_tokens != 0:
             raise ValueError("none long-context measurement must not record target ctx tokens")
+        if rss_limit_bytes != 0:
+            raise ValueError("none long-context measurement must not record an RSS limit")
     elif policy == "ctx4k-smoke":
         if target_ctx_tokens != 4096:
             raise ValueError("ctx4k-smoke measurement must record target_ctx_tokens=4096")

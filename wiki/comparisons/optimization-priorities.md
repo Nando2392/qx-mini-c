@@ -41,6 +41,7 @@ confidence: medium
 | 27 | long-context benchmark cell shape hardening | Issue #51 rechaza celdas benchmark no-objeto antes de leer profiles/measurement | fail-closed report-level; sin benchmark nuevo ni claims |
 | 28 | long-context benchmark profile presence hardening | Issue #52 rechaza celdas benchmark sin `summary.long_context_profile` antes de derivar profiles/measurement | fail-closed report-level; sin benchmark nuevo ni claims |
 | 29 | long-context benchmark summary presence hardening | Issue #53 rechaza celdas benchmark sin `summary` antes de derivar profiles/measurement | fail-closed report-level; sin benchmark nuevo ni claims |
+| 30 | inactive long-context RSS limit hardening | Issue #54 rechaza `rss_limit_bytes` non-zero cuando `policy=none` | fail-closed report-level; sin límite OS ni claims |
 
 ## No priorizar todavía
 
@@ -106,5 +107,7 @@ La prioridad 27 empieza en Issue #51 como hardening de forma de celda benchmark:
 La prioridad 28 empieza en Issue #52 como hardening de presencia del perfil por celda: la ruta de perfil/medición long-context rechaza celdas benchmark que omiten `summary.long_context_profile` antes de derivar perfiles o metadata de medición. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
 
 La prioridad 29 empieza en Issue #53 como hardening de presencia del summary por celda: la ruta de perfil/medición long-context rechaza celdas benchmark que omiten `summary` antes de derivar perfiles o metadata de medición. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
+
+La prioridad 30 empieza en Issue #54 como hardening del límite RSS inactivo: `long_context_measurement` rechaza `rss_limit_bytes` non-zero cuando `policy=none` antes de reportar `rss_limit_active`. Esto no instala un límite duro de OS, no cambia allocator ni defaults y no autoriza claims de estabilidad.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

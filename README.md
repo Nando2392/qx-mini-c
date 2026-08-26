@@ -76,6 +76,8 @@ metadata, not a throughput or stability claim.
 The same metadata records `rss_limit_bytes` and whether that sampled RSS gate
 was active; negative report-level RSS limits fail closed, and this does not
 install an OS-level hard limit.
+The inactive `none` policy also rejects non-zero report-level RSS limits before
+an active sampled-RSS gate can be reported.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

@@ -1,0 +1,32 @@
+{
+  "behavior": "policy=none rejects non-zero rss_limit_bytes before reporting an active sampled-RSS gate",
+  "created_utc": "2026-08-26T14:27:33Z",
+  "green": "focused reject/control pytest cases passed after explicit inactive-policy RSS-limit validation",
+  "issue": 54,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 62 passed in 0.11s",
+    "python smoke_check.py: PASS",
+    "python scripts/lint_wiki.py: PASS (30 knowledge pages, 34 total notes)",
+    "git diff --check: PASS"
+  ],
+  "out_of_scope": [
+    "OS RSS hard limit",
+    "allocator change",
+    "heavy 4K CI benchmark",
+    "KV-quality sweep",
+    "soak runner",
+    "default promotion",
+    "speed/quality/stability claims"
+  ],
+  "red": "focused pytest failed with DID NOT RAISE because policy=none accepted rss_limit_bytes=1",
+  "scope": "report-level fail-closed metadata hardening only",
+  "staged_blob_sha256": {
+    "README.md": "e021136f9f18f070c85ec6aaca5a331c8352086bfd9d0e7d9fca9ca70922faf6",
+    "scripts/q8k_perf_experiment.py": "a9d8326c57192861c89b56ffa6ff1ad1be1f391da9d6fb70f5cfa2ab21d14a1e",
+    "tests/test_q8k_perf_experiment.py": "be64665510f06a1597343c6dda16dab92175e88d767c5848167b1b8e05b20920",
+    "wiki/comparisons/optimization-priorities.md": "d93ec79c122545ae1be2736ee95ff542766fd35fa9287e1f21830f3f05f6a3e4",
+    "wiki/queries/current-status-and-roadmap.md": "9d0121f7f43442898d3e3028440e7e4dd96a4f5e982c4256ea1f279f8938765d"
+  },
+  "title": "Reject RSS limits for inactive long-context measurement policy"
+}
