@@ -72,6 +72,7 @@ long-context benchmark summary presence hardening: Issue #53 en verificación lo
 inactive long-context RSS limit hardening: Issue #54 en verificación local
 long-context benchmark enabled-state hardening: Issue #55 en verificación local
 long-context disabled-reason hardening: Issue #56 en verificación local
+long-context policy allowlist hardening: Issue #57 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -152,6 +153,8 @@ Issue #54 endurece `long_context_measurement` para rechazar `rss_limit_bytes` no
 Issue #55 endurece la agregación report-level para rechazar `summary.long_context_profile.enabled` distinto de `true` antes de derivar el perfil común o metadata de medición. No ejecuta benchmark nuevo, no cambia defaults y no afirma rendimiento o estabilidad.
 
 Issue #56 endurece la agregación report-level para validar `disabled_reason` por policy en cada profile: `none_policy` para `none`, y null para `ctx4k-smoke`. La validación ocurre antes de comparar perfiles o derivar metadata; no ejecuta benchmark nuevo ni cambia defaults.
+
+Issue #57 endurece la agregación report-level con una allowlist de policy por cada profile benchmark: sólo `none` y `ctx4k-smoke` son válidas. Policies ausentes/no soportadas fallan antes de profile drift o metadata de medición; no ejecuta benchmark nuevo ni cambia defaults.
 
 ## Después
 

@@ -82,6 +82,8 @@ Report-level aggregation rejects benchmark profiles whose `enabled` flag is not
 exactly `true` before deriving common profile or measurement metadata.
 It also validates every profile's policy-specific `disabled_reason`: `none`
 requires `none_policy`, while `ctx4k-smoke` requires null.
+Missing or unsupported profile policies fail closed in the same per-cell
+validation seam before profile equality or measurement derivation.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

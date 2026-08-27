@@ -744,10 +744,14 @@ def _validate_report_long_context_profile(profile: dict[str, Any]) -> None:
     if profile.get("enabled") is not True:
         raise ValueError("long_context_profile.enabled must be true")
     policy = profile.get("policy")
-    if policy == "none" and profile.get("disabled_reason") != "none_policy":
-        raise ValueError("long_context_profile.disabled_reason must record none_policy")
-    if policy == "ctx4k-smoke" and profile.get("disabled_reason") is not None:
-        raise ValueError("long_context_profile.disabled_reason must be null for ctx4k-smoke policy")
+    if policy == "none":
+        if profile.get("disabled_reason") != "none_policy":
+            raise ValueError("long_context_profile.disabled_reason must record none_policy")
+    elif policy == "ctx4k-smoke":
+        if profile.get("disabled_reason") is not None:
+            raise ValueError("long_context_profile.disabled_reason must be null for ctx4k-smoke policy")
+    else:
+        raise ValueError("unsupported long_context_profile.policy")
 
 
 def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[str, Any]:

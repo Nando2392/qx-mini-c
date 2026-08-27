@@ -1,0 +1,33 @@
+{
+  "behavior": "every report-level long-context benchmark profile rejects missing or unsupported policy before equality or measurement derivation",
+  "created_utc": "2026-08-27T11:03:59Z",
+  "green": "focused first/later-cell policy cases and valid controls passed after a fail-closed policy ladder",
+  "issue": 57,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 69 passed in 0.16s",
+    "python smoke_check.py: PASS (optional real-model probes unavailable in isolated worktree)",
+    "python scripts/lint_wiki.py: PASS (30 knowledge pages, 34 total notes)",
+    "git diff --check: PASS"
+  ],
+  "out_of_scope": [
+    "OS RSS hard limit",
+    "allocator change",
+    "heavy 4K CI benchmark",
+    "KV-quality sweep",
+    "soak runner",
+    "default promotion",
+    "speed/quality/stability claims"
+  ],
+  "red": "missing first-cell policy was accepted and later unsupported policy produced only generic profile drift; full gate exposed one obsolete downstream error expectation",
+  "scope": "report-level fail-closed policy allowlist hardening only",
+  "staged_blob_sha256": {
+    "README.md": "ba7b956e872ad72bb3018258071b060338f2ef632330e7b401a2de1001a7e42c",
+    "scripts/q8k_perf_experiment.py": "2b9f6c25d7adc3973b7e7af4fce4f1662e0c5a6d8ef9a121850c594d90abd2b0",
+    "tests/test_q8k_perf_experiment.py": "f23165470a2ff5c63059a6513a442908c6a1cacc935bc4632df45b523a25cc9b",
+    "wiki/comparisons/optimization-priorities.md": "b4cf5dc5a0101deb8b9ec3e4b5be68df3c8fd817c261888689e2f08b7de538fb",
+    "wiki/queries/current-status-and-roadmap.md": "ad255634f7e68ae3460ce727b24eb0e7f17ab18a79765180a427286d41f65e16"
+  },
+  "supported_policies": ["none", "ctx4k-smoke"],
+  "title": "Reject unsupported long-context benchmark policies"
+}

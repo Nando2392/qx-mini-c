@@ -1237,6 +1237,27 @@ def test_build_long_context_measurement_gate_rejects_ctx4k_disabled_reason():
         PERF.build_long_context_measurement_gate(cells, ctx=4096)
 
 
+def test_summarize_cells_rejects_missing_long_context_policy():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile.pop("policy")
+    cells = [{"summary": {"long_context_profile": profile}}]
+
+    with pytest.raises(ValueError, match="unsupported long_context_profile.policy"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
+def test_summarize_cells_rejects_later_unsupported_long_context_policy():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    later_profile = dict(profile, policy="ctx8k-smoke", disabled_reason=None)
+    cells = [
+        {"summary": {"long_context_profile": profile}},
+        {"summary": {"long_context_profile": later_profile}},
+    ]
+
+    with pytest.raises(ValueError, match="unsupported long_context_profile.policy"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,
@@ -1306,7 +1327,7 @@ def test_build_long_context_measurement_gate_rejects_unsupported_policy():
     }
     cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
 
-    with pytest.raises(ValueError, match="unsupported long-context measurement policy"):
+    with pytest.raises(ValueError, match="unsupported long_context_profile.policy"):
         PERF.build_long_context_measurement_gate(cells, ctx=8192)
 
 
