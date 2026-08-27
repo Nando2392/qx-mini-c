@@ -1,0 +1,33 @@
+{
+  "behavior": "every report-level long-context profile requires exact non-negative integer numeric fields before equality or measurement derivation",
+  "created_utc": "2026-08-27T11:28:09Z",
+  "green": "focused missing, later boolean-equality bypass, later negative, and valid control tests passed after per-cell exact-int validation",
+  "issue": 58,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 72 passed in 0.15s",
+    "python smoke_check.py: PASS (optional real-model probes unavailable in isolated worktree)",
+    "python scripts/lint_wiki.py: PASS (30 knowledge pages, 34 total notes)",
+    "git diff --check: PASS"
+  ],
+  "numeric_fields": ["target_ctx_tokens", "rss_limit_bytes", "kv_quality_checks", "soak_seconds"],
+  "out_of_scope": [
+    "OS RSS hard limit",
+    "allocator change",
+    "heavy 4K CI benchmark",
+    "KV-quality sweep",
+    "soak runner",
+    "default promotion",
+    "speed/quality/stability claims"
+  ],
+  "red": "missing numeric field was accepted; later bool False bypassed zero via Python equality; later negative value produced only generic profile drift",
+  "scope": "report-level fail-closed numeric profile hardening only",
+  "staged_blob_sha256": {
+    "README.md": "ffd0b1beb64238dfeffb29706992617100e7d1377483b54d427c6728158a77ea",
+    "scripts/q8k_perf_experiment.py": "1f1e5019479c15811c19db061a0ed327db6072d98ce2641781c45bd09cfdcfbd",
+    "tests/test_q8k_perf_experiment.py": "d7c9f69744c3bd4dccc2ce25ac15450e3920fbf1efb2fe5c722c1d3628b122cf",
+    "wiki/comparisons/optimization-priorities.md": "b4170fec80d6d18e0f25bebb417aac5feabf1af3427f6ffd785bcda4a00514fb",
+    "wiki/queries/current-status-and-roadmap.md": "993aa596ac87a210a8fff50082fe7c7b7a1ff1a03c090a2e7294832bdcaf64f1"
+  },
+  "title": "Reject malformed long-context numeric profile fields"
+}

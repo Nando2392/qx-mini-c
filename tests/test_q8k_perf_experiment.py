@@ -1258,6 +1258,39 @@ def test_summarize_cells_rejects_later_unsupported_long_context_policy():
         PERF.summarize_cells_long_context_profile(cells)
 
 
+def test_summarize_cells_rejects_missing_long_context_numeric_field():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile.pop("soak_seconds")
+    cells = [{"summary": {"long_context_profile": profile}}]
+
+    with pytest.raises(ValueError, match="long_context_profile.soak_seconds must be an integer"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
+def test_summarize_cells_rejects_later_boolean_long_context_numeric_field():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    later_profile = dict(profile, target_ctx_tokens=False)
+    cells = [
+        {"summary": {"long_context_profile": profile}},
+        {"summary": {"long_context_profile": later_profile}},
+    ]
+
+    with pytest.raises(ValueError, match="long_context_profile.target_ctx_tokens must be an integer"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
+def test_summarize_cells_rejects_later_negative_long_context_numeric_field():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    later_profile = dict(profile, rss_limit_bytes=-1)
+    cells = [
+        {"summary": {"long_context_profile": profile}},
+        {"summary": {"long_context_profile": later_profile}},
+    ]
+
+    with pytest.raises(ValueError, match="long_context_profile.rss_limit_bytes must be non-negative"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,
