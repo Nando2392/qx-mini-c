@@ -740,6 +740,16 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
+def _validate_report_long_context_profile(profile: dict[str, Any]) -> None:
+    if profile.get("enabled") is not True:
+        raise ValueError("long_context_profile.enabled must be true")
+    policy = profile.get("policy")
+    if policy == "none" and profile.get("disabled_reason") != "none_policy":
+        raise ValueError("long_context_profile.disabled_reason must record none_policy")
+    if policy == "ctx4k-smoke" and profile.get("disabled_reason") is not None:
+        raise ValueError("long_context_profile.disabled_reason must be null for ctx4k-smoke policy")
+
+
 def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[str, Any]:
     """Return the common long-context profile across benchmark cells, fail-closed on drift."""
     if not cells:
@@ -751,8 +761,7 @@ def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[st
     if "long_context_profile" not in first_summary:
         raise ValueError("long_context_profile is required")
     first_profile = _require_object(first_summary.get("long_context_profile"), "cell.summary.long_context_profile")
-    if first_profile.get("enabled") is not True:
-        raise ValueError("long_context_profile.enabled must be true")
+    _validate_report_long_context_profile(first_profile)
     for cell in cells[1:]:
         cell_obj = _require_object(cell, "benchmark cell")
         if "summary" not in cell_obj:
@@ -761,8 +770,7 @@ def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[st
         if "long_context_profile" not in summary:
             raise ValueError("long_context_profile is required")
         profile = _require_object(summary.get("long_context_profile"), "cell.summary.long_context_profile")
-        if profile.get("enabled") is not True:
-            raise ValueError("long_context_profile.enabled must be true")
+        _validate_report_long_context_profile(profile)
         if profile != first_profile:
             raise ValueError("long_context_profile differs across benchmark cells")
     return json.loads(json.dumps(first_profile))

@@ -1203,6 +1203,40 @@ def test_build_long_context_measurement_gate_rejects_later_non_boolean_enabled_s
         PERF.build_long_context_measurement_gate(cells, ctx=16)
 
 
+def test_build_long_context_measurement_gate_rejects_none_policy_without_disabled_reason():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile["disabled_reason"] = None
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="long_context_profile.disabled_reason must record none_policy"):
+        PERF.build_long_context_measurement_gate(cells, ctx=16)
+
+
+def test_build_long_context_measurement_gate_rejects_later_invalid_disabled_reason():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    later_profile = dict(profile, disabled_reason="unexpected")
+    cells = [
+        {"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}},
+        {"summary": {"long_context_profile": later_profile, "peak_rss_bytes": {"count": 3}}},
+    ]
+
+    with pytest.raises(ValueError, match="long_context_profile.disabled_reason must record none_policy"):
+        PERF.build_long_context_measurement_gate(cells, ctx=16)
+
+
+def test_build_long_context_measurement_gate_rejects_ctx4k_disabled_reason():
+    profile = native_payload(
+        activation="f32",
+        selected=(358, 1184),
+        long_context_policy="ctx4k-smoke",
+    )["long_context_profile"]
+    profile["disabled_reason"] = "none_policy"
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="long_context_profile.disabled_reason must be null for ctx4k-smoke policy"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,

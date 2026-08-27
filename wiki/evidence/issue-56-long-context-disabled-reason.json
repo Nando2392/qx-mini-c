@@ -1,0 +1,32 @@
+{
+  "behavior": "report-level aggregation validates policy-specific disabled_reason on every long-context benchmark profile",
+  "created_utc": "2026-08-27T10:38:52Z",
+  "green": "focused none-policy first/later-cell and ctx4k-smoke rejection tests passed after common per-cell validation",
+  "issue": 56,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 67 passed in 0.17s",
+    "python smoke_check.py: PASS (optional real-model probes unavailable in isolated worktree)",
+    "python scripts/lint_wiki.py: PASS (30 knowledge pages, 34 total notes)",
+    "git diff --check: PASS"
+  ],
+  "out_of_scope": [
+    "OS RSS hard limit",
+    "allocator change",
+    "heavy 4K CI benchmark",
+    "KV-quality sweep",
+    "soak runner",
+    "default promotion",
+    "speed/quality/stability claims"
+  ],
+  "red": "none policy with null disabled_reason was accepted; a later invalid reason produced only generic profile drift; ctx4k-smoke with non-null reason was accepted",
+  "scope": "report-level fail-closed disabled-reason hardening only",
+  "staged_blob_sha256": {
+    "README.md": "4141894f5a51615f34bc37f7821754771280196dc934669aa461e4b50d73bffd",
+    "scripts/q8k_perf_experiment.py": "3754610dbfe876b941cd55a46d885874ba717ba62780d33423fdf96e94acafc3",
+    "tests/test_q8k_perf_experiment.py": "d2b528873ff1129b4db2d3d83c7402aa677606fd47e61e3980555cefd3260582",
+    "wiki/comparisons/optimization-priorities.md": "3debdc6f017c234173331805b41afebe8dc241be7b18ab8fbc83e214c9680ad6",
+    "wiki/queries/current-status-and-roadmap.md": "2a7ba3d2226614b54ba0fee3ee4a6b9d9e7786501a0acf49d23a9da8dd9babde"
+  },
+  "title": "Reject inconsistent long-context disabled reasons"
+}

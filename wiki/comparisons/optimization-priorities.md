@@ -43,6 +43,7 @@ confidence: medium
 | 29 | long-context benchmark summary presence hardening | Issue #53 rechaza celdas benchmark sin `summary` antes de derivar profiles/measurement | fail-closed report-level; sin benchmark nuevo ni claims |
 | 30 | inactive long-context RSS limit hardening | Issue #54 rechaza `rss_limit_bytes` non-zero cuando `policy=none` | fail-closed report-level; sin límite OS ni claims |
 | 31 | long-context benchmark enabled-state hardening | Issue #55 rechaza profiles benchmark con `enabled` distinto de `true` | fail-closed report-level; sin benchmark nuevo ni claims |
+| 32 | long-context disabled-reason hardening | Issue #56 valida `disabled_reason` por policy en cada profile benchmark | fail-closed report-level; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -112,5 +113,7 @@ La prioridad 29 empieza en Issue #53 como hardening de presencia del summary por
 La prioridad 30 empieza en Issue #54 como hardening del límite RSS inactivo: `long_context_measurement` rechaza `rss_limit_bytes` non-zero cuando `policy=none` antes de reportar `rss_limit_active`. Esto no instala un límite duro de OS, no cambia allocator ni defaults y no autoriza claims de estabilidad.
 
 La prioridad 31 empieza en Issue #55 como hardening del estado enabled: la agregación report-level rechaza `summary.long_context_profile.enabled` distinto de `true` antes de derivar el perfil común o `long_context_measurement`. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims de rendimiento o estabilidad.
+
+La prioridad 32 empieza en Issue #56 como hardening del motivo de desactivación: cada profile report-level con policy `none` exige `disabled_reason=none_policy`, y `ctx4k-smoke` exige `disabled_reason=null`, antes de comparar perfiles o derivar mediciones. Esto no ejecuta benchmark nuevo, no cambia defaults y no autoriza claims.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

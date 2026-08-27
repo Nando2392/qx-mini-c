@@ -80,6 +80,8 @@ The inactive `none` policy also rejects non-zero report-level RSS limits before
 an active sampled-RSS gate can be reported.
 Report-level aggregation rejects benchmark profiles whose `enabled` flag is not
 exactly `true` before deriving common profile or measurement metadata.
+It also validates every profile's policy-specific `disabled_reason`: `none`
+requires `none_policy`, while `ctx4k-smoke` requires null.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation
