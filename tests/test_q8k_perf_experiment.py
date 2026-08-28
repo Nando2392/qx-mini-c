@@ -1077,6 +1077,12 @@ def test_summarize_cells_rejects_empty_benchmark_cells():
         PERF.summarize_cells_long_context_profile([])
 
 
+@pytest.mark.parametrize("cells", [None, (), {}, "cells"])
+def test_summarize_cells_rejects_non_list_container(cells):
+    with pytest.raises(ValueError, match="benchmark cells must be a list"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
 def test_build_long_context_measurement_gate_records_ctx4k_measured_cells():
     payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke")
     payload["ctx_tokens"] = 4096

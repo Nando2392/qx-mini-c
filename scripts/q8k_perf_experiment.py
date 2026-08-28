@@ -772,6 +772,8 @@ def _validate_report_long_context_profile(profile: dict[str, Any]) -> None:
 
 def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[str, Any]:
     """Return the common long-context profile across benchmark cells, fail-closed on drift."""
+    if not isinstance(cells, list):
+        raise ValueError("benchmark cells must be a list")
     if not cells:
         raise ValueError("benchmark cells must be non-empty")
     first_cell = _require_object(cells[0], "benchmark cell")

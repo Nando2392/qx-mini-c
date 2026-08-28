@@ -1,0 +1,16 @@
+{
+  "issue": 65,
+  "title": "Reject non-list long-context profile cells",
+  "scope": "shared profile aggregator cells container contract only",
+  "red": "None, tuple, mapping, and string leaked empty/cell-shape errors instead of the aggregator container contract",
+  "green": "four adversarial containers reject and list controls pass",
+  "local_gates": ["MSVC PASS", "pytest 93 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "ffbc036a17d7c74a4549505f193198b330de7e0db1edf55d86109b8ac9eeaa84",
+    "scripts/q8k_perf_experiment.py": "e91e1522b033f1908db14b41e4fafe6eba5232e5b0a42819de8b95b465ded77d",
+    "tests/test_q8k_perf_experiment.py": "89b6226d3dc9bca9557cba1dafea3eb2304d60c679174b207e45a8d762f6176e",
+    "wiki/comparisons/optimization-priorities.md": "b6e24fd544b4f3e367e87499092e9de6d39879c4d1104021e4917460ebf7b039",
+    "wiki/queries/current-status-and-roadmap.md": "368763c3c9433875ea7f2c8bc7bd83a05220b53b4cc8722542bc433e17e8732d"
+  }
+}
