@@ -48,6 +48,7 @@ confidence: medium
 | 34 | long-context numeric profile hardening | Issue #58 exige enteros exactos non-negative por campo y celda | fail-closed report-level; sin benchmark nuevo ni claims |
 | 35 | long-context target profile hardening | Issue #59 valida target exacto por policy y celda | fail-closed report-level; sin benchmark nuevo ni claims |
 | 36 | inactive RSS profile hardening | Issue #60 exige RSS limit cero para `none` por celda | fail-closed report-level; sin límite OS ni claims |
+| 37 | KV-quality profile hardening | Issue #61 exige `kv_quality_checks=0` por celda | fail-closed report-level; sin quality sweep ni claims |
 
 ## No priorizar todavía
 
@@ -127,5 +128,7 @@ La prioridad 34 empieza en Issue #58 como hardening numérico por celda: `target
 La prioridad 35 empieza en Issue #59 como target policy-specific por celda: `none` exige `target_ctx_tokens=0` y `ctx4k-smoke` exige `4096` antes de profile equality o measurement. No ejecuta benchmark, no cambia defaults y no autoriza claims.
 
 La prioridad 36 empieza en Issue #60 como RSS policy-specific por celda: `none` exige `rss_limit_bytes=0` antes de profile equality; `ctx4k-smoke` conserva thresholds opt-in non-negative. No instala límites OS ni cambia defaults.
+
+La prioridad 37 empieza en Issue #61: cada profile report-level exige `kv_quality_checks=0` antes de profile equality o measurement hasta que exista un sweep real. No mide calidad ni cambia defaults.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

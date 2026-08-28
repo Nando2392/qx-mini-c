@@ -90,6 +90,8 @@ It enforces policy-specific targets per cell too: `none` requires `0`, while
 `ctx4k-smoke` requires `4096`, before profile equality or measurement.
 Inactive `none` profiles also require `rss_limit_bytes=0` per cell; opt-in
 `ctx4k-smoke` profiles may retain a non-negative measurement threshold.
+All report profiles require `kv_quality_checks=0` per cell until a real quality
+sweep exists, so unsupported provenance cannot hide behind profile drift.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

@@ -1335,6 +1335,29 @@ def test_summarize_cells_rejects_later_none_rss_limit_before_equality():
         PERF.summarize_cells_long_context_profile(cells)
 
 
+def test_summarize_cells_rejects_long_context_quality_checks():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile["kv_quality_checks"] = 1
+    cells = [{"summary": {"long_context_profile": profile}}]
+
+    with pytest.raises(ValueError, match="kv_quality_checks must be 0"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
+def test_summarize_cells_rejects_later_quality_checks_before_equality():
+    profile = native_payload(
+        activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke"
+    )["long_context_profile"]
+    later_profile = dict(profile, kv_quality_checks=1)
+    cells = [
+        {"summary": {"long_context_profile": profile}},
+        {"summary": {"long_context_profile": later_profile}},
+    ]
+
+    with pytest.raises(ValueError, match="kv_quality_checks must be 0"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,
@@ -1484,7 +1507,7 @@ def test_build_long_context_measurement_gate_rejects_kv_quality_checks_until_imp
     }
     cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
 
-    with pytest.raises(ValueError, match="long_context_profile.kv_quality_checks must be 0 for measurement"):
+    with pytest.raises(ValueError, match="long_context_profile.kv_quality_checks must be 0"):
         PERF.build_long_context_measurement_gate(cells, ctx=4096)
 
 

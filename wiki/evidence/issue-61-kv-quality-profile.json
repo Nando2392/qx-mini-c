@@ -1,0 +1,16 @@
+{
+  "issue": 61,
+  "title": "Reject unsupported long-context quality checks per cell",
+  "scope": "report-level fail-closed KV-quality provenance only",
+  "red": "first nonzero quality checks was accepted by summary; later nonzero produced generic drift",
+  "green": "first/later adversarial tests and valid zero controls pass",
+  "local_gates": ["MSVC PASS", "pytest 78 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["KV-quality sweep", "OS RSS limit", "allocator change", "heavy 4K benchmark", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "690b17510d3937a61174812a6b1b95d858e2ee74c5652bc0ad57d61d4bf8d7f8",
+    "scripts/q8k_perf_experiment.py": "a3bd1f397d8b0cddc73b42b33c9b5f832c2b122dc37eef9cac5f669c0cda5363",
+    "tests/test_q8k_perf_experiment.py": "154ac9fb2a6141d25970cce12888441be377ec55f340076819daabf8c66149cf",
+    "wiki/comparisons/optimization-priorities.md": "68719c058b87a706da6d45d4cc7a041c41fc842565823194c518f531a9710a2c",
+    "wiki/queries/current-status-and-roadmap.md": "df4e3554ebb3850d98d794210026186bb79a4331482c2672df00240c81d1996e"
+  }
+}
