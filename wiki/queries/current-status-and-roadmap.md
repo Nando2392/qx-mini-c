@@ -77,6 +77,7 @@ long-context numeric profile hardening: Issue #58 en verificación local
 long-context target profile hardening: Issue #59 en verificación local
 inactive long-context RSS profile hardening: Issue #60 en verificación local
 long-context KV-quality profile hardening: Issue #61 en verificación local
+long-context soak profile hardening: Issue #62 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -167,6 +168,8 @@ Issue #59 valida el target exacto en cada profile report-level: policy `none` ex
 Issue #60 valida RSS inactivo por cada profile report-level: policy `none` exige `rss_limit_bytes=0` antes de profile equality, mientras `ctx4k-smoke` conserva thresholds opt-in non-negative. No aplica límite duro de OS ni cambia defaults.
 
 Issue #61 exige `kv_quality_checks=0` en cada profile report-level antes de profile equality o measurement. No ejecuta sweep de calidad KV, no cambia defaults y no autoriza claims.
+
+Issue #62 exige `soak_seconds=0` en cada profile report-level antes de profile equality o measurement. No ejecuta soak runner, no cambia defaults y no autoriza claims de estabilidad.
 
 ## Después
 

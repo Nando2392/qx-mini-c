@@ -764,6 +764,8 @@ def _validate_report_long_context_profile(profile: dict[str, Any]) -> None:
         raise ValueError("long_context_profile.rss_limit_bytes must be 0 for none policy")
     if numeric_values["kv_quality_checks"] != 0:
         raise ValueError("long_context_profile.kv_quality_checks must be 0")
+    if numeric_values["soak_seconds"] != 0:
+        raise ValueError("long_context_profile.soak_seconds must be 0")
     if policy == "ctx4k-smoke" and numeric_values["target_ctx_tokens"] != 4096:
         raise ValueError("long_context_profile.target_ctx_tokens must be 4096 for ctx4k-smoke policy")
 

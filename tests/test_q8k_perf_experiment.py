@@ -1358,6 +1358,29 @@ def test_summarize_cells_rejects_later_quality_checks_before_equality():
         PERF.summarize_cells_long_context_profile(cells)
 
 
+def test_summarize_cells_rejects_long_context_soak_seconds():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile["soak_seconds"] = 1
+    cells = [{"summary": {"long_context_profile": profile}}]
+
+    with pytest.raises(ValueError, match="soak_seconds must be 0"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
+def test_summarize_cells_rejects_later_soak_before_equality():
+    profile = native_payload(
+        activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke"
+    )["long_context_profile"]
+    later_profile = dict(profile, soak_seconds=1)
+    cells = [
+        {"summary": {"long_context_profile": profile}},
+        {"summary": {"long_context_profile": later_profile}},
+    ]
+
+    with pytest.raises(ValueError, match="soak_seconds must be 0"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,
@@ -1523,7 +1546,7 @@ def test_build_long_context_measurement_gate_rejects_soak_seconds_until_implemen
     }
     cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
 
-    with pytest.raises(ValueError, match="long_context_profile.soak_seconds must be 0 for measurement"):
+    with pytest.raises(ValueError, match="long_context_profile.soak_seconds must be 0"):
         PERF.build_long_context_measurement_gate(cells, ctx=4096)
 
 

@@ -1,0 +1,16 @@
+{
+  "issue": 62,
+  "title": "Reject unsupported long-context soak values per cell",
+  "scope": "report-level fail-closed soak provenance only",
+  "red": "first nonzero soak was accepted; later nonzero produced generic drift",
+  "green": "first/later adversarial tests and zero controls pass",
+  "local_gates": ["MSVC PASS", "pytest 80 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["soak runner", "OS RSS hard limit", "allocator change", "heavy 4K benchmark", "KV sweep", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "6e2c34e56114c31cd265f695e2d582af7e2caf96f764030d41e4478dd225fe8f",
+    "scripts/q8k_perf_experiment.py": "d106c5eded29f41880067c68496989d661b85bd0369b800aa80bbde1cdc8ecf2",
+    "tests/test_q8k_perf_experiment.py": "f64b9eb7ff4df1f5f36a935dbffbd9c26032aa7bc4e28dc10f8bcda9953a8928",
+    "wiki/comparisons/optimization-priorities.md": "7b500ff639d9640b71fa0939740f73773575844dcc5d12651b8d0a6165510a2f",
+    "wiki/queries/current-status-and-roadmap.md": "a0bc8fd1d4abd9e89a5878022d0ac44ad739ae826450856290feb5f9508d59b6"
+  }
+}
