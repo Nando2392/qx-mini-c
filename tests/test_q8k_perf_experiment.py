@@ -1158,6 +1158,12 @@ def test_build_long_context_measurement_gate_rejects_invalid_measured_ctx(ctx):
         PERF.build_long_context_measurement_gate(cells, ctx=ctx)
 
 
+@pytest.mark.parametrize("cells", [None, (), {}, "cells"])
+def test_build_long_context_measurement_gate_rejects_non_list_cells(cells):
+    with pytest.raises(ValueError, match="long_context_measurement cells must be a list"):
+        PERF.build_long_context_measurement_gate(cells, ctx=4096)
+
+
 def test_build_long_context_measurement_gate_rejects_empty_cells():
     with pytest.raises(ValueError, match="long_context_measurement requires benchmark cells"):
         PERF.build_long_context_measurement_gate([], ctx=4096)

@@ -1,0 +1,16 @@
+{
+  "issue": 64,
+  "title": "Reject non-list long-context measurement cells",
+  "scope": "report-level cells container contract only",
+  "red": "None, tuple, mapping, and string leaked empty/cell-shape errors instead of a container contract error",
+  "green": "four adversarial containers reject and list controls pass",
+  "local_gates": ["MSVC PASS", "pytest 89 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "4c99bc2d9c6fb5fa8beb7827c507237b0c30420556a53afc06fa7daf29035ee1",
+    "scripts/q8k_perf_experiment.py": "bc5347408b92197cc8a5f7052484a1554a86ee09cc4868f7af229225a6b80f68",
+    "tests/test_q8k_perf_experiment.py": "5ab4b41a4a5232e166c3477a3784c01338a1f7019cf818c892ed0751cc49d939",
+    "wiki/comparisons/optimization-priorities.md": "d1d43d068bf33a18d8960786d1b0c39d191dbbe052794651b6c1a7db5e96afe8",
+    "wiki/queries/current-status-and-roadmap.md": "e27148ce2f0e770f6e46e4a5bbc6b27b87b25cea3d5616ff010e7f062462b26b"
+  }
+}

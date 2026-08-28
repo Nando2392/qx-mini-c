@@ -79,6 +79,7 @@ inactive long-context RSS profile hardening: Issue #60 en verificación local
 long-context KV-quality profile hardening: Issue #61 en verificación local
 long-context soak profile hardening: Issue #62 en verificación local
 long-context measured ctx hardening: Issue #63 en verificación local
+long-context measurement cells container hardening: Issue #64 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -173,6 +174,8 @@ Issue #61 exige `kv_quality_checks=0` en cada profile report-level antes de prof
 Issue #62 exige `soak_seconds=0` en cada profile report-level antes de profile equality o measurement. No ejecuta soak runner, no cambia defaults y no autoriza claims de estabilidad.
 
 Issue #63 exige que `ctx` sea un entero exacto positivo al construir `long_context_measurement`, antes de leer celdas o derivar metadata. No ejecuta benchmark nuevo ni cambia defaults.
+
+Issue #64 exige que `cells` sea una lista exacta antes de emptiness, indexado, profile aggregation o measurement. Evita aceptar secuencias/mappings ambiguos y no cambia defaults.
 
 ## Después
 

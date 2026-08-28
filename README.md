@@ -95,6 +95,8 @@ sweep exists, so unsupported provenance cannot hide behind profile drift.
 They also require `soak_seconds=0` per cell until a real soak runner exists.
 Report-level long-context measurement additionally requires `ctx` to be an
 exact positive integer before reading cells or deriving measurement metadata.
+Its `cells` container must be an exact list before emptiness or cell-shape
+validation, so tuples, mappings, strings, and null fail with one contract error.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

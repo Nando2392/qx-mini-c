@@ -51,6 +51,7 @@ confidence: medium
 | 37 | KV-quality profile hardening | Issue #61 exige `kv_quality_checks=0` por celda | fail-closed report-level; sin quality sweep ni claims |
 | 38 | soak profile hardening | Issue #62 exige `soak_seconds=0` por celda | fail-closed report-level; sin soak runner ni claims |
 | 39 | measured ctx hardening | Issue #63 exige `ctx` entero exacto positivo | fail-closed report-level; sin benchmark nuevo ni claims |
+| 40 | measurement cells container hardening | Issue #64 exige lista exacta | fail-closed report-level; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -136,5 +137,7 @@ La prioridad 37 empieza en Issue #61: cada profile report-level exige `kv_qualit
 La prioridad 38 empieza en Issue #62: cada profile report-level exige `soak_seconds=0` antes de profile equality o measurement hasta que exista runner real. No ejecuta soak ni cambia defaults.
 
 La prioridad 39 empieza en Issue #63: el measurement report exige `ctx` entero exacto positivo antes de leer celdas o derivar metadata. Bloquea bool/non-int/cero/negativo sin ejecutar benchmark nuevo.
+
+La prioridad 40 empieza en Issue #64: `long_context_measurement` exige que `cells` sea una lista exacta antes de emptiness, indexado o agregación. Rechaza null, tupla, mapping y string con error contractual explícito.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].
