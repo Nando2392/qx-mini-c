@@ -752,10 +752,16 @@ def _validate_report_long_context_profile(profile: dict[str, Any]) -> None:
             raise ValueError("long_context_profile.disabled_reason must be null for ctx4k-smoke policy")
     else:
         raise ValueError("unsupported long_context_profile.policy")
+    numeric_values: dict[str, int] = {}
     for field in ("target_ctx_tokens", "rss_limit_bytes", "kv_quality_checks", "soak_seconds"):
         value = _require_exact_int(profile.get(field), f"long_context_profile.{field}")
         if value < 0:
             raise ValueError(f"long_context_profile.{field} must be non-negative")
+        numeric_values[field] = value
+    if policy == "none" and numeric_values["target_ctx_tokens"] != 0:
+        raise ValueError("long_context_profile.target_ctx_tokens must be 0 for none policy")
+    if policy == "ctx4k-smoke" and numeric_values["target_ctx_tokens"] != 4096:
+        raise ValueError("long_context_profile.target_ctx_tokens must be 4096 for ctx4k-smoke policy")
 
 
 def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[str, Any]:

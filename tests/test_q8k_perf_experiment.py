@@ -1291,6 +1291,29 @@ def test_summarize_cells_rejects_later_negative_long_context_numeric_field():
         PERF.summarize_cells_long_context_profile(cells)
 
 
+def test_summarize_cells_rejects_none_policy_with_target_ctx_tokens():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile["target_ctx_tokens"] = 4096
+    cells = [{"summary": {"long_context_profile": profile}}]
+
+    with pytest.raises(ValueError, match="target_ctx_tokens must be 0 for none policy"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
+def test_summarize_cells_rejects_later_ctx4k_target_drift_before_equality():
+    profile = native_payload(
+        activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke"
+    )["long_context_profile"]
+    later_profile = dict(profile, target_ctx_tokens=0)
+    cells = [
+        {"summary": {"long_context_profile": profile}},
+        {"summary": {"long_context_profile": later_profile}},
+    ]
+
+    with pytest.raises(ValueError, match="target_ctx_tokens must be 4096 for ctx4k-smoke policy"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,
@@ -1344,7 +1367,7 @@ def test_build_long_context_measurement_gate_rejects_invalid_ctx4k_target():
     }
     cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
 
-    with pytest.raises(ValueError, match="ctx4k-smoke measurement must record target_ctx_tokens=4096"):
+    with pytest.raises(ValueError, match="target_ctx_tokens must be 4096 for ctx4k-smoke policy"):
         PERF.build_long_context_measurement_gate(cells, ctx=4096)
 
 

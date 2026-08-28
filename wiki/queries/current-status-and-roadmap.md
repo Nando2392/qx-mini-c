@@ -74,6 +74,7 @@ long-context benchmark enabled-state hardening: Issue #55 en verificación local
 long-context disabled-reason hardening: Issue #56 en verificación local
 long-context policy allowlist hardening: Issue #57 en verificación local
 long-context numeric profile hardening: Issue #58 en verificación local
+long-context target profile hardening: Issue #59 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -158,6 +159,8 @@ Issue #56 endurece la agregación report-level para validar `disabled_reason` po
 Issue #57 endurece la agregación report-level con una allowlist de policy por cada profile benchmark: sólo `none` y `ctx4k-smoke` son válidas. Policies ausentes/no soportadas fallan antes de profile drift o metadata de medición; no ejecuta benchmark nuevo ni cambia defaults.
 
 Issue #58 endurece cada profile report-level para exigir enteros exactos non-negative en `target_ctx_tokens`, `rss_limit_bytes`, `kv_quality_checks` y `soak_seconds` antes de profile equality. Bloquea missing/non-int/bool/negative y no ejecuta benchmark nuevo ni cambia defaults.
+
+Issue #59 valida el target exacto en cada profile report-level: policy `none` exige `target_ctx_tokens=0` y `ctx4k-smoke` exige `4096` antes de profile equality o measurement. No ejecuta benchmark nuevo ni cambia defaults.
 
 ## Después
 

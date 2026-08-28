@@ -86,6 +86,8 @@ Missing or unsupported profile policies fail closed in the same per-cell
 validation seam before profile equality or measurement derivation.
 That seam also requires exact non-negative integers for all long-context
 numeric fields, preventing boolean-vs-zero equality bypasses across cells.
+It enforces policy-specific targets per cell too: `none` requires `0`, while
+`ctx4k-smoke` requires `4096`, before profile equality or measurement.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

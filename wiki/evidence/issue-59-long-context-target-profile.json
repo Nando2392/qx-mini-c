@@ -1,0 +1,36 @@
+{
+  "behavior": "every report-level long-context profile enforces its policy-specific target_ctx_tokens before equality or measurement derivation",
+  "created_utc": "2026-08-28T12:28:09Z",
+  "green": "focused first none-policy invalid target, later ctx4k target drift, and valid common-profile control passed after per-cell target validation",
+  "issue": 59,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 74 passed in 0.19s",
+    "python smoke_check.py: PASS (optional real-model probes unavailable in isolated worktree)",
+    "python scripts/lint_wiki.py: PASS (30 knowledge pages, 34 total notes)",
+    "git diff --check: PASS"
+  ],
+  "out_of_scope": [
+    "OS RSS hard limit",
+    "allocator change",
+    "heavy 4K CI benchmark",
+    "KV-quality sweep",
+    "soak runner",
+    "default promotion",
+    "speed/quality/stability claims"
+  ],
+  "policy_targets": {
+    "none": 0,
+    "ctx4k-smoke": 4096
+  },
+  "red": "none target 4096 was accepted by profile summary; a later ctx4k target 0 produced only generic profile drift",
+  "scope": "report-level fail-closed target profile hardening only",
+  "staged_blob_sha256": {
+    "README.md": "cd081e529887bd47a83d4460fe5372b6df787b3ee2f47f3157979f0e20055e7a",
+    "scripts/q8k_perf_experiment.py": "5e1aa9e7a4c0b76e18c264b2788d8059ae883d9baffad712fe3465e25ef73124",
+    "tests/test_q8k_perf_experiment.py": "0f4f23f6cbd5094ccc2b528dc5764e0af82268b76b8e10956f6b24133cb0349b",
+    "wiki/comparisons/optimization-priorities.md": "a1d1266ed8c226f59d216ac5914f6481e553cca4a8f079d95afc0b96fbf0f2ad",
+    "wiki/queries/current-status-and-roadmap.md": "89aeaacdd6acbacc5ff46b0fd6dec628e62742dcd38d2262b5c437d27534d046"
+  },
+  "title": "Reject inconsistent long-context target profiles per cell"
+}
