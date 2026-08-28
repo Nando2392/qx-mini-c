@@ -1013,6 +1013,11 @@ def test_summarize_runs_preserves_common_long_context_profile_across_many_runs()
     assert summary["total_latency_seconds"]["count"] == 8
 
 
+def test_summarize_runs_rejects_empty_measured_run_set():
+    with pytest.raises(ValueError, match="measured runs must be non-empty"):
+        PERF.summarize_runs([])
+
+
 def test_summarize_runs_rejects_mixed_long_context_profiles():
     base_payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="none")
     base_run = PERF.compact_run(

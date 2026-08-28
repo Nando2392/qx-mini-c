@@ -99,6 +99,8 @@ Its `cells` container must be an exact list before emptiness or cell-shape
 validation, so tuples, mappings, strings, and null fail with one contract error.
 The shared profile aggregator enforces the same exact-list boundary even when
 called independently of the measurement gate.
+Measured run aggregation rejects an empty run set explicitly before reading the
+first run's long-context profile.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

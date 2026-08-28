@@ -710,6 +710,8 @@ def compact_run(
 
 
 def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    if not runs:
+        raise ValueError("measured runs must be non-empty")
     positive_fields = (
         "total_latency_seconds", "native_process_seconds",
         "prefill_latency_seconds", "prefill_tokens_per_second",

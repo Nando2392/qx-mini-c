@@ -1,0 +1,16 @@
+{
+  "issue": 66,
+  "title": "Reject empty measured run sets",
+  "scope": "summarize_runs emptiness contract only",
+  "red": "empty list raised IndexError while indexing the first long-context profile",
+  "green": "empty list raises explicit ValueError and non-empty controls pass",
+  "local_gates": ["MSVC PASS", "pytest 94 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["container type", "benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "0f1d5b0593bdd90723be42fb3ba17ed04f53e22a1efd611add6b61c3bc52a1e5",
+    "scripts/q8k_perf_experiment.py": "15878a97f917192b792cb588233e244bd58baa9a960ec02ce0168d040e19bbb7",
+    "tests/test_q8k_perf_experiment.py": "5f62f9d589b343ac511dff5714afb504f3d592778d4668d39b2a0b8a32091e8a",
+    "wiki/comparisons/optimization-priorities.md": "14332989cb5259740faa923dcaf70f4658a081aa767c8eb6d7d4cb051c01c51f",
+    "wiki/queries/current-status-and-roadmap.md": "748288132da24bf566fdfe1a3a628c6985152c90ac28453226cca18392ee7512"
+  }
+}
