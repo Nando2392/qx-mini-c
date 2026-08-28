@@ -710,6 +710,8 @@ def compact_run(
 
 
 def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(runs, list):
+        raise ValueError("measured runs must be a list")
     if not runs:
         raise ValueError("measured runs must be non-empty")
     positive_fields = (

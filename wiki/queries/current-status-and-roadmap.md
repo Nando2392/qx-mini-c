@@ -82,6 +82,7 @@ long-context measured ctx hardening: Issue #63 en verificación local
 long-context measurement cells container hardening: Issue #64 en verificación local
 long-context profile aggregator container hardening: Issue #65 en verificación local
 measured run emptiness hardening: Issue #66 en verificación local
+measured run container hardening: Issue #67 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -182,6 +183,8 @@ Issue #64 exige que `cells` sea una lista exacta antes de emptiness, indexado, p
 Issue #65 aplica ese contrato de lista exacta directamente en `summarize_cells_long_context_profile`, cerrando invocaciones fuera del measurement gate sin cambiar defaults.
 
 Issue #66 exige un run set no vacío en `summarize_runs` antes de leer el primer profile. Evita `IndexError`, no ejecuta benchmark nuevo y no cambia defaults.
+
+Issue #67 exige que el contenedor de `summarize_runs` sea una lista exacta antes de emptiness o indexado. Evita shapes ambiguos y no cambia defaults.
 
 ## Después
 

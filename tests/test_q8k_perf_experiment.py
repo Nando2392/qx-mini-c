@@ -1018,6 +1018,12 @@ def test_summarize_runs_rejects_empty_measured_run_set():
         PERF.summarize_runs([])
 
 
+@pytest.mark.parametrize("runs", [None, (), {}, "runs"])
+def test_summarize_runs_rejects_non_list_container(runs):
+    with pytest.raises(ValueError, match="measured runs must be a list"):
+        PERF.summarize_runs(runs)
+
+
 def test_summarize_runs_rejects_mixed_long_context_profiles():
     base_payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="none")
     base_run = PERF.compact_run(

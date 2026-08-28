@@ -1,0 +1,16 @@
+{
+  "issue": 67,
+  "title": "Reject non-list measured run containers",
+  "scope": "summarize_runs container contract only",
+  "red": "None, tuple, mapping, and string leaked emptiness or AttributeError paths",
+  "green": "four adversarial containers reject before emptiness/indexing and list controls pass",
+  "local_gates": ["MSVC PASS", "pytest 98 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "c6036513e704994b37d3baf155d0d263965b464341e2ee8deab677981ec5d2f5",
+    "scripts/q8k_perf_experiment.py": "d1950f20e37c8a9cb8da86d09cabc4954f280a510e72a402267d387259a11b7f",
+    "tests/test_q8k_perf_experiment.py": "e8406c0030aef315fb8ea8608dd081846bd050574cf90a26135ff064c63b6602",
+    "wiki/comparisons/optimization-priorities.md": "c42d2b51cacb5582a17ad9f373736c8f5e49631b0a8dde8d8db5469bf3212764",
+    "wiki/queries/current-status-and-roadmap.md": "3c0186f020b8f573bd34b38f6307102f627df43c216e586114ca2bcb5f500fbc"
+  }
+}
