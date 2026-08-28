@@ -1,0 +1,24 @@
+{
+  "behavior": "every report-level none long-context profile requires rss_limit_bytes zero before equality or measurement derivation",
+  "created_utc": "2026-08-28T12:52:23Z",
+  "green": "first and later none-policy RSS limit tests plus ctx4k active-RSS control passed after per-cell validation",
+  "issue": 60,
+  "local_gates": [
+    "cmd.exe /c build_msvc.bat: PASS",
+    "python -m pytest tests/test_q8k_perf_experiment.py -q: 76 passed in 0.15s",
+    "python smoke_check.py: PASS",
+    "python scripts/lint_wiki.py: PASS (30 knowledge pages, 34 total notes)",
+    "git diff --check: PASS"
+  ],
+  "out_of_scope": ["OS RSS hard limit", "allocator change", "heavy 4K CI benchmark", "KV-quality sweep", "soak runner", "default promotion", "performance/quality/stability claims"],
+  "red": "a first none profile with RSS limit was accepted by summary; a later one produced generic profile drift",
+  "scope": "report-level inactive RSS provenance hardening only",
+  "staged_blob_sha256": {
+    "README.md": "b44ae9b65ac64405a652ae9870d69e9105bc3a3dab4f1d4b4fe35faafdf52ff3",
+    "scripts/q8k_perf_experiment.py": "4b5d00ee4c20a6e4085fe504f652f6fbc1acda43ee30dfa7ae8db44bdc5db2df",
+    "tests/test_q8k_perf_experiment.py": "f68ac5e59ef70a678e5885c20161df1968ebed64c0d79a7d3879349ee632e409",
+    "wiki/comparisons/optimization-priorities.md": "c383dc3e1fe2f07bb01114360c055cd5d10d6c821aa68ad6a5768747b6d332e4",
+    "wiki/queries/current-status-and-roadmap.md": "9c40a5708990390989fca3a5de38c8c6b8bfdc76c26ca7e160f95589cbf2d65e"
+  },
+  "title": "Reject inactive long-context RSS limits per cell"
+}

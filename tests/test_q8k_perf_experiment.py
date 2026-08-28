@@ -1068,7 +1068,7 @@ def test_summarize_cells_rejects_mixed_long_context_profiles():
         {"summary": {"long_context_profile": mixed_profile}},
     ]
 
-    with pytest.raises(ValueError, match="long_context_profile differs across benchmark cells"):
+    with pytest.raises(ValueError, match="rss_limit_bytes must be 0 for none policy"):
         PERF.summarize_cells_long_context_profile(cells)
 
 
@@ -1314,6 +1314,27 @@ def test_summarize_cells_rejects_later_ctx4k_target_drift_before_equality():
         PERF.summarize_cells_long_context_profile(cells)
 
 
+def test_summarize_cells_rejects_none_policy_with_rss_limit():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    profile["rss_limit_bytes"] = 1
+    cells = [{"summary": {"long_context_profile": profile}}]
+
+    with pytest.raises(ValueError, match="rss_limit_bytes must be 0 for none policy"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
+def test_summarize_cells_rejects_later_none_rss_limit_before_equality():
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    later_profile = dict(profile, rss_limit_bytes=1)
+    cells = [
+        {"summary": {"long_context_profile": profile}},
+        {"summary": {"long_context_profile": later_profile}},
+    ]
+
+    with pytest.raises(ValueError, match="rss_limit_bytes must be 0 for none policy"):
+        PERF.summarize_cells_long_context_profile(cells)
+
+
 def test_build_long_context_measurement_gate_rejects_negative_rss_limit():
     profile = {
         "enabled": True,
@@ -1335,7 +1356,7 @@ def test_build_long_context_measurement_gate_rejects_rss_limit_for_none_policy()
     profile["rss_limit_bytes"] = 1
     cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
 
-    with pytest.raises(ValueError, match="none long-context measurement must not record an RSS limit"):
+    with pytest.raises(ValueError, match="rss_limit_bytes must be 0 for none policy"):
         PERF.build_long_context_measurement_gate(cells, ctx=16)
 
 
