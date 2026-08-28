@@ -1149,6 +1149,15 @@ def test_build_long_context_measurement_gate_keeps_none_policy_rss_limit_inactiv
     assert gate["rss_limit_active"] is False
 
 
+@pytest.mark.parametrize("ctx", [False, 0, -1, 1.5, "16"])
+def test_build_long_context_measurement_gate_rejects_invalid_measured_ctx(ctx):
+    profile = native_payload(activation="f32", selected=(358, 1184))["long_context_profile"]
+    cells = [{"summary": {"long_context_profile": profile, "peak_rss_bytes": {"count": 3}}}]
+
+    with pytest.raises(ValueError, match="ctx must be a positive integer"):
+        PERF.build_long_context_measurement_gate(cells, ctx=ctx)
+
+
 def test_build_long_context_measurement_gate_rejects_empty_cells():
     with pytest.raises(ValueError, match="long_context_measurement requires benchmark cells"):
         PERF.build_long_context_measurement_gate([], ctx=4096)

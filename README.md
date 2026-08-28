@@ -93,6 +93,8 @@ Inactive `none` profiles also require `rss_limit_bytes=0` per cell; opt-in
 All report profiles require `kv_quality_checks=0` per cell until a real quality
 sweep exists, so unsupported provenance cannot hide behind profile drift.
 They also require `soak_seconds=0` per cell until a real soak runner exists.
+Report-level long-context measurement additionally requires `ctx` to be an
+exact positive integer before reading cells or deriving measurement metadata.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

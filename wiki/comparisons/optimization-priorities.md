@@ -50,6 +50,7 @@ confidence: medium
 | 36 | inactive RSS profile hardening | Issue #60 exige RSS limit cero para `none` por celda | fail-closed report-level; sin límite OS ni claims |
 | 37 | KV-quality profile hardening | Issue #61 exige `kv_quality_checks=0` por celda | fail-closed report-level; sin quality sweep ni claims |
 | 38 | soak profile hardening | Issue #62 exige `soak_seconds=0` por celda | fail-closed report-level; sin soak runner ni claims |
+| 39 | measured ctx hardening | Issue #63 exige `ctx` entero exacto positivo | fail-closed report-level; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -133,5 +134,7 @@ La prioridad 36 empieza en Issue #60 como RSS policy-specific por celda: `none` 
 La prioridad 37 empieza en Issue #61: cada profile report-level exige `kv_quality_checks=0` antes de profile equality o measurement hasta que exista un sweep real. No mide calidad ni cambia defaults.
 
 La prioridad 38 empieza en Issue #62: cada profile report-level exige `soak_seconds=0` antes de profile equality o measurement hasta que exista runner real. No ejecuta soak ni cambia defaults.
+
+La prioridad 39 empieza en Issue #63: el measurement report exige `ctx` entero exacto positivo antes de leer celdas o derivar metadata. Bloquea bool/non-int/cero/negativo sin ejecutar benchmark nuevo.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

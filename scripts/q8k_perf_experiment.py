@@ -798,6 +798,8 @@ def summarize_cells_long_context_profile(cells: list[dict[str, Any]]) -> dict[st
 
 def build_long_context_measurement_gate(cells: list[dict[str, Any]], *, ctx: int) -> dict[str, Any]:
     """Summarize the measured long-context contract for the completed benchmark report."""
+    if isinstance(ctx, bool) or not isinstance(ctx, int) or ctx <= 0:
+        raise ValueError("ctx must be a positive integer")
     if not cells:
         raise ValueError("long_context_measurement requires benchmark cells")
     profile = summarize_cells_long_context_profile(cells)

@@ -1,0 +1,16 @@
+{
+  "issue": 63,
+  "title": "Reject malformed measured context metadata",
+  "scope": "report-level measured ctx contract only",
+  "red": "none-policy measurement accepted bool, zero, negative, float, and string ctx values",
+  "green": "five adversarial ctx cases reject and valid none/ctx4k controls pass",
+  "local_gates": ["MSVC PASS", "pytest 85 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "73802a781f5f15b42f65f45cccf86d6a062bc94eef248f2fca576c8e4c4e290d",
+    "scripts/q8k_perf_experiment.py": "99dea1eb4dbaaadfdb27e7256fc78e1841d1840061721ae5c363b59dc8fe652b",
+    "tests/test_q8k_perf_experiment.py": "e6bc0860a2c867b966b65f3fa1a3e035203b26e1d8b5339ceaef56088a92ad2e",
+    "wiki/comparisons/optimization-priorities.md": "a7f2ca4849ba7638cb010cf1b6c1232f23ec8519256a62ebc61a9bf70ab0fdc5",
+    "wiki/queries/current-status-and-roadmap.md": "5dcd93b20ababf90e109496403ab7603739259fb89cbd2bc4080a33771128ba9"
+  }
+}
