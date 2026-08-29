@@ -1,0 +1,16 @@
+{
+  "issue": 70,
+  "title": "Reject non-numeric measured run metrics",
+  "scope": "summarize_runs metric type contract only",
+  "red": "first-run bool positive metric and later-run numeric string counter were normalized and accepted",
+  "green": "every required metric must have exact native int or float type before float conversion",
+  "local_gates": ["MSVC PASS", "pytest 104 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["new finiteness/sign rules", "benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "8578c1834f980fc5d609912392331d61429998dacec7d90da3052f7203aafb40",
+    "scripts/q8k_perf_experiment.py": "adfa09d7d0f59b291db0061bb019b86b50d04c4cdaafc5a9e09f23896f0af94b",
+    "tests/test_q8k_perf_experiment.py": "397d3626af709e096d244d076b54b191cb136adbff576ab5464736fd692fb586",
+    "wiki/comparisons/optimization-priorities.md": "2b3a74a98bbb6d4768d42875b531578fa0c962abab71fe5c574a35d73a27c64e",
+    "wiki/queries/current-status-and-roadmap.md": "80e722b8ba1c84ddddab05852773eff75f01fc9a3c5afa75bb315f4b13b46655"
+  }
+}

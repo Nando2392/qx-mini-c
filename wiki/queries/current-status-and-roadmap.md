@@ -85,6 +85,7 @@ measured run emptiness hardening: Issue #66 en verificación local
 measured run container hardening: Issue #67 en verificación local
 measured run shape hardening: Issue #68 en verificación local
 measured run field-presence hardening: Issue #69 en verificación local
+measured run metric-type hardening: Issue #70 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -191,6 +192,8 @@ Issue #67 exige que el contenedor de `summarize_runs` sea una lista exacta antes
 Issue #68 exige objetos en cada run first/later antes de profile extraction/equality. Evita `AttributeError`, no ejecuta benchmark nuevo y no cambia defaults.
 
 Issue #69 exige presencia de todos los campos métricos requeridos en cada run first/later antes de aggregation. Evita `KeyError`; type/value hardening queda pendiente y no cambian defaults.
+
+Issue #70 exige tipo numérico nativo para cada métrica first/later antes de `float(...)`. Rechaza bool/string ambiguos; preserva los checks existentes de finitud/signo y no cambia defaults.
 
 ## Después
 

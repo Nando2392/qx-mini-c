@@ -739,6 +739,8 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         for field in required_fields:
             if field not in run:
                 raise ValueError(f"measured run missing required field: {field}")
+            if type(run[field]) not in (int, float):
+                raise ValueError(f"measured run field {field} must be numeric")
     first_run = run_objects[0]
     first_long_context_profile = _require_object(first_run.get("long_context_profile"), "long_context_profile")
     for run_obj in run_objects[1:]:
