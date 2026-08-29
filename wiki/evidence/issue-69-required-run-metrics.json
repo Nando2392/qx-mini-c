@@ -1,0 +1,16 @@
+{
+  "issue": 69,
+  "title": "Reject measured runs missing required metrics",
+  "scope": "summarize_runs required metric presence only",
+  "red": "first and later runs missing total_latency_seconds leaked KeyError during aggregation",
+  "green": "all positive and non-negative metric fields are required before profile extraction and aggregation",
+  "local_gates": ["MSVC PASS", "pytest 102 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["metric type/value hardening", "benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "fbed79202abf2ff51eb96382fb9362f494c97bd103e12da44e920c9d047e9aa4",
+    "scripts/q8k_perf_experiment.py": "77ff6c24572a056d84a3c298e746875d0950cfca571d06f32bc5618b3491b659",
+    "tests/test_q8k_perf_experiment.py": "9cfbc4cf4c93db5f9cc0c98b86442f4331d3088354f2e69e66fd9b6bf18e20af",
+    "wiki/comparisons/optimization-priorities.md": "7a0b75e47b618614588f483ddb8004ae91a923a77d1c7d746b9a2fc851f87619",
+    "wiki/queries/current-status-and-roadmap.md": "e83189a6009099c31dbd06845fdf5cd77f04d53cbd0d23ba44177f016b5be887"
+  }
+}

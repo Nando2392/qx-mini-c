@@ -84,6 +84,7 @@ long-context profile aggregator container hardening: Issue #65 en verificación 
 measured run emptiness hardening: Issue #66 en verificación local
 measured run container hardening: Issue #67 en verificación local
 measured run shape hardening: Issue #68 en verificación local
+measured run field-presence hardening: Issue #69 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -188,6 +189,8 @@ Issue #66 exige un run set no vacío en `summarize_runs` antes de leer el primer
 Issue #67 exige que el contenedor de `summarize_runs` sea una lista exacta antes de emptiness o indexado. Evita shapes ambiguos y no cambia defaults.
 
 Issue #68 exige objetos en cada run first/later antes de profile extraction/equality. Evita `AttributeError`, no ejecuta benchmark nuevo y no cambia defaults.
+
+Issue #69 exige presencia de todos los campos métricos requeridos en cada run first/later antes de aggregation. Evita `KeyError`; type/value hardening queda pendiente y no cambian defaults.
 
 ## Después
 

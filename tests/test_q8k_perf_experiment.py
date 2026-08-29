@@ -1036,6 +1036,28 @@ def test_summarize_runs_rejects_later_non_object_run_before_profile_equality():
         PERF.summarize_runs([{"long_context_profile": profile}, "run"])
 
 
+@pytest.mark.parametrize("missing_index", [0, 1])
+def test_summarize_runs_rejects_first_or_later_run_missing_required_metric(missing_index):
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    run = PERF.compact_run(
+        {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 1024, "payload": payload},
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="none",
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+    )
+    runs = [dict(run), dict(run)]
+    runs[missing_index].pop("total_latency_seconds")
+
+    with pytest.raises(ValueError, match="measured run missing required field: total_latency_seconds"):
+        PERF.summarize_runs(runs)
+
+
 def test_summarize_runs_rejects_mixed_long_context_profiles():
     base_payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="none")
     base_run = PERF.compact_run(

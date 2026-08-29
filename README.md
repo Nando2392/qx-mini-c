@@ -105,6 +105,8 @@ It also requires the run container itself to be an exact list before emptiness
 or indexing, rejecting null, tuples, mappings, and strings consistently.
 Every first and later measured run must also be an object before profile
 extraction or equality checks.
+Every measured run must contain all required positive and non-negative metric
+fields before aggregation, replacing raw missing-key failures with a contract error.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

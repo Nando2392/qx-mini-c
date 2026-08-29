@@ -733,15 +733,20 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "speculative_rejected_tokens", "speculative_target_verifications", "kv2_packed_bytes",
         "kv2_read_ops", "kv2_write_ops", "kv2_fallback_reads",
     )
-    first_run = _require_object(runs[0], "measured run")
+    run_objects = [_require_object(run, "measured run") for run in runs]
+    required_fields = positive_fields + non_negative_fields
+    for run in run_objects:
+        for field in required_fields:
+            if field not in run:
+                raise ValueError(f"measured run missing required field: {field}")
+    first_run = run_objects[0]
     first_long_context_profile = _require_object(first_run.get("long_context_profile"), "long_context_profile")
-    for run in runs[1:]:
-        run_obj = _require_object(run, "measured run")
+    for run_obj in run_objects[1:]:
         profile = _require_object(run_obj.get("long_context_profile"), "long_context_profile")
         if profile != first_long_context_profile:
             raise ValueError("long_context_profile differs across measured runs")
-    summary = {field: summarize([float(run[field]) for run in runs]) for field in positive_fields}
-    summary.update({field: summarize_non_negative([float(run[field]) for run in runs]) for field in non_negative_fields})
+    summary = {field: summarize([float(run[field]) for run in run_objects]) for field in positive_fields}
+    summary.update({field: summarize_non_negative([float(run[field]) for run in run_objects]) for field in non_negative_fields})
     summary["long_context_profile"] = json.loads(json.dumps(first_long_context_profile))
     return summary
 

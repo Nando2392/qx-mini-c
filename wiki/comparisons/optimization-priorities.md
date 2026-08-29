@@ -56,6 +56,7 @@ confidence: medium
 | 42 | measured run emptiness hardening | Issue #66 rechaza run sets vacíos | fail-closed report-level; sin benchmark nuevo ni claims |
 | 43 | measured run container hardening | Issue #67 exige lista exacta | fail-closed report-level; sin benchmark nuevo ni claims |
 | 44 | measured run shape hardening | Issue #68 exige objetos first/later | fail-closed report-level; sin benchmark nuevo ni claims |
+| 45 | measured run field-presence hardening | Issue #69 exige métricas requeridas | fail-closed report-level; sin type/value hardening ni claims |
 
 ## No priorizar todavía
 
@@ -151,5 +152,7 @@ La prioridad 42 empieza en Issue #66: `summarize_runs` rechaza explícitamente u
 La prioridad 43 empieza en Issue #67: `summarize_runs` exige una lista exacta antes de emptiness o indexado, rechazando null, tupla, mapping y string con error explícito.
 
 La prioridad 44 empieza en Issue #68: cada run first/later debe ser objeto antes de extraer o comparar `long_context_profile`, reemplazando `AttributeError` por error contractual.
+
+La prioridad 45 empieza en Issue #69: cada run first/later debe incluir todos los campos métricos agregados antes de aggregation, reemplazando `KeyError` por error contractual. Tipos y valores quedan fuera del slice.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].
