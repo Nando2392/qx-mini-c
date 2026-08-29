@@ -41,7 +41,19 @@ static bool parse_tokens(const char * text, std::vector<uint32_t> * tokens) {
     return !tokens->empty() && tokens->size() <= 64;
 }
 
-static bool decode_one(llama_context * ctx, uint32_t token_id, int32_t n_vocab, uint32_t * selected) {
+static bool write_logits(const char * dir, uint32_t step, const float * logits, int32_t n_vocab) {
+    if (!dir) return true;
+    char path[1024];
+    const int length = std::snprintf(path, sizeof(path), "%s/step-%u-logits.f32", dir, step);
+    if (length < 0 || static_cast<size_t>(length) >= sizeof(path)) return false;
+    FILE * output = std::fopen(path, "wb");
+    if (!output) return false;
+    const size_t written = std::fwrite(logits, sizeof(float), static_cast<size_t>(n_vocab), output);
+    const bool closed = std::fclose(output) == 0;
+    return written == static_cast<size_t>(n_vocab) && closed;
+}
+
+static bool decode_one(llama_context * ctx, uint32_t token_id, int32_t n_vocab, const char * dump_dir, uint32_t step, uint32_t * selected) {
     llama_token token = static_cast<llama_token>(token_id);
     llama_batch batch = llama_batch_get_one(&token, 1);
     if (llama_decode(ctx, batch) != 0) return false;
@@ -53,13 +65,14 @@ static bool decode_one(llama_context * ctx, uint32_t token_id, int32_t n_vocab, 
         if (!std::isfinite(logits[i])) return false;
         if (logits[i] > logits[argmax]) argmax = static_cast<uint32_t>(i);
     }
+    if (!write_logits(dump_dir, step, logits, n_vocab)) return false;
     *selected = argmax;
     return true;
 }
 
 int main(int argc, char ** argv) {
-    if (argc != 5) {
-        std::fprintf(stderr, "usage: llama_sequence_oracle <model.gguf> <tokens-csv> <generation-steps> <f16|q8_0>\n");
+    if (argc != 5 && argc != 6) {
+        std::fprintf(stderr, "usage: llama_sequence_oracle <model.gguf> <tokens-csv> <generation-steps> <f16|q8_0> [logits-dump-dir]\n");
         return 2;
     }
 
@@ -121,14 +134,16 @@ int main(int argc, char ** argv) {
 
     uint32_t selected = 0;
     bool ok = true;
-    for (uint32_t token : prompt_tokens) {
-        ok = ok && decode_one(ctx, token, n_vocab, &selected);
+    const char * dump_dir = argc == 6 ? argv[5] : nullptr;
+    for (size_t index = 0; index < prompt_tokens.size(); ++index) {
+        const char * step_dump_dir = index + 1u == prompt_tokens.size() ? dump_dir : nullptr;
+        ok = ok && decode_one(ctx, prompt_tokens[index], n_vocab, step_dump_dir, 0u, &selected);
         if (!ok) break;
     }
     std::vector<uint32_t> generated;
     if (ok) generated.push_back(selected);
     for (uint32_t step = 1; ok && step < generation_steps; ++step) {
-        ok = decode_one(ctx, selected, n_vocab, &selected);
+        ok = decode_one(ctx, selected, n_vocab, dump_dir, step, &selected);
         if (ok) generated.push_back(selected);
     }
 

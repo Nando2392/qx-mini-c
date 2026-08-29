@@ -61,7 +61,9 @@ scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend
 policy provenance gates #27–#42: GREEN local/CI
 long-context measurement/report hardening #43–#65: COMPLETED y publicado
 measured run aggregation hardening #66–#72: COMPLETED y publicado
-→ milestone activo: Issue #74 hace reusable el comparador full-logit; expansión case-local posterior, paridad global no afirmada
+full-logit reusable #74: COMPLETED y publicado
+matriz CPU/read-only real #75: 3/3 greedy y 12/12 argmax; 0/12 tolerancia full-logit, paridad numérica refutada case-local
+→ milestone activo siguiente: localizar la divergencia numérica con seams residuales existentes antes de optimizar o promover defaults
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -176,8 +178,8 @@ Issue #72 exige presencia explícita de `long_context_profile` en cada run first
 
 ## Después
 
-1. Ampliar el seam existente de Issue #22 con un slice CPU/read-only de prompts/tokens y métricas de logits, conservando cada modalidad separada y claims case-local.
-2. Elegir una sola [[optimization-priorities|optimización CPU]] mediante el baseline A/B F32/Q8_K; no promover defaults sin outputs y mediciones reproducibles.
+1. Localizar la divergencia full-logit observada en #75 con `compare_residuals.py` y dumps por capa, manteniendo casos/modalidades separados y sin asumir una causa.
+2. Corregir sólo la primera capa/operación con divergencia demostrada y repetir la misma matriz; no promover defaults hasta que el outcome mejore reproduciblemente.
 3. Convertir contratos 4K/RSS/calidad KV/soak en mediciones reales sólo con gates reproducibles y fuera del CI pesado por defecto.
 4. Diseñar CUDA híbrido únicamente después de cerrar el milestone CPU/paridad y medir transferencias/residency; no asumir que el temporal Q8_K CPU es un contrato CUDA.
 

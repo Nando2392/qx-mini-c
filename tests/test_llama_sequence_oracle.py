@@ -16,7 +16,7 @@ BUILD = ROOT / "tests" / "build_llama_reference_oracle.bat"
 EXE = ROOT / "build" / "llama_sequence_oracle.exe"
 
 
-def test_llama_sequence_oracle_runs_fixed_token_and_hello_ids():
+def test_llama_sequence_oracle_runs_fixed_token_and_hello_ids(tmp_path):
     if not MODEL.exists() or not LLAMA_CPP_DIR.exists():
         pytest.skip("real llama.cpp sequence fixtures are not available")
 
@@ -29,9 +29,11 @@ def test_llama_sequence_oracle_runs_fixed_token_and_hello_ids():
     assert EXE.is_file()
 
     cases = (("42", [42]), ("9707,0", [9707, 0]))
-    for token_csv, prompt_tokens in cases:
+    for case_index, (token_csv, prompt_tokens) in enumerate(cases):
+        dump_dir = tmp_path / f"logits-{case_index}"
+        dump_dir.mkdir()
         result = subprocess.run(
-            [str(EXE), str(MODEL), token_csv, "2", "f16"],
+            [str(EXE), str(MODEL), token_csv, "2", "f16", str(dump_dir)],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -45,6 +47,8 @@ def test_llama_sequence_oracle_runs_fixed_token_and_hello_ids():
         assert payload["generation_steps"] == 2
         assert len(payload["generated_tokens"]) == 2
         assert all(0 <= token < payload["n_vocab"] for token in payload["generated_tokens"])
+        for step in range(2):
+            assert (dump_dir / f"step-{step}-logits.f32").stat().st_size == payload["n_vocab"] * 4
 
 
 def test_qx_and_llama_sequence_comparison_is_explicit(tmp_path):

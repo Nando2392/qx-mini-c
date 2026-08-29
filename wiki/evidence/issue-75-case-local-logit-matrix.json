@@ -1,0 +1,69 @@
+{
+  "issue": 75,
+  "schema": "qx-issue-75-evidence-v1",
+  "scope": "real CPU case-local full-logit matrix",
+  "source": {
+    "llama_cpp_commit": "768d2a481a99cb75ec9a03b95dadbd35e7acf496",
+    "model_sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+    "model_size": 10865578560,
+    "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+    "qxf_size": 10860081152,
+    "runtime": "CPU-only; QX int8 KV/F32 activation; llama F16 and Q8_0 KV reported separately"
+  },
+  "report": {
+    "sha256": "d175a8d35f60ab1c2b879a7fa7f6d1a8bf30d06768d20297811d5f2460b34a61",
+    "bytes": 13473,
+    "tokenizer_cases_passed": 7,
+    "chat_cases_passed": 2,
+    "greedy_cases_passed": 3,
+    "argmax_comparisons_passed": 12,
+    "numeric_threshold_comparisons_passed": 0,
+    "numeric_threshold_comparisons_failed": 12,
+    "thresholds": {"max_abs": 0.1, "rmse": 0.1, "min_cosine": 0.99}
+  },
+  "gates": {
+    "build_msvc": "pass",
+    "build_llama_reference_oracles": "pass",
+    "targeted": "15 passed, 3 skipped (large artifacts absent from worktree test paths)",
+    "official_q8k_perf": "108 passed",
+    "real_matrix": "3 greedy cases passed; 12 argmax matches; 0/12 full-logit threshold pass",
+    "smoke": "pass",
+    "wiki_lint": "pass",
+    "diff_check": "pass"
+  },
+  "staged_blobs": {
+    "README.md": "3cb5c3c75e4e1e49de00bf4dc74e228f1af8d0164462b8a41433450e0eccbe81",
+    "scripts/run_unicode_chat_greedy_matrix.py": "8fede3dc2ef373f8dd26a3e9b699e1957530c37a5f4144878707f812d45ce3f3",
+    "tests/llama_sequence_oracle.cpp": "06472d666a73629adc239d6c17e9347e2282ec2596a7ca13aea1d0a1f132ba54",
+    "tests/test_llama_sequence_oracle.py": "77cdf600f52bcfb7e9b812b959998d68fa1fee4d2b8e864d25060dab6f7eaa85",
+    "tests/test_unicode_chat_greedy_matrix.py": "3d0383c7f6c9c73c2b1260616f6e78c88f87e063b0d1378cebc1596cec5c41bd",
+    "wiki/comparisons/optimization-priorities.md": "a8b15fa839b4832149e2f013b6eec960f6c69f22f491613f778c410341a9354e",
+    "wiki/queries/current-status-and-roadmap.md": "72b2a3f63c36ab88e3217fd154819125f2a84cc22c38361c3285e730db82ac82"
+  },
+  "comparisons": [
+    {"case":"token-42","step":0,"modality":"llama_f16","max_abs":1.5876102447509766,"rmse":0.2040714428793074,"cosine":0.9982447099342109,"argmax":1124,"threshold_pass":false},
+    {"case":"token-42","step":0,"modality":"llama_q8_0","max_abs":1.5481576919555664,"rmse":0.19246014134045034,"cosine":0.9983492329239165,"argmax":1124,"threshold_pass":false},
+    {"case":"token-42","step":1,"modality":"llama_f16","max_abs":0.535797119140625,"rmse":0.10744373868306943,"cosine":0.9990292084756529,"argmax":50853,"threshold_pass":false},
+    {"case":"token-42","step":1,"modality":"llama_q8_0","max_abs":0.517288327217102,"rmse":0.13864372596410027,"cosine":0.9985643732988363,"argmax":50853,"threshold_pass":false},
+    {"case":"token-56","step":0,"modality":"llama_f16","max_abs":1.5607609748840332,"rmse":0.21500231173723713,"cosine":0.9983760154964327,"argmax":1124,"threshold_pass":false},
+    {"case":"token-56","step":0,"modality":"llama_q8_0","max_abs":1.549234390258789,"rmse":0.2169845237848076,"cosine":0.9983889180734113,"argmax":1124,"threshold_pass":false},
+    {"case":"token-56","step":1,"modality":"llama_f16","max_abs":0.4629029631614685,"rmse":0.10251609200727196,"cosine":0.9992522401052217,"argmax":8,"threshold_pass":false},
+    {"case":"token-56","step":1,"modality":"llama_q8_0","max_abs":0.5086169242858887,"rmse":0.10518213678514766,"cosine":0.9992296720553109,"argmax":8,"threshold_pass":false},
+    {"case":"token-1000","step":0,"modality":"llama_f16","max_abs":1.115006923675537,"rmse":0.1440051202142732,"cosine":0.9985106195485818,"argmax":1124,"threshold_pass":false},
+    {"case":"token-1000","step":0,"modality":"llama_q8_0","max_abs":1.0235276222229004,"rmse":0.14003116403279964,"cosine":0.9986067487153212,"argmax":1124,"threshold_pass":false},
+    {"case":"token-1000","step":1,"modality":"llama_f16","max_abs":0.8437423706054688,"rmse":0.19990785011944864,"cosine":0.9957928550763101,"argmax":67075,"threshold_pass":false},
+    {"case":"token-1000","step":1,"modality":"llama_q8_0","max_abs":0.8023912906646729,"rmse":0.19914957751373982,"cosine":0.9957511097755436,"argmax":67075,"threshold_pass":false}
+  ],
+  "claims": {
+    "greedy_sequence": "case_and_modality_local",
+    "full_logit_measurement": "case_and_modality_local",
+    "logit_parity": "refuted_at_configured_thresholds_for_all_12_comparisons",
+    "semantic_equivalence": "not_claimed",
+    "global_modality_equivalence": "not_claimed"
+  },
+  "limits": [
+    "Three one-token prompts and two generated steps only.",
+    "Argmax equality is not numeric logit parity.",
+    "No default, CUDA, long-context or global-equivalence promotion."
+  ]
+}

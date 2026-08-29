@@ -44,6 +44,8 @@ The fixed-token QX greedy gate is GREEN for `42 → 1124 → 50853` after the Q5
 
 `scripts/compare_logits.py` exposes the same full-sidecar metrics through `compare_logit_files(...)` and its existing CLI. This reusable seam is preparation for case-local parity matrices; it does not itself run a model, expand coverage or claim global logit equivalence.
 
+The real CPU matrix now records complete logits for three fixed-token cases over two generation steps, comparing QX separately with llama.cpp F16 and Q8_0 KV. All 12 argmax comparisons match, while all 12 comparisons fail the configured full-logit thresholds (`max_abs <= 0.1`, `RMSE <= 0.1`, cosine `>= 0.99`). This is case-local greedy agreement and a numeric-parity refutation, not global logit or semantic equivalence.
+
 ## Honest performance state
 
 Measured on the current scalar CPU path:

@@ -11,6 +11,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from compare_logits import compare_logit_files
+
 ROOT = Path(__file__).resolve().parents[1]
 TOKENIZER_ORACLE = ROOT / "tests" / "fixtures" / "qwen3-tokenizer-llama-cpp-goldens.json"
 TOP_FIELDS = ("schema", "issue", "source", "tokenizer_cases", "chat_cases", "greedy_cases", "claims")
@@ -35,6 +37,7 @@ EXPECTED_RUNTIME = {
     "llama_greedy": ["f16_cpu", "q8_0_cpu"],
     "qx_greedy": "int8_kv_f32_activation_cpu",
 }
+LOGIT_THRESHOLDS = {"max_abs": 0.1, "rmse": 0.1, "min_cosine": 0.99}
 
 
 def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -201,6 +204,31 @@ def _require_artifact(root: Path, relative: str, size: int) -> Path:
     return path
 
 
+def compare_case_logits(
+    qx_dir: Path,
+    llama_dirs: dict[str, Path],
+    generation_steps: int,
+) -> list[dict[str, Any]]:
+    if set(llama_dirs) != {"f16", "q8_0"} or generation_steps <= 0:
+        raise ValueError("case logit modalities/steps invalid")
+    rows = []
+    for step in range(generation_steps):
+        qx_logits = qx_dir / f"step-{step}-logits.f32"
+        f16_logits = llama_dirs["f16"] / f"step-{step}-logits.f32"
+        q8_logits = llama_dirs["q8_0"] / f"step-{step}-logits.f32"
+        f16_metrics = compare_logit_files(qx_logits, f16_logits, **LOGIT_THRESHOLDS)
+        q8_metrics = compare_logit_files(qx_logits, q8_logits, **LOGIT_THRESHOLDS)
+        for metrics, reference in ((f16_metrics, f16_logits), (q8_metrics, q8_logits)):
+            metrics["qx"] = qx_logits.name
+            metrics["llama"] = reference.name
+        rows.append({
+            "step": step,
+            "llama_f16": f16_metrics,
+            "llama_q8_0": q8_metrics,
+        })
+    return rows
+
+
 def run_contract(contract: dict[str, Any], root: Path, work: Path, run_greedy: bool = False) -> dict[str, Any]:
     validate_contract(contract)
     root = root.resolve()
@@ -248,6 +276,9 @@ def run_contract(contract: dict[str, Any], root: Path, work: Path, run_greedy: b
     if run_greedy:
         model = _require_artifact(root, contract["source"]["model_path"], contract["source"]["model_size"])
         qxf = _require_artifact(root, contract["source"]["qxf_path"], contract["source"]["qxf_size"])
+        llama_oracle = ROOT / "build" / "llama_sequence_oracle.exe"
+        if not llama_oracle.is_file():
+            raise ValueError("llama_sequence_oracle.exe is missing; build the reference oracles first")
         if _sha256(model) != contract["source"]["model_sha256"]:
             raise ValueError("model_sha256 does not match the GGUF artifact")
         if _sha256(qxf) != contract["source"]["qxf_sha256"]:
@@ -256,23 +287,61 @@ def run_contract(contract: dict[str, Any], root: Path, work: Path, run_greedy: b
         for case in contract["greedy_cases"]:
             if len(case["prompt_token_ids"]) != 1:
                 raise ValueError("QX state-loop gate requires one prompt token per case")
+            case_work = work / f"greedy-{case['name']}"
+            qx_logits = case_work / "qx"
+            llama_logits = {kv: case_work / f"llama-{kv}" for kv in ("f16", "q8_0")}
+            qx_logits.mkdir(parents=True)
+            for directory in llama_logits.values():
+                directory.mkdir()
             payload = _invoke([
                 str(exe), "state-loop-probe", "--in", str(qxf), "--prompt-token", str(case["prompt_token_ids"][0]),
                 "--steps", str(case["generation_steps"]), "--layers", "48", "--ctx", "4", "--kv", "int8",
                 "--temperature", "0", "--seed", "7", "--full-moe", "--final-head", "--top-n", "5",
+                "--dump-residuals", str(qx_logits),
             ])
             actual = [step["selected_token"] for step in payload["tokens"]]
             if actual != case["expected_qx_tokens"]:
                 raise ValueError(f"greedy QX mismatch: {case['name']}")
+            llama_tokens = {}
+            for kv in ("f16", "q8_0"):
+                llama_payload = _invoke([
+                    str(llama_oracle), str(model), str(case["prompt_token_ids"][0]),
+                    str(case["generation_steps"]), kv, str(llama_logits[kv]),
+                ])
+                expected = case[f"expected_llama_{kv}_tokens"]
+                if llama_payload.get("llama_commit") != contract["source"]["llama_cpp_commit"]:
+                    raise ValueError("llama.cpp oracle commit mismatch")
+                if llama_payload.get("generated_tokens") != expected:
+                    raise ValueError(f"greedy llama {kv} mismatch: {case['name']}")
+                llama_tokens[kv] = llama_payload["generated_tokens"]
+            logit_comparisons = compare_case_logits(qx_logits, llama_logits, case["generation_steps"])
             greedy_results.append({
                 "name": case["name"],
-                "llama_f16_tokens": case["expected_llama_f16_tokens"],
-                "llama_q8_0_tokens": case["expected_llama_q8_0_tokens"],
+                "llama_f16_tokens": llama_tokens["f16"],
+                "llama_q8_0_tokens": llama_tokens["q8_0"],
                 "qx_tokens": actual,
+                "logit_comparisons": logit_comparisons,
                 "modalities_reported_separately": True,
                 "status": "passed",
             })
-        greedy_report = {"status": "passed", "passed": len(greedy_results), "cases": greedy_results}
+        threshold_results = [
+            row[modality]["pass"]
+            for case in greedy_results
+            for row in case["logit_comparisons"]
+            for modality in ("llama_f16", "llama_q8_0")
+        ]
+        greedy_report = {
+            "status": "passed",
+            "passed": len(greedy_results),
+            "logit_thresholds": LOGIT_THRESHOLDS,
+            "logit_threshold_summary": {
+                "comparisons": len(threshold_results),
+                "passed": sum(threshold_results),
+                "failed": len(threshold_results) - sum(threshold_results),
+                "claim": "case_local_measurement_only",
+            },
+            "cases": greedy_results,
+        }
 
     return {
         "schema": "qx-unicode-chat-greedy-report-v1",

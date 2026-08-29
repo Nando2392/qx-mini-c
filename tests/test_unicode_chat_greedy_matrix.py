@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +19,11 @@ def load_matrix_module():
     spec = importlib.util.spec_from_file_location("unicode_chat_greedy_matrix", MATRIX_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.path.insert(0, str(MATRIX_PATH.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.pop(0)
     return module
 
 
@@ -116,6 +121,37 @@ def test_matrix_runner_executes_exact_tokenizer_and_chat_claims(tmp_path):
     assert report["chat_template"]["passed"] == len(fixture["chat_cases"])
     assert report["greedy"]["status"] in {"passed", "not_run"}
     assert report["overall_status"] in {"passed", "partial_environmental"}
+
+
+def test_case_logit_metrics_keep_llama_modalities_separate(tmp_path):
+    matrix = load_matrix_module()
+    qx_dir = tmp_path / "qx"
+    f16_dir = tmp_path / "llama-f16"
+    q8_dir = tmp_path / "llama-q8"
+    for directory in (qx_dir, f16_dir, q8_dir):
+        directory.mkdir()
+    values = {
+        qx_dir: ([1.0, 3.0, 2.0], [3.0, 2.0, 1.0]),
+        f16_dir: ([1.0, 3.0, 2.0], [3.0, 2.0, 1.0]),
+        q8_dir: ([1.0, 2.0, 3.0], [2.0, 3.0, 1.0]),
+    }
+    for directory, steps in values.items():
+        for step, logits in enumerate(steps):
+            (directory / f"step-{step}-logits.f32").write_bytes(
+                struct.pack(f"<{len(logits)}f", *logits)
+            )
+
+    metrics = matrix.compare_case_logits(
+        qx_dir,
+        {"f16": f16_dir, "q8_0": q8_dir},
+        generation_steps=2,
+    )
+
+    assert [row["step"] for row in metrics] == [0, 1]
+    assert all(row["llama_f16"]["argmax_match"] is True for row in metrics)
+    assert all(row["llama_f16"]["pass"] is True for row in metrics)
+    assert all(row["llama_q8_0"]["argmax_match"] is False for row in metrics)
+    assert all(row["llama_q8_0"]["pass"] is False for row in metrics)
 
 
 def test_matrix_runner_reports_missing_artifacts_fail_closed(tmp_path):

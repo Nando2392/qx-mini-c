@@ -61,6 +61,7 @@ confidence: medium
 | 47 | measured run profile-contract hardening | Issue #71 valida profiles first/later antes de equality | reutiliza contrato existente; sin policy nueva |
 | 48 | measured run profile-presence hardening | Issue #72 exige campo profile first/later | distingue missing de null/non-object |
 | 49 | reusable full-logit comparison | Issue #74 extrae la comparación sidecar del CLI | preserva schema/thresholds; aún sin matriz ni claim nuevo |
+| 50 | real case-local full-logit matrix | Issue #75 mide 3 casos × 2 pasos × 2 modalidades | 12/12 argmax; 0/12 tolerancia numérica; paridad refutada localmente |
 
 ## Estado tras el hardening report-level
 
@@ -69,6 +70,8 @@ Issues #27–#72 están completados y publicados. Sus perfiles y validadores son
 El siguiente milestone no continúa el hardening por inercia: reutiliza la matriz CPU/read-only de Issue #22 y el comparador de logits existente para ampliar cobertura case-local con provenance fija. Debe separar llama F16, llama Q8_0 y QX por modalidad, registrar secuencias greedy y métricas de logits completas, y conservar `logit_parity`, `semantic_equivalence` y `global_modality_equivalence` como no afirmadas salvo evidencia futura independiente. CUDA, 4K pesado y promoción de defaults permanecen fuera de ese slice.
 
 Issue #74 inicia ese milestone extrayendo `compare_logit_files(...)` del CLI existente. La API devuelve las mismas métricas, argmax, thresholds y verdict para que un runner posterior pueda consumirlas sin subprocess/JSON; este slice no ejecuta oráculos ni añade casos.
+
+Issue #75 completa el milestone CPU/read-only inicial con ejecución real sobre artefactos fijados: 3/3 secuencias greedy pasan y los 12 argmax coinciden, pero ninguna de las 12 comparaciones full-logit pasa `max_abs <= 0.1`, `RMSE <= 0.1` y cosine `>= 0.99`. Por tanto, el resultado sostiene corrección greedy sólo para esos casos y refuta paridad numérica bajo esas tolerancias; no promueve defaults ni equivalencia global.
 
 ## No priorizar todavía
 
