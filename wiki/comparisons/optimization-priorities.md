@@ -58,6 +58,7 @@ confidence: medium
 | 44 | measured run shape hardening | Issue #68 exige objetos first/later | fail-closed report-level; sin benchmark nuevo ni claims |
 | 45 | measured run field-presence hardening | Issue #69 exige métricas requeridas | fail-closed report-level; sin type/value hardening ni claims |
 | 46 | measured run metric-type hardening | Issue #70 exige int/float nativos, no bool/string | fail-closed report-level; finitud/signo preservados |
+| 47 | measured run profile-contract hardening | Issue #71 valida profiles first/later antes de equality | reutiliza contrato existente; sin policy nueva |
 
 ## No priorizar todavía
 
@@ -157,5 +158,7 @@ La prioridad 44 empieza en Issue #68: cada run first/later debe ser objeto antes
 La prioridad 45 empieza en Issue #69: cada run first/later debe incluir todos los campos métricos agregados antes de aggregation, reemplazando `KeyError` por error contractual. Tipos y valores quedan fuera del slice.
 
 La prioridad 46 empieza en Issue #70: cada métrica requerida first/later debe ser `int` o `float` nativo antes de normalización, rechazando bool y strings numéricos. Finitud/signo siguen en los summary validators existentes.
+
+La prioridad 47 empieza en Issue #71: `summarize_runs` valida cada `long_context_profile` first/later con el contrato report-level existente antes de equality, impidiendo que metadata inválida se degrade a drift genérico.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

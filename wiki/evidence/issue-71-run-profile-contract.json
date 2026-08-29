@@ -1,0 +1,17 @@
+{
+  "issue": 71,
+  "title": "Validate measured run long-context profiles",
+  "scope": "summarize_runs profile contract reuse only",
+  "red": "invalid first/later enabled=false profiles degraded to generic profile drift",
+  "green": "existing report-level profile validator runs on first/later profiles before equality",
+  "test_adjustment": "drift control now compares two valid but different policy profiles",
+  "local_gates": ["MSVC PASS", "pytest 106 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["new profile policy", "benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "31c3859f68863fcd1463b260a62aa1db4786aa0054cd83dc04d67005cd5a5dce",
+    "scripts/q8k_perf_experiment.py": "c819917e5bf09df337e18a43184dff2f1df8a67d4ee1fee5d142cbb2ded2f6c3",
+    "tests/test_q8k_perf_experiment.py": "afdcd529a5e58afe35566f9d6956b98fbde4c011f199c6bcdb0ed4866e034939",
+    "wiki/comparisons/optimization-priorities.md": "05db334c6c9f20870682429d483c803ae918a97455d4136d2936709f29d1b7fd",
+    "wiki/queries/current-status-and-roadmap.md": "7c679922ad54818758246e91d66023c9eb6f502c66057025b1fc784ca1c7ab7b"
+  }
+}

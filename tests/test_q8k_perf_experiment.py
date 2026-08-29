@@ -1086,6 +1086,30 @@ def test_summarize_runs_rejects_first_or_later_non_numeric_metric(run_index, fie
         PERF.summarize_runs(runs)
 
 
+@pytest.mark.parametrize("invalid_index", [0, 1])
+def test_summarize_runs_validates_first_or_later_long_context_profile_before_equality(invalid_index):
+    payload = native_payload(activation="f32", selected=(358, 1184))
+    run = PERF.compact_run(
+        {"wall_elapsed_seconds": 3.5, "peak_rss_bytes": 1024, "payload": payload},
+        activation="f32",
+        io_backend="buffered",
+        scratch_policy="ephemeral",
+        kernel_policy="baseline",
+        long_context_policy="none",
+        kv="int8",
+        layers=48,
+        ctx=16,
+        generation_steps=2,
+    )
+    runs = [dict(run), dict(run)]
+    runs[0]["long_context_profile"] = dict(run["long_context_profile"])
+    runs[1]["long_context_profile"] = dict(run["long_context_profile"])
+    runs[invalid_index]["long_context_profile"]["enabled"] = False
+
+    with pytest.raises(ValueError, match="long_context_profile.enabled must be true"):
+        PERF.summarize_runs(runs)
+
+
 def test_summarize_runs_rejects_mixed_long_context_profiles():
     base_payload = native_payload(activation="f32", selected=(358, 1184), long_context_policy="none")
     base_run = PERF.compact_run(
@@ -1100,8 +1124,11 @@ def test_summarize_runs_rejects_mixed_long_context_profiles():
         ctx=16,
         generation_steps=2,
     )
+    mixed_payload = native_payload(
+        activation="f32", selected=(358, 1184), long_context_policy="ctx4k-smoke"
+    )
     mixed_run = dict(base_run)
-    mixed_run["long_context_profile"] = dict(base_run["long_context_profile"], rss_limit_bytes=1)
+    mixed_run["long_context_profile"] = mixed_payload["long_context_profile"]
 
     with pytest.raises(ValueError, match="long_context_profile differs across measured runs"):
         PERF.summarize_runs([base_run, mixed_run])

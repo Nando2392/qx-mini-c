@@ -743,8 +743,10 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
                 raise ValueError(f"measured run field {field} must be numeric")
     first_run = run_objects[0]
     first_long_context_profile = _require_object(first_run.get("long_context_profile"), "long_context_profile")
+    _validate_report_long_context_profile(first_long_context_profile)
     for run_obj in run_objects[1:]:
         profile = _require_object(run_obj.get("long_context_profile"), "long_context_profile")
+        _validate_report_long_context_profile(profile)
         if profile != first_long_context_profile:
             raise ValueError("long_context_profile differs across measured runs")
     summary = {field: summarize([float(run[field]) for run in run_objects]) for field in positive_fields}
