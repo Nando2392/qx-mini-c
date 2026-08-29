@@ -46,6 +46,8 @@ The fixed-token QX greedy gate is GREEN for `42 → 1124 → 50853` after the Q5
 
 The real CPU matrix now records complete logits for three fixed-token cases over two generation steps, comparing QX separately with llama.cpp F16 and Q8_0 KV. All 12 argmax comparisons match, while all 12 comparisons fail the configured full-logit thresholds (`max_abs <= 0.1`, `RMSE <= 0.1`, cosine `>= 0.99`). This is case-local greedy agreement and a numeric-parity refutation, not global logit or semantic equivalence.
 
+The activation bisect localizes the first material amplification to the layer-1 MoE: the layer-input delta grows about 35x across the MoE while routing top-8 remains exact. Replaying the exact llama F16 `ffn_inp` keeps the F32 MoE error (`RMSE 0.0345051`) but closes it under `q8_k_compat` (`RMSE 9.62582e-7`). The repeated real matrix preserves 3/3 greedy and 12/12 argmax for both QX modes; Q8_K improves full-logit thresholds from 0/12 to 1/12, including token-42 step 0 vs llama Q8_0 (`max_abs 0.0997415`, `RMSE 0.0220756`, cosine `0.9999756`). This is a causal, case-local diagnostic—not parity, semantic equivalence, or permission to promote defaults. Evidence: `wiki/evidence/issue-76-first-divergence-localization.json` and `wiki/evidence/issue-76-activation-parity-bisect-report.json`.
+
 ## Honest performance state
 
 Measured on the current scalar CPU path:

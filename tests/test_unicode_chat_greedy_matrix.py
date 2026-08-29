@@ -154,6 +154,38 @@ def test_case_logit_metrics_keep_llama_modalities_separate(tmp_path):
     assert all(row["llama_q8_0"]["pass"] is False for row in metrics)
 
 
+def test_activation_logit_metrics_keep_qx_modes_separate(tmp_path):
+    matrix = load_matrix_module()
+    f32_dir = tmp_path / "qx-f32"
+    q8k_dir = tmp_path / "qx-q8k"
+    llama_f16 = tmp_path / "llama-f16"
+    llama_q8 = tmp_path / "llama-q8"
+    for directory in (f32_dir, q8k_dir, llama_f16, llama_q8):
+        directory.mkdir()
+    values = {
+        f32_dir: [1.0, 3.0, 2.0],
+        q8k_dir: [1.0, 2.0, 3.0],
+        llama_f16: [1.0, 3.0, 2.0],
+        llama_q8: [1.0, 2.0, 3.0],
+    }
+    for directory, logits in values.items():
+        (directory / "step-0-logits.f32").write_bytes(
+            struct.pack(f"<{len(logits)}f", *logits)
+        )
+
+    report = matrix.compare_activation_logits(
+        {"f32": f32_dir, "q8_k_compat": q8k_dir},
+        {"f16": llama_f16, "q8_0": llama_q8},
+        generation_steps=1,
+    )
+
+    assert tuple(report) == ("f32", "q8_k_compat")
+    assert report["f32"][0]["llama_f16"]["pass"] is True
+    assert report["f32"][0]["llama_q8_0"]["pass"] is False
+    assert report["q8_k_compat"][0]["llama_f16"]["pass"] is False
+    assert report["q8_k_compat"][0]["llama_q8_0"]["pass"] is True
+
+
 def test_matrix_runner_reports_missing_artifacts_fail_closed(tmp_path):
     matrix = load_matrix_module()
     fixture = matrix.load_contract(FIXTURE_PATH)

@@ -62,6 +62,7 @@ confidence: medium
 | 48 | measured run profile-presence hardening | Issue #72 exige campo profile first/later | distingue missing de null/non-object |
 | 49 | reusable full-logit comparison | Issue #74 extrae la comparación sidecar del CLI | preserva schema/thresholds; aún sin matriz ni claim nuevo |
 | 50 | real case-local full-logit matrix | Issue #75 mide 3 casos × 2 pasos × 2 modalidades | 12/12 argmax; 0/12 tolerancia numérica; paridad refutada localmente |
+| 51 | activation parity bisect | Issue #76 localiza amplificación en MoE layer 1 y repite F32/Q8_K | 3/3 greedy, 12/12 argmax; Q8_K 1/12 thresholds; sin default promotion |
 
 ## Estado tras el hardening report-level
 
@@ -72,6 +73,8 @@ El siguiente milestone no continúa el hardening por inercia: reutiliza la matri
 Issue #74 inicia ese milestone extrayendo `compare_logit_files(...)` del CLI existente. La API devuelve las mismas métricas, argmax, thresholds y verdict para que un runner posterior pueda consumirlas sin subprocess/JSON; este slice no ejecuta oráculos ni añade casos.
 
 Issue #75 completa el milestone CPU/read-only inicial con ejecución real sobre artefactos fijados: 3/3 secuencias greedy pasan y los 12 argmax coinciden, pero ninguna de las 12 comparaciones full-logit pasa `max_abs <= 0.1`, `RMSE <= 0.1` y cosine `>= 0.99`. Por tanto, el resultado sostiene corrección greedy sólo para esos casos y refuta paridad numérica bajo esas tolerancias; no promueve defaults ni equivalencia global.
+
+Issue #76 localiza el primer cambio material en el MoE de layer 1: el delta L2 crece aproximadamente 35x entre `ffn_inp` y `ffn_moe_out`, con routing top-8 exacto. El replay con el mismo `ffn_inp` conserva error en F32 y lo cierra con el temporal `q8_k_compat`; el contrafactual end-to-end mejora de 0/12 a 1/12 threshold PASS sin cambiar 3/3 greedy ni 12/12 argmax. F32 permanece control/default y la divergencia multi-token restante requiere snapshot/replay del KV acumulado antes de cualquier promoción o kernel nuevo.
 
 ## No priorizar todavía
 

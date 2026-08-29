@@ -229,7 +229,26 @@ def compare_case_logits(
     return rows
 
 
-def run_contract(contract: dict[str, Any], root: Path, work: Path, run_greedy: bool = False) -> dict[str, Any]:
+def compare_activation_logits(
+    qx_dirs: dict[str, Path],
+    llama_dirs: dict[str, Path],
+    generation_steps: int,
+) -> dict[str, list[dict[str, Any]]]:
+    if tuple(qx_dirs) != ("f32", "q8_k_compat"):
+        raise ValueError("QX activation modes/order must be f32,q8_k_compat")
+    return {
+        activation: compare_case_logits(directory, llama_dirs, generation_steps)
+        for activation, directory in qx_dirs.items()
+    }
+
+
+def run_contract(
+    contract: dict[str, Any],
+    root: Path,
+    work: Path,
+    run_greedy: bool = False,
+    qx_activation_bisect: bool = False,
+) -> dict[str, Any]:
     validate_contract(contract)
     root = root.resolve()
     work.mkdir(parents=True, exist_ok=True)
@@ -288,20 +307,25 @@ def run_contract(contract: dict[str, Any], root: Path, work: Path, run_greedy: b
             if len(case["prompt_token_ids"]) != 1:
                 raise ValueError("QX state-loop gate requires one prompt token per case")
             case_work = work / f"greedy-{case['name']}"
-            qx_logits = case_work / "qx"
+            activations = ("f32", "q8_k_compat") if qx_activation_bisect else ("f32",)
+            qx_logits = {activation: case_work / f"qx-{activation}" for activation in activations}
             llama_logits = {kv: case_work / f"llama-{kv}" for kv in ("f16", "q8_0")}
-            qx_logits.mkdir(parents=True)
+            for directory in qx_logits.values():
+                directory.mkdir(parents=True)
             for directory in llama_logits.values():
                 directory.mkdir()
-            payload = _invoke([
-                str(exe), "state-loop-probe", "--in", str(qxf), "--prompt-token", str(case["prompt_token_ids"][0]),
-                "--steps", str(case["generation_steps"]), "--layers", "48", "--ctx", "4", "--kv", "int8",
-                "--temperature", "0", "--seed", "7", "--full-moe", "--final-head", "--top-n", "5",
-                "--dump-residuals", str(qx_logits),
-            ])
-            actual = [step["selected_token"] for step in payload["tokens"]]
-            if actual != case["expected_qx_tokens"]:
-                raise ValueError(f"greedy QX mismatch: {case['name']}")
+            qx_tokens = {}
+            for activation in activations:
+                payload = _invoke([
+                    str(exe), "state-loop-probe", "--in", str(qxf), "--prompt-token", str(case["prompt_token_ids"][0]),
+                    "--steps", str(case["generation_steps"]), "--layers", "48", "--ctx", "4", "--kv", "int8",
+                    "--activation", activation, "--temperature", "0", "--seed", "7", "--full-moe", "--final-head", "--top-n", "5",
+                    "--dump-residuals", str(qx_logits[activation]),
+                ])
+                actual = [step["selected_token"] for step in payload["tokens"]]
+                if actual != case["expected_qx_tokens"]:
+                    raise ValueError(f"greedy QX {activation} mismatch: {case['name']}")
+                qx_tokens[activation] = actual
             llama_tokens = {}
             for kv in ("f16", "q8_0"):
                 llama_payload = _invoke([
@@ -314,13 +338,23 @@ def run_contract(contract: dict[str, Any], root: Path, work: Path, run_greedy: b
                 if llama_payload.get("generated_tokens") != expected:
                     raise ValueError(f"greedy llama {kv} mismatch: {case['name']}")
                 llama_tokens[kv] = llama_payload["generated_tokens"]
-            logit_comparisons = compare_case_logits(qx_logits, llama_logits, case["generation_steps"])
+            activation_comparisons = {
+                activation: compare_case_logits(directory, llama_logits, case["generation_steps"])
+                for activation, directory in qx_logits.items()
+            }
             greedy_results.append({
                 "name": case["name"],
                 "llama_f16_tokens": llama_tokens["f16"],
                 "llama_q8_0_tokens": llama_tokens["q8_0"],
-                "qx_tokens": actual,
-                "logit_comparisons": logit_comparisons,
+                "qx_tokens": qx_tokens["f32"],
+                "logit_comparisons": activation_comparisons["f32"],
+                "qx_activation_bisect": {
+                    activation: {
+                        "qx_tokens": qx_tokens[activation],
+                        "logit_comparisons": comparisons,
+                    }
+                    for activation, comparisons in activation_comparisons.items()
+                },
                 "modalities_reported_separately": True,
                 "status": "passed",
             })
@@ -339,6 +373,21 @@ def run_contract(contract: dict[str, Any], root: Path, work: Path, run_greedy: b
                 "passed": sum(threshold_results),
                 "failed": len(threshold_results) - sum(threshold_results),
                 "claim": "case_local_measurement_only",
+            },
+            "activation_threshold_summary": {
+                activation: {
+                    "comparisons": sum(
+                        len(case["qx_activation_bisect"][activation]["logit_comparisons"]) * 2
+                        for case in greedy_results
+                    ),
+                    "passed": sum(
+                        row[modality]["pass"]
+                        for case in greedy_results
+                        for row in case["qx_activation_bisect"][activation]["logit_comparisons"]
+                        for modality in ("llama_f16", "llama_q8_0")
+                    ),
+                }
+                for activation in activations
             },
             "cases": greedy_results,
         }
@@ -379,10 +428,17 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--run-greedy", action="store_true")
+    parser.add_argument("--qx-activation-bisect", action="store_true")
     args = parser.parse_args()
     contract = load_contract(args.contract)
     with tempfile.TemporaryDirectory(prefix="qx-unicode-chat-") as temp:
-        report = run_contract(contract, args.root.resolve(), Path(temp), run_greedy=args.run_greedy)
+        report = run_contract(
+            contract,
+            args.root.resolve(),
+            Path(temp),
+            run_greedy=args.run_greedy,
+            qx_activation_bisect=args.qx_activation_bisect,
+        )
     publish_report(args.out, report)
     return 0
 

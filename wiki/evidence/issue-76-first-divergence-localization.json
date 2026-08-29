@@ -1,0 +1,95 @@
+{
+  "schema": "qx-first-full-logit-divergence-v1",
+  "issue": 76,
+  "case": {
+    "prompt_token": 42,
+    "step": 0,
+    "layers": 48,
+    "qx_kv": "int8",
+    "qx_activation_control": "f32",
+    "qx_activation_counterfactual": "q8_k_compat",
+    "llama_modalities": [
+      "f16",
+      "q8_0"
+    ],
+    "llama_cpp_commit": "768d2a481a99cb75ec9a03b95dadbd35e7acf496"
+  },
+  "provenance": {
+    "gguf_sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+    "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+    "qxt_sha256": "8ec26e5ae058b271c0e17ee28aea3cf4d2b9ae9a4cd8f68f7aac81e9380761c6",
+    "qxqxf_exe_sha256": "637ecaab7248b0ddabc8e0559b20efa2bdd7d5347f3303cf8a093de069823fdf",
+    "llama_reference_oracle_exe_sha256": "6e1cb12d31affde6d1ae4ad9ef4cf685e58090e209b76e21d45e76cbbea6123e",
+    "llama_sequence_oracle_exe_sha256": "496223986c3d09effcc474329908b8a7fb4b5b6ac68dc0d491dcf5408b79ea91",
+    "activation_matrix_report": "wiki/evidence/issue-76-activation-parity-bisect-report.json",
+    "activation_matrix_report_sha256": "ef5566f5c408ff76b2dd15516e47d78a41974a71aa15e4e4f72e89d90aca349d"
+  },
+  "layer_input_vs_llama": [
+    {
+      "layer": 0,
+      "qx_vs_f16": {"max_abs": 0.0, "rmse": 0.0, "cosine": 1.0, "delta_l2": 0.0},
+      "qx_vs_q8_0": {"max_abs": 0.0, "rmse": 0.0, "cosine": 1.0, "delta_l2": 0.0}
+    },
+    {
+      "layer": 1,
+      "qx_vs_f16": {"max_abs": 0.0007439684122800827, "rmse": 0.00008092719893429669, "cosine": 0.999999904331688, "delta_l2": 0.003662752705272368},
+      "qx_vs_q8_0": {"max_abs": 0.0007531940937042236, "rmse": 0.00008912789027677188, "cosine": 0.9999998839035126, "delta_l2": 0.004033889047500708}
+    },
+    {
+      "layer": 2,
+      "qx_vs_f16": {"max_abs": 0.0348130464553833, "rmse": 0.003787889857854898, "cosine": 0.9997993054772153, "delta_l2": 0.17143110825519396, "gain_from_layer_1": 46.80389755671715},
+      "qx_vs_q8_0": {"max_abs": 0.03291654586791992, "rmse": 0.003881014328728654, "cosine": 0.9997891701761622, "delta_l2": 0.17564556942408324, "gain_from_layer_1": 43.54246860418047}
+    }
+  ],
+  "layer_1_seam_bisect_qx_f32_vs_llama_f16": [
+    {"seam": "input", "delta_l2": 0.003662752705272368, "max_abs": 0.0007439684122800827, "rmse": 0.00008092719893429669, "cosine": 0.999999904331688},
+    {"seam": "ffn_input", "delta_l2": 0.003913364082326724, "max_abs": 0.0007818080484867096, "rmse": 0.0000864735070804122, "cosine": 0.9999998907600358},
+    {"seam": "moe_output", "delta_l2": 0.13708931996178953, "max_abs": 0.02663242816925049, "rmse": 0.003029223572586443, "cosine": 0.9994874637339389, "gain_from_ffn_input": 35.030041926351224},
+    {"seam": "layer_output", "delta_l2": 0.13859068540152256, "max_abs": 0.027310848236083984, "rmse": 0.0030623972816355366, "cosine": 0.9997745487671755}
+  ],
+  "routing_layer_1": {
+    "qx_experts": [68, 75, 95, 98, 31, 20, 59, 16],
+    "llama_experts": [68, 75, 95, 98, 31, 20, 59, 16],
+    "exact_top8_match": true,
+    "weight_max_abs": 0.0000032404281450071357,
+    "weight_rmse": 0.0000021198442980122448,
+    "weight_cosine": 0.9999999999886124
+  },
+  "same_input_layer_1_moe_vs_llama_f16": {
+    "f32": {
+      "moe_output": {"max_abs": 0.5201743841171265, "rmse": 0.03450512750777612, "cosine": 0.9323869624067532}
+    },
+    "q8_k_compat": {
+      "moe_output": {"max_abs": 0.000012069940567016602, "rmse": 0.0000009625820522999267, "cosine": 0.9999999999486029}
+    }
+  },
+  "matrix_outcome": {
+    "tokenizer": "7/7 PASS",
+    "chat_templates": "2/2 PASS",
+    "greedy": "3/3 PASS for f32 and q8_k_compat",
+    "argmax": "12/12 MATCH for f32 and q8_k_compat",
+    "f32_full_logit_thresholds": "0/12 PASS",
+    "q8_k_compat_full_logit_thresholds": "1/12 PASS",
+    "new_threshold_pass": {
+      "case": "token-42",
+      "step": 0,
+      "reference": "llama_q8_0",
+      "max_abs": 0.09974145889282227,
+      "rmse": 0.022075612580387326,
+      "cosine": 0.9999756207184689
+    }
+  },
+  "causal_verdict": {
+    "first_material_amplification": "layer 1 MoE, observed at layer-2 input",
+    "responsible_region": "src/qx_format.c:5286-5303",
+    "cause": "The F32 control dequantizes expert matvec activations while llama.cpp uses modal Q8_K temporaries for these quantized expert tensors. Same-input Q8_K closes the MoE seam; routing and residual add are not the material source.",
+    "safe_change": "Expose an explicit runner bisect that reports f32 and q8_k_compat independently.",
+    "not_claimed": [
+      "global numerical parity",
+      "semantic equivalence",
+      "default promotion",
+      "multi-token KV closure",
+      "CUDA equivalence"
+    ]
+  }
+}
