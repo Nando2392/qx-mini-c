@@ -111,6 +111,8 @@ Those fields must be native integers or floats, excluding booleans and numeric
 strings before normalization; finiteness and sign remain enforced by summaries.
 Each run's long-context profile is validated against the report-level contract
 before profiles are compared, so invalid metadata cannot masquerade as drift.
+The profile field itself is required explicitly in every first and later run,
+distinguishing missing metadata from null or non-object profile values.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation

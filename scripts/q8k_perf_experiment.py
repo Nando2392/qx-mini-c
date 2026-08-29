@@ -736,6 +736,8 @@ def summarize_runs(runs: list[dict[str, Any]]) -> dict[str, Any]:
     run_objects = [_require_object(run, "measured run") for run in runs]
     required_fields = positive_fields + non_negative_fields
     for run in run_objects:
+        if "long_context_profile" not in run:
+            raise ValueError("long_context_profile is required")
         for field in required_fields:
             if field not in run:
                 raise ValueError(f"measured run missing required field: {field}")

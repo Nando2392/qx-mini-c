@@ -1,0 +1,16 @@
+{
+  "issue": 72,
+  "title": "Reject measured runs missing long-context profiles",
+  "scope": "summarize_runs profile field presence only",
+  "red": "first/later missing profile fields were reported as non-object profiles",
+  "green": "every run requires the profile field before shape, contract, and equality validation",
+  "local_gates": ["MSVC PASS", "pytest 108 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["new profile policy", "benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "df02bbe392f3ad3953f71e34cc6572ca4977f94f6f138a363311c3fabede1c6b",
+    "scripts/q8k_perf_experiment.py": "2f728cd27b9de778721f3c36c1cbdbfc2dee814f90393b30af16331c0d999f31",
+    "tests/test_q8k_perf_experiment.py": "5266f9d0686adb319ccb4c46c79e8fbf05f23e4b70ba179d40da630d8cdc5a6d",
+    "wiki/comparisons/optimization-priorities.md": "b6883d0aa70c81351775b8dc8afb499cf75cbe0b397582c14eef8fcac467f07a",
+    "wiki/queries/current-status-and-roadmap.md": "f08ac634518918ef63725d0b9de1aef2cc2a1ff9e0cc5396760387f945d90576"
+  }
+}

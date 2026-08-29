@@ -87,6 +87,7 @@ measured run shape hardening: Issue #68 en verificación local
 measured run field-presence hardening: Issue #69 en verificación local
 measured run metric-type hardening: Issue #70 en verificación local
 measured run profile-contract hardening: Issue #71 en verificación local
+measured run profile-presence hardening: Issue #72 en verificación local
 → paridad global/logits/greedy: pendiente
 ```
 
@@ -197,6 +198,8 @@ Issue #69 exige presencia de todos los campos métricos requeridos en cada run f
 Issue #70 exige tipo numérico nativo para cada métrica first/later antes de `float(...)`. Rechaza bool/string ambiguos; preserva los checks existentes de finitud/signo y no cambia defaults.
 
 Issue #71 aplica el contrato report-level existente a cada profile first/later dentro de `summarize_runs` antes de equality. Rechaza metadata inválida con causa específica; no añade policy ni cambia defaults.
+
+Issue #72 exige presencia explícita de `long_context_profile` en cada run first/later antes de shape/contract/equality. Distingue missing de null/non-object y no cambia defaults.
 
 ## Después
 
