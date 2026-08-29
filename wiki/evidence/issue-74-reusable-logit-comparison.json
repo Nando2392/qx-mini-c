@@ -1,0 +1,29 @@
+{
+  "issue": 74,
+  "title": "Expose reusable full-logit comparison for parity matrices",
+  "scope": "verification tooling API extraction with CLI compatibility",
+  "red": "compare_logits module had no compare_logit_files API",
+  "green": "reusable API returns the existing full-sidecar metrics, thresholds, argmax verdict and pass result; CLI delegates to it",
+  "gates": {
+    "msvc": "pass",
+    "pytest_compare_logits": "3 passed",
+    "pytest_llama_end_to_end_parity": "1 skipped: large real fixtures absent from this worktree",
+    "pytest_tests_test_q8k_perf_experiment_py": "108 passed",
+    "smoke": "pass",
+    "wiki_lint": "pass",
+    "diff_check": "pass"
+  },
+  "staged_blob_sha256": {
+    "README.md": "1b6d25e439f403d32efb372a9f6e85bf93cb447dfec9c53074999546c52d69fb",
+    "scripts/compare_logits.py": "181d32aaac48dcd9fd2eb709f024688665739c7d51e3eaa48bc8e15c2f8e75c0",
+    "tests/test_compare_logits.py": "fb3e49a96d56cdf96b1cda1458303813aaeb8c03a182586b6d39d3aa5f9edd7f",
+    "wiki/comparisons/optimization-priorities.md": "a1f1f9c2c8fdb7d31cafbd5fab83558de81580775c5244a0b6d5daa47e658ae8",
+    "wiki/queries/current-status-and-roadmap.md": "b45080f4f78570c21e9d29a45e5ae6120b830bd54cb50d18407a31126b859854"
+  },
+  "limits": [
+    "no model or oracle execution claim",
+    "no matrix case expansion",
+    "no global parity claim",
+    "no runtime, kernel, default, policy, CUDA or 4K change"
+  ]
+}

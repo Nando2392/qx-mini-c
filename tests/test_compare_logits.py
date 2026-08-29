@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import struct
 import subprocess
@@ -7,6 +8,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPARE = ROOT / "scripts" / "compare_logits.py"
+
+
+def load_compare_module():
+    spec = importlib.util.spec_from_file_location("compare_logits", COMPARE)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(COMPARE.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.pop(0)
+    return module
 
 
 def write_f32(path, values):
@@ -51,3 +64,33 @@ def test_compare_logits_fails_threshold_or_argmax_mismatch(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["argmax_match"] is False
     assert payload["pass"] is False
+
+
+def test_compare_logit_files_returns_reusable_case_metrics(tmp_path):
+    qx = tmp_path / "qx.f32"
+    llama = tmp_path / "llama.f32"
+    write_f32(qx, [1.0, 3.0, 2.0])
+    write_f32(llama, [1.0, 3.0, 2.0])
+
+    payload = load_compare_module().compare_logit_files(
+        qx,
+        llama,
+        max_abs=0.0,
+        rmse=0.0,
+        min_cosine=1.0,
+    )
+
+    assert payload == {
+        "qx": str(qx),
+        "llama": str(llama),
+        "count": 3,
+        "max_abs": 0.0,
+        "rmse": 0.0,
+        "cosine": 1.0,
+        "delta_l2": 0.0,
+        "qx_argmax": 1,
+        "llama_argmax": 1,
+        "argmax_match": True,
+        "thresholds": {"max_abs": 0.0, "rmse": 0.0, "min_cosine": 1.0},
+        "pass": True,
+    }

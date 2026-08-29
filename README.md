@@ -42,6 +42,8 @@ text prompt
 
 The fixed-token QX greedy gate is GREEN for `42 → 1124 → 50853` after the Q5_K decoder/attention fix. Fixed-prompt tokenizer parity against `llama-tokenize` is also GREEN. `Hello!` maps to `[9707, 0]`, prefills both positions and generates `[358, 1184]`. These two sequences exactly match the pinned llama.cpp F16 oracle; broader exact residual/logit and prompt coverage remains gated.
 
+`scripts/compare_logits.py` exposes the same full-sidecar metrics through `compare_logit_files(...)` and its existing CLI. This reusable seam is preparation for case-local parity matrices; it does not itself run a model, expand coverage or claim global logit equivalence.
+
 ## Honest performance state
 
 Measured on the current scalar CPU path:

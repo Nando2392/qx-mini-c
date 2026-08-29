@@ -61,7 +61,7 @@ scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend
 policy provenance gates #27–#42: GREEN local/CI
 long-context measurement/report hardening #43–#65: COMPLETED y publicado
 measured run aggregation hardening #66–#72: COMPLETED y publicado
-→ milestone activo: ampliar de forma acotada la matriz greedy/logits existente; paridad global no afirmada
+→ milestone activo: Issue #74 hace reusable el comparador full-logit; expansión case-local posterior, paridad global no afirmada
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.

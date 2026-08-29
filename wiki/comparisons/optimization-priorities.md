@@ -60,12 +60,15 @@ confidence: medium
 | 46 | measured run metric-type hardening | Issue #70 exige int/float nativos, no bool/string | fail-closed report-level; finitud/signo preservados |
 | 47 | measured run profile-contract hardening | Issue #71 valida profiles first/later antes de equality | reutiliza contrato existente; sin policy nueva |
 | 48 | measured run profile-presence hardening | Issue #72 exige campo profile first/later | distingue missing de null/non-object |
+| 49 | reusable full-logit comparison | Issue #74 extrae la comparación sidecar del CLI | preserva schema/thresholds; aún sin matriz ni claim nuevo |
 
 ## Estado tras el hardening report-level
 
 Issues #27–#72 están completados y publicados. Sus perfiles y validadores son contratos fail-closed, no implementaciones de expert cache, CUDA, GEMM, speculative decoding, KV2, sampling, benchmark 4K, quality sweep ni soak.
 
 El siguiente milestone no continúa el hardening por inercia: reutiliza la matriz CPU/read-only de Issue #22 y el comparador de logits existente para ampliar cobertura case-local con provenance fija. Debe separar llama F16, llama Q8_0 y QX por modalidad, registrar secuencias greedy y métricas de logits completas, y conservar `logit_parity`, `semantic_equivalence` y `global_modality_equivalence` como no afirmadas salvo evidencia futura independiente. CUDA, 4K pesado y promoción de defaults permanecen fuera de ese slice.
+
+Issue #74 inicia ese milestone extrayendo `compare_logit_files(...)` del CLI existente. La API devuelve las mismas métricas, argmax, thresholds y verdict para que un runner posterior pueda consumirlas sin subprocess/JSON; este slice no ejecuta oráculos ni añade casos.
 
 ## No priorizar todavía
 

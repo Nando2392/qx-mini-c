@@ -14,6 +14,35 @@ def argmax(values):
     return max(range(len(values)), key=values.__getitem__)
 
 
+def compare_logit_files(qx, llama, *, max_abs=math.inf, rmse=math.inf, min_cosine=-1.0):
+    qx_values = read_f32(qx)
+    llama_values = read_f32(llama)
+    result = compare_values(qx_values, llama_values)
+    qx_argmax = argmax(qx_values)
+    llama_argmax = argmax(llama_values)
+    passed = (
+        result["max_abs"] <= max_abs
+        and result["rmse"] <= rmse
+        and result["cosine"] >= min_cosine
+        and qx_argmax == llama_argmax
+    )
+    return {
+        "qx": str(qx),
+        "llama": str(llama),
+        "count": len(qx_values),
+        **result,
+        "qx_argmax": qx_argmax,
+        "llama_argmax": llama_argmax,
+        "argmax_match": qx_argmax == llama_argmax,
+        "thresholds": {
+            "max_abs": max_abs,
+            "rmse": rmse,
+            "min_cosine": min_cosine,
+        },
+        "pass": passed,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--qx", required=True, type=Path)
@@ -24,38 +53,19 @@ def main():
     args = parser.parse_args()
 
     try:
-        qx_values = read_f32(args.qx)
-        llama_values = read_f32(args.llama)
-        result = compare_values(qx_values, llama_values)
-        qx_argmax = argmax(qx_values)
-        llama_argmax = argmax(llama_values)
-        passed = (
-            result["max_abs"] <= args.max_abs
-            and result["rmse"] <= args.rmse
-            and result["cosine"] >= args.min_cosine
-            and qx_argmax == llama_argmax
+        payload = compare_logit_files(
+            args.qx,
+            args.llama,
+            max_abs=args.max_abs,
+            rmse=args.rmse,
+            min_cosine=args.min_cosine,
         )
-        payload = {
-            "qx": str(args.qx),
-            "llama": str(args.llama),
-            "count": len(qx_values),
-            **result,
-            "qx_argmax": qx_argmax,
-            "llama_argmax": llama_argmax,
-            "argmax_match": qx_argmax == llama_argmax,
-            "thresholds": {
-                "max_abs": args.max_abs,
-                "rmse": args.rmse,
-                "min_cosine": args.min_cosine,
-            },
-            "pass": passed,
-        }
     except (OSError, ValueError) as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return 2
 
     print(json.dumps(payload, indent=2))
-    return 0 if passed else 1
+    return 0 if payload["pass"] else 1
 
 
 if __name__ == "__main__":
