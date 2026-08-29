@@ -1,0 +1,29 @@
+{
+  "issue": 73,
+  "title": "Reconcile roadmap state and select the next parity milestone",
+  "scope": "documentation-only roadmap reconciliation",
+  "source_check": {
+    "issues": "43-72",
+    "queried_count": 30,
+    "not_closed": 0
+  },
+  "red": "roadmap still contained en verificacion local markers after all 30 issues were closed",
+  "green": "stale markers removed; delivered hardening and active/deferred work separated",
+  "gates": {
+    "msvc": "pass",
+    "pytest_tests_test_q8k_perf_experiment_py": "108 passed",
+    "smoke": "pass",
+    "wiki_lint": "pass",
+    "diff_check": "pass"
+  },
+  "staged_blob_sha256": {
+    "wiki/queries/current-status-and-roadmap.md": "3594583d3db657a978caab4ada8e125a65d303adf8cb093c0487bf72d57ce904",
+    "wiki/comparisons/optimization-priorities.md": "4786d5bf2c3c66c5ecf8fd96b6dc071e6fd774ba056d06ec6de7f919e0ae49a3"
+  },
+  "limits": [
+    "no runtime or test behavior change",
+    "no policy or default change",
+    "no benchmark or global parity claim",
+    "no CUDA, 4K, RSS enforcement, allocator or kernel work"
+  ]
+}

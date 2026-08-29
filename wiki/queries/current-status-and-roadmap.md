@@ -58,37 +58,10 @@ snapshot/replay de KV acumulado: GREEN; baseline 3 posiciones == captura 2 + rep
 baseline CPU A/B F32/Q8_K: GREEN local; prefill/decode/total/RSS separados
 QXF mmap read-only opt-in: GREEN local WSL2; gate 2x2 exacto por modalidad, buffered permanece default
 scratch persistente opt-in: GREEN local; gate 2x2x2 exacto por modalidad/backend, ephemeral permanece default
-policy provenance gates #27–#42: GREEN local/CI; Issue #43 long-context measurement metadata en verificación local
-long-context measurement inactive counters: Issue #44 en verificación local
-long-context measurement RSS metadata: Issue #45 en verificación local
-long-context measurement RSS negative-limit hardening: Issue #46 en verificación local
-long-context measurement run-count hardening: Issue #47 en verificación local
-long-context measurement RSS count presence hardening: Issue #48 en verificación local
-long-context measurement RSS summary shape hardening: Issue #49 en verificación local
-long-context measurement empty-report hardening: Issue #50 en verificación local
-long-context benchmark cell shape hardening: Issue #51 en verificación local
-long-context benchmark profile presence hardening: Issue #52 en verificación local
-long-context benchmark summary presence hardening: Issue #53 en verificación local
-inactive long-context RSS limit hardening: Issue #54 en verificación local
-long-context benchmark enabled-state hardening: Issue #55 en verificación local
-long-context disabled-reason hardening: Issue #56 en verificación local
-long-context policy allowlist hardening: Issue #57 en verificación local
-long-context numeric profile hardening: Issue #58 en verificación local
-long-context target profile hardening: Issue #59 en verificación local
-inactive long-context RSS profile hardening: Issue #60 en verificación local
-long-context KV-quality profile hardening: Issue #61 en verificación local
-long-context soak profile hardening: Issue #62 en verificación local
-long-context measured ctx hardening: Issue #63 en verificación local
-long-context measurement cells container hardening: Issue #64 en verificación local
-long-context profile aggregator container hardening: Issue #65 en verificación local
-measured run emptiness hardening: Issue #66 en verificación local
-measured run container hardening: Issue #67 en verificación local
-measured run shape hardening: Issue #68 en verificación local
-measured run field-presence hardening: Issue #69 en verificación local
-measured run metric-type hardening: Issue #70 en verificación local
-measured run profile-contract hardening: Issue #71 en verificación local
-measured run profile-presence hardening: Issue #72 en verificación local
-→ paridad global/logits/greedy: pendiente
+policy provenance gates #27–#42: GREEN local/CI
+long-context measurement/report hardening #43–#65: COMPLETED y publicado
+measured run aggregation hardening #66–#72: COMPLETED y publicado
+→ milestone activo: ampliar de forma acotada la matriz greedy/logits existente; paridad global no afirmada
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -203,9 +176,10 @@ Issue #72 exige presencia explícita de `long_context_profile` en cada run first
 
 ## Después
 
-1. Aplicar [[optimization-priorities]] CPU manteniendo A/B F32/Q8_K.
-2. Diseñar backend CUDA híbrido sin asumir temporal Q8_K CPU.
-3. Convertir contratos 4K/RSS/calidad KV/soak en mediciones reales sólo con gates reproducibles.
+1. Ampliar el seam existente de Issue #22 con un slice CPU/read-only de prompts/tokens y métricas de logits, conservando cada modalidad separada y claims case-local.
+2. Elegir una sola [[optimization-priorities|optimización CPU]] mediante el baseline A/B F32/Q8_K; no promover defaults sin outputs y mediciones reproducibles.
+3. Convertir contratos 4K/RSS/calidad KV/soak en mediciones reales sólo con gates reproducibles y fuera del CI pesado por defecto.
+4. Diseñar CUDA híbrido únicamente después de cerrar el milestone CPU/paridad y medir transferencias/residency; no asumir que el temporal Q8_K CPU es un contrato CUDA.
 
 ## Riesgos
 
