@@ -1,0 +1,2060 @@
+{
+  "chat_template": {
+    "cases": [
+      {
+        "name": "system-user-generation",
+        "status": "passed",
+        "token_ids": [
+          151644,
+          8948,
+          198,
+          1061,
+          75049,
+          662,
+          69888,
+          13,
+          151645,
+          198,
+          151644,
+          872,
+          198,
+          30182,
+          65706,
+          67732,
+          51950,
+          25125,
+          243,
+          30,
+          151645,
+          198,
+          151644,
+          77091,
+          198
+        ],
+        "utf8_bytes": 128
+      },
+      {
+        "name": "user-assistant-no-generation",
+        "status": "passed",
+        "token_ids": [
+          151644,
+          872,
+          198,
+          68012,
+          11162,
+          234,
+          235,
+          151645,
+          198,
+          151644,
+          77091,
+          198,
+          39832,
+          68012,
+          0,
+          151645,
+          198
+        ],
+        "utf8_bytes": 77
+      }
+    ],
+    "passed": 2
+  },
+  "claims": {
+    "chat_template_render": "case_local",
+    "global_modality_equivalence": "not_claimed",
+    "greedy_sequence": "case_and_modality_local",
+    "logit_parity": "not_claimed",
+    "semantic_equivalence": "not_claimed",
+    "tokenizer_parity": "case_local"
+  },
+  "greedy": {
+    "activation_threshold_summary": {
+      "f32": {
+        "comparisons": 12,
+        "passed": 0
+      },
+      "q8_k_compat": {
+        "comparisons": 12,
+        "passed": 1
+      }
+    },
+    "cases": [
+      {
+        "llama_f16_tokens": [
+          1124,
+          50853
+        ],
+        "llama_q8_0_tokens": [
+          1124,
+          50853
+        ],
+        "logit_comparisons": [
+          {
+            "llama_f16": {
+              "argmax_match": true,
+              "cosine": 0.9982447099343446,
+              "count": 151936,
+              "delta_l2": 79.54494382160978,
+              "llama": "step-0-logits.f32",
+              "llama_argmax": 1124,
+              "max_abs": 1.5876102447509766,
+              "pass": false,
+              "qx": "step-0-logits.f32",
+              "qx_argmax": 1124,
+              "rmse": 0.2040714428793418,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "llama_q8_0": {
+              "argmax_match": true,
+              "cosine": 0.9983492329240349,
+              "count": 151936,
+              "delta_l2": 75.0189782304823,
+              "llama": "step-0-logits.f32",
+              "llama_argmax": 1124,
+              "max_abs": 1.5481576919555664,
+              "pass": false,
+              "qx": "step-0-logits.f32",
+              "qx_argmax": 1124,
+              "rmse": 0.19246014134049128,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "step": 0
+          },
+          {
+            "llama_f16": {
+              "argmax_match": true,
+              "cosine": 0.9990292084757678,
+              "count": 151936,
+              "delta_l2": 41.88046125877013,
+              "llama": "step-1-logits.f32",
+              "llama_argmax": 50853,
+              "max_abs": 0.535797119140625,
+              "pass": false,
+              "qx": "step-1-logits.f32",
+              "qx_argmax": 50853,
+              "rmse": 0.10744373868308348,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "llama_q8_0": {
+              "argmax_match": true,
+              "cosine": 0.998564373298957,
+              "count": 151936,
+              "delta_l2": 54.04189453178331,
+              "llama": "step-1-logits.f32",
+              "llama_argmax": 50853,
+              "max_abs": 0.517288327217102,
+              "pass": false,
+              "qx": "step-1-logits.f32",
+              "qx_argmax": 50853,
+              "rmse": 0.13864372596411556,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "step": 1
+          }
+        ],
+        "modalities_reported_separately": true,
+        "name": "token-42",
+        "qx_accumulated_kv_activation_bisect": {
+          "axis_effects": {
+            "continuation_activation_change": {
+              "prefix_f32": {
+                "argmax_match": true,
+                "cosine": 0.9993876130277475,
+                "count": 151936,
+                "delta_l2": 33.60304571785832,
+                "left": "prefix-f32\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.44080066680908203,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "right": "prefix-f32\\continue-q8_k_compat",
+                "rmse": 0.08620814467054658,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_q8_k_compat": {
+                "argmax_match": true,
+                "cosine": 0.9994493843528536,
+                "count": 151936,
+                "delta_l2": 31.66654863428553,
+                "left": "prefix-q8_k_compat\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.41857290267944336,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "right": "prefix-q8_k_compat\\continue-q8_k_compat",
+                "rmse": 0.08124008843729824,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              }
+            },
+            "prefix_activation_change": {
+              "continuation_f32": {
+                "argmax_match": true,
+                "cosine": 0.9997993749050371,
+                "count": 151936,
+                "delta_l2": 20.244239698770635,
+                "left": "prefix-f32\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.2751011848449707,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "right": "prefix-q8_k_compat\\continue-f32",
+                "rmse": 0.05193631432550014,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "continuation_q8_k_compat": {
+                "argmax_match": true,
+                "cosine": 0.9988974569326153,
+                "count": 151936,
+                "delta_l2": 44.49399675592175,
+                "left": "prefix-f32\\continue-q8_k_compat",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.560662031173706,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "right": "prefix-q8_k_compat\\continue-q8_k_compat",
+                "rmse": 0.11414872751450704,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              }
+            }
+          },
+          "cells": [
+            {
+              "continuation_activation": "f32",
+              "diagonal_exact": true,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9990292084757678,
+                "count": 151936,
+                "delta_l2": 41.88046125877013,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.535797119140625,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "rmse": 0.10744373868308348,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.998564373298957,
+                "count": 151936,
+                "delta_l2": 54.04189453178331,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.517288327217102,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "rmse": 0.13864372596411556,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "f32",
+              "routing_changed_layers_vs_diagonal": [],
+              "selected_token": 50853
+            },
+            {
+              "continuation_activation": "q8_k_compat",
+              "diagonal_exact": false,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9988009168562776,
+                "count": 151936,
+                "delta_l2": 46.36646972868423,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.5662713050842285,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "rmse": 0.1189525307852864,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9984078282302461,
+                "count": 151936,
+                "delta_l2": 58.40499785889082,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.5550436973571777,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "rmse": 0.1498372066382775,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "f32",
+              "routing_changed_layers_vs_diagonal": [
+                3,
+                8,
+                11,
+                14,
+                18,
+                19,
+                20,
+                22,
+                24,
+                26,
+                27,
+                28,
+                30,
+                31,
+                32,
+                33,
+                35,
+                37,
+                44,
+                45,
+                46
+              ],
+              "selected_token": 50853
+            },
+            {
+              "continuation_activation": "f32",
+              "diagonal_exact": false,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.999171560375688,
+                "count": 151936,
+                "delta_l2": 38.67103856420424,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.49017852544784546,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "rmse": 0.09921000956563532,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9985594952177914,
+                "count": 151936,
+                "delta_l2": 56.578695747511894,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.49688661098480225,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "rmse": 0.1451518540678048,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "q8_k_compat",
+              "routing_changed_layers_vs_diagonal": [
+                1,
+                3,
+                5,
+                6,
+                7,
+                9,
+                10,
+                11,
+                14,
+                17,
+                18,
+                19,
+                20,
+                22,
+                25,
+                26,
+                27,
+                28,
+                29,
+                31,
+                33,
+                34,
+                35,
+                36,
+                38,
+                45,
+                46
+              ],
+              "selected_token": 50853
+            },
+            {
+              "continuation_activation": "q8_k_compat",
+              "diagonal_exact": true,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9990384588484048,
+                "count": 151936,
+                "delta_l2": 41.51926420391145,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.5015414953231812,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "rmse": 0.10651709268137047,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9985511341869185,
+                "count": 151936,
+                "delta_l2": 55.08130682131687,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 50853,
+                "max_abs": 0.6285190582275391,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 50853,
+                "rmse": 0.1413103236820966,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "q8_k_compat",
+              "routing_changed_layers_vs_diagonal": [],
+              "selected_token": 50853
+            }
+          ],
+          "claims": {
+            "causal_scope": "case_local_cross_activation_replay",
+            "default_promotion": "not_claimed",
+            "global_parity": "not_claimed"
+          },
+          "continuation_step": 1,
+          "kv_format": "int8",
+          "snapshots": {
+            "f32": {
+              "bytes": 49616,
+              "next_token": 1124,
+              "sha256": "62f2ca3d8ef82e7b6ab520187895d5e834c77b201d6782b10c41f2cc40a5d8d4"
+            },
+            "q8_k_compat": {
+              "bytes": 49616,
+              "next_token": 1124,
+              "sha256": "f48858d2e4dec8125afe97492d20bdb918d806ed7a91da1d37e35a8ad1e6010d"
+            }
+          }
+        },
+        "qx_activation_bisect": {
+          "f32": {
+            "logit_comparisons": [
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9982447099343446,
+                  "count": 151936,
+                  "delta_l2": 79.54494382160978,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 1.5876102447509766,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.2040714428793418,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9983492329240349,
+                  "count": 151936,
+                  "delta_l2": 75.0189782304823,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 1.5481576919555664,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.19246014134049128,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 0
+              },
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9990292084757678,
+                  "count": 151936,
+                  "delta_l2": 41.88046125877013,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 50853,
+                  "max_abs": 0.535797119140625,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 50853,
+                  "rmse": 0.10744373868308348,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.998564373298957,
+                  "count": 151936,
+                  "delta_l2": 54.04189453178331,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 50853,
+                  "max_abs": 0.517288327217102,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 50853,
+                  "rmse": 0.13864372596411556,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 1
+              }
+            ],
+            "qx_tokens": [
+              1124,
+              50853
+            ]
+          },
+          "q8_k_compat": {
+            "logit_comparisons": [
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9999592508084231,
+                  "count": 151936,
+                  "delta_l2": 11.706443609969794,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 0.1434946060180664,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.03003271765242213,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9999756207184689,
+                  "count": 151936,
+                  "delta_l2": 8.60484611544976,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 0.09974145889282227,
+                  "pass": true,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.022075612580387326,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 0
+              },
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9990384588484048,
+                  "count": 151936,
+                  "delta_l2": 41.51926420391145,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 50853,
+                  "max_abs": 0.5015414953231812,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 50853,
+                  "rmse": 0.10651709268137047,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9985511341869185,
+                  "count": 151936,
+                  "delta_l2": 55.08130682131687,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 50853,
+                  "max_abs": 0.6285190582275391,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 50853,
+                  "rmse": 0.1413103236820966,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 1
+              }
+            ],
+            "qx_tokens": [
+              1124,
+              50853
+            ]
+          }
+        },
+        "qx_tokens": [
+          1124,
+          50853
+        ],
+        "status": "passed"
+      },
+      {
+        "llama_f16_tokens": [
+          1124,
+          8
+        ],
+        "llama_q8_0_tokens": [
+          1124,
+          8
+        ],
+        "logit_comparisons": [
+          {
+            "llama_f16": {
+              "argmax_match": true,
+              "cosine": 0.9983760154965448,
+              "count": 151936,
+              "delta_l2": 83.8056837710952,
+              "llama": "step-0-logits.f32",
+              "llama_argmax": 1124,
+              "max_abs": 1.5607609748840332,
+              "pass": false,
+              "qx": "step-0-logits.f32",
+              "qx_argmax": 1124,
+              "rmse": 0.21500231173726828,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "llama_q8_0": {
+              "argmax_match": true,
+              "cosine": 0.9983889180735096,
+              "count": 151936,
+              "delta_l2": 84.57832958445238,
+              "llama": "step-0-logits.f32",
+              "llama_argmax": 1124,
+              "max_abs": 1.549234390258789,
+              "pass": false,
+              "qx": "step-0-logits.f32",
+              "qx_argmax": 1124,
+              "rmse": 0.21698452378483837,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "step": 0
+          },
+          {
+            "llama_f16": {
+              "argmax_match": true,
+              "cosine": 0.999252240105324,
+              "count": 151936,
+              "delta_l2": 39.95971540394473,
+              "llama": "step-1-logits.f32",
+              "llama_argmax": 8,
+              "max_abs": 0.4629029631614685,
+              "pass": false,
+              "qx": "step-1-logits.f32",
+              "qx_argmax": 8,
+              "rmse": 0.10251609200728999,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "llama_q8_0": {
+              "argmax_match": true,
+              "cosine": 0.9992296720554332,
+              "count": 151936,
+              "delta_l2": 40.998912163127656,
+              "llama": "step-1-logits.f32",
+              "llama_argmax": 8,
+              "max_abs": 0.5086169242858887,
+              "pass": false,
+              "qx": "step-1-logits.f32",
+              "qx_argmax": 8,
+              "rmse": 0.10518213678516541,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "step": 1
+          }
+        ],
+        "modalities_reported_separately": true,
+        "name": "token-56",
+        "qx_accumulated_kv_activation_bisect": {
+          "axis_effects": {
+            "continuation_activation_change": {
+              "prefix_f32": {
+                "argmax_match": true,
+                "cosine": 0.9990256501137873,
+                "count": 151936,
+                "delta_l2": 48.12289989219364,
+                "left": "prefix-f32\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.5185462236404419,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "right": "prefix-f32\\continue-q8_k_compat",
+                "rmse": 0.12345862784895405,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_q8_k_compat": {
+                "argmax_match": true,
+                "cosine": 0.9987792466822868,
+                "count": 151936,
+                "delta_l2": 55.65553089541976,
+                "left": "prefix-q8_k_compat\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.5296130180358887,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "right": "prefix-q8_k_compat\\continue-q8_k_compat",
+                "rmse": 0.14278348752769598,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              }
+            },
+            "prefix_activation_change": {
+              "continuation_f32": {
+                "argmax_match": true,
+                "cosine": 0.9992663151489285,
+                "count": 151936,
+                "delta_l2": 40.32172616719872,
+                "left": "prefix-f32\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.4934964179992676,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "right": "prefix-q8_k_compat\\continue-f32",
+                "rmse": 0.1034448255665313,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "continuation_q8_k_compat": {
+                "argmax_match": true,
+                "cosine": 0.9982769514594899,
+                "count": 151936,
+                "delta_l2": 67.48999796356567,
+                "left": "prefix-f32\\continue-q8_k_compat",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.6604838371276855,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "right": "prefix-q8_k_compat\\continue-q8_k_compat",
+                "rmse": 0.17314464757478487,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              }
+            }
+          },
+          "cells": [
+            {
+              "continuation_activation": "f32",
+              "diagonal_exact": true,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.999252240105324,
+                "count": 151936,
+                "delta_l2": 39.95971540394473,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.4629029631614685,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "rmse": 0.10251609200728999,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9992296720554332,
+                "count": 151936,
+                "delta_l2": 40.998912163127656,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.5086169242858887,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "rmse": 0.10518213678516541,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "f32",
+              "routing_changed_layers_vs_diagonal": [],
+              "selected_token": 8
+            },
+            {
+              "continuation_activation": "q8_k_compat",
+              "diagonal_exact": false,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9984524110484931,
+                "count": 151936,
+                "delta_l2": 59.16748412302941,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.684441328048706,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "rmse": 0.1517933545041607,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9986469093148073,
+                "count": 151936,
+                "delta_l2": 54.0119401422414,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.683072566986084,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "rmse": 0.13856687839592696,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "f32",
+              "routing_changed_layers_vs_diagonal": [
+                2,
+                4,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                15,
+                16,
+                18,
+                21,
+                22,
+                23,
+                24,
+                26,
+                27,
+                28,
+                29,
+                31,
+                32,
+                35,
+                37,
+                38,
+                39,
+                40,
+                47
+              ],
+              "selected_token": 8
+            },
+            {
+              "continuation_activation": "f32",
+              "diagonal_exact": false,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9991458503609165,
+                "count": 151936,
+                "delta_l2": 43.25194155709141,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.4915264844894409,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "rmse": 0.11096225224174136,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9989952486468844,
+                "count": 151936,
+                "delta_l2": 46.016275540610614,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.5224056243896484,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "rmse": 0.11805411248470389,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "q8_k_compat",
+              "routing_changed_layers_vs_diagonal": [
+                6,
+                10,
+                11,
+                14,
+                16,
+                18,
+                22,
+                23,
+                25,
+                28,
+                30,
+                31,
+                32,
+                33,
+                36,
+                40,
+                42,
+                43
+              ],
+              "selected_token": 8
+            },
+            {
+              "continuation_activation": "q8_k_compat",
+              "diagonal_exact": true,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9987304145220766,
+                "count": 151936,
+                "delta_l2": 54.23138598488683,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.6872477531433105,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "rmse": 0.1391298636416386,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9986989554329154,
+                "count": 151936,
+                "delta_l2": 56.61138761017018,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 8,
+                "max_abs": 0.6090607643127441,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 8,
+                "rmse": 0.14523572458505668,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "q8_k_compat",
+              "routing_changed_layers_vs_diagonal": [],
+              "selected_token": 8
+            }
+          ],
+          "claims": {
+            "causal_scope": "case_local_cross_activation_replay",
+            "default_promotion": "not_claimed",
+            "global_parity": "not_claimed"
+          },
+          "continuation_step": 1,
+          "kv_format": "int8",
+          "snapshots": {
+            "f32": {
+              "bytes": 49616,
+              "next_token": 1124,
+              "sha256": "9be58f1ef0cd4c4a2b1574476de0de415f8b822517b9b7731cb0c6e95564f523"
+            },
+            "q8_k_compat": {
+              "bytes": 49616,
+              "next_token": 1124,
+              "sha256": "bc7bbbe16be856164e8fcec2ce51f2db8188c1e8045e48c8423ab7e1411c0098"
+            }
+          }
+        },
+        "qx_activation_bisect": {
+          "f32": {
+            "logit_comparisons": [
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9983760154965448,
+                  "count": 151936,
+                  "delta_l2": 83.8056837710952,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 1.5607609748840332,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.21500231173726828,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9983889180735096,
+                  "count": 151936,
+                  "delta_l2": 84.57832958445238,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 1.549234390258789,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.21698452378483837,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 0
+              },
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.999252240105324,
+                  "count": 151936,
+                  "delta_l2": 39.95971540394473,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 8,
+                  "max_abs": 0.4629029631614685,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 8,
+                  "rmse": 0.10251609200728999,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9992296720554332,
+                  "count": 151936,
+                  "delta_l2": 40.998912163127656,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 8,
+                  "max_abs": 0.5086169242858887,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 8,
+                  "rmse": 0.10518213678516541,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 1
+              }
+            ],
+            "qx_tokens": [
+              1124,
+              8
+            ]
+          },
+          "q8_k_compat": {
+            "logit_comparisons": [
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.999948512396659,
+                  "count": 151936,
+                  "delta_l2": 15.358339634586647,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 0.15702247619628906,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.03940160592092367,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9999470694769443,
+                  "count": 151936,
+                  "delta_l2": 16.655771371581924,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 0.17723321914672852,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.0427301489292619,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 0
+              },
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9987304145220766,
+                  "count": 151936,
+                  "delta_l2": 54.23138598488683,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 8,
+                  "max_abs": 0.6872477531433105,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 8,
+                  "rmse": 0.1391298636416386,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9986989554329154,
+                  "count": 151936,
+                  "delta_l2": 56.61138761017018,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 8,
+                  "max_abs": 0.6090607643127441,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 8,
+                  "rmse": 0.14523572458505668,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 1
+              }
+            ],
+            "qx_tokens": [
+              1124,
+              8
+            ]
+          }
+        },
+        "qx_tokens": [
+          1124,
+          8
+        ],
+        "status": "passed"
+      },
+      {
+        "llama_f16_tokens": [
+          1124,
+          67075
+        ],
+        "llama_q8_0_tokens": [
+          1124,
+          67075
+        ],
+        "logit_comparisons": [
+          {
+            "llama_f16": {
+              "argmax_match": true,
+              "cosine": 0.9985106195486891,
+              "count": 151936,
+              "delta_l2": 56.1317107178243,
+              "llama": "step-0-logits.f32",
+              "llama_argmax": 1124,
+              "max_abs": 1.115006923675537,
+              "pass": false,
+              "qx": "step-0-logits.f32",
+              "qx_argmax": 1124,
+              "rmse": 0.14400512021431966,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "llama_q8_0": {
+              "argmax_match": true,
+              "cosine": 0.9986067487154012,
+              "count": 151936,
+              "delta_l2": 54.582703582162544,
+              "llama": "step-0-logits.f32",
+              "llama_argmax": 1124,
+              "max_abs": 1.0235276222229004,
+              "pass": false,
+              "qx": "step-0-logits.f32",
+              "qx_argmax": 1124,
+              "rmse": 0.14003116403284563,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "step": 0
+          },
+          {
+            "llama_f16": {
+              "argmax_match": true,
+              "cosine": 0.9957928550764539,
+              "count": 151936,
+              "delta_l2": 77.92201830341976,
+              "llama": "step-1-logits.f32",
+              "llama_argmax": 67075,
+              "max_abs": 0.8437423706054688,
+              "pass": false,
+              "qx": "step-1-logits.f32",
+              "qx_argmax": 67075,
+              "rmse": 0.19990785011943638,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "llama_q8_0": {
+              "argmax_match": true,
+              "cosine": 0.9957511097756694,
+              "count": 151936,
+              "delta_l2": 77.62645146186917,
+              "llama": "step-1-logits.f32",
+              "llama_argmax": 67075,
+              "max_abs": 0.8023912906646729,
+              "pass": false,
+              "qx": "step-1-logits.f32",
+              "qx_argmax": 67075,
+              "rmse": 0.19914957751372822,
+              "thresholds": {
+                "max_abs": 0.1,
+                "min_cosine": 0.99,
+                "rmse": 0.1
+              }
+            },
+            "step": 1
+          }
+        ],
+        "modalities_reported_separately": true,
+        "name": "token-1000",
+        "qx_accumulated_kv_activation_bisect": {
+          "axis_effects": {
+            "continuation_activation_change": {
+              "prefix_f32": {
+                "argmax_match": false,
+                "cosine": 0.9943556057756625,
+                "count": 151936,
+                "delta_l2": 102.93462340134356,
+                "left": "prefix-f32\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 1318,
+                "max_abs": 0.9193572998046875,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "right": "prefix-f32\\continue-q8_k_compat",
+                "rmse": 0.2640773393072306,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_q8_k_compat": {
+                "argmax_match": true,
+                "cosine": 0.9985438270910054,
+                "count": 151936,
+                "delta_l2": 46.260204694257915,
+                "left": "prefix-q8_k_compat\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 0.41976940631866455,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "right": "prefix-q8_k_compat\\continue-q8_k_compat",
+                "rmse": 0.11867990932298915,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              }
+            },
+            "prefix_activation_change": {
+              "continuation_f32": {
+                "argmax_match": true,
+                "cosine": 0.9977366022666174,
+                "count": 151936,
+                "delta_l2": 56.30174796434279,
+                "left": "prefix-f32\\continue-f32",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 0.7347577810287476,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "right": "prefix-q8_k_compat\\continue-f32",
+                "rmse": 0.14444134839644115,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "continuation_q8_k_compat": {
+                "argmax_match": false,
+                "cosine": 0.9869697178642796,
+                "count": 151936,
+                "delta_l2": 151.93866549442285,
+                "left": "prefix-f32\\continue-q8_k_compat",
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 1.244032859802246,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 1318,
+                "right": "prefix-q8_k_compat\\continue-q8_k_compat",
+                "rmse": 0.3897965251712846,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              }
+            }
+          },
+          "cells": [
+            {
+              "continuation_activation": "f32",
+              "diagonal_exact": true,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9957928550764539,
+                "count": 151936,
+                "delta_l2": 77.92201830341976,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 0.8437423706054688,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "rmse": 0.19990785011943638,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9957511097756694,
+                "count": 151936,
+                "delta_l2": 77.62645146186917,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 0.8023912906646729,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "rmse": 0.19914957751372822,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "f32",
+              "routing_changed_layers_vs_diagonal": [],
+              "selected_token": 67075
+            },
+            {
+              "continuation_activation": "q8_k_compat",
+              "diagonal_exact": false,
+              "llama_f16": {
+                "argmax_match": false,
+                "cosine": 0.9862885317755524,
+                "count": 151936,
+                "delta_l2": 155.2008592912841,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 1.29398775100708,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 1318,
+                "rmse": 0.39816563781495534,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": false,
+                "cosine": 0.9860063246153429,
+                "count": 151936,
+                "delta_l2": 155.12060912988036,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 1.1112032532691956,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 1318,
+                "rmse": 0.39795975714621434,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "f32",
+              "routing_changed_layers_vs_diagonal": [
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                15,
+                16,
+                17,
+                18,
+                19,
+                21,
+                22,
+                23,
+                24,
+                25,
+                26,
+                27,
+                28,
+                32,
+                34,
+                35,
+                36,
+                37,
+                39,
+                40,
+                41,
+                42,
+                43,
+                44,
+                45,
+                46,
+                47
+              ],
+              "selected_token": 1318
+            },
+            {
+              "continuation_activation": "f32",
+              "diagonal_exact": false,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9963460228872226,
+                "count": 151936,
+                "delta_l2": 71.64150689267957,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 1.0540781021118164,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "rmse": 0.18379528577487858,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9950568868891267,
+                "count": 151936,
+                "delta_l2": 82.64299894448081,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 0.9175010919570923,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "rmse": 0.21201946004636474,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "q8_k_compat",
+              "routing_changed_layers_vs_diagonal": [
+                0,
+                3,
+                4,
+                5,
+                9,
+                10,
+                15,
+                18,
+                19,
+                21,
+                23,
+                27,
+                28,
+                30,
+                31,
+                32,
+                33,
+                34,
+                35,
+                36,
+                38,
+                40,
+                41,
+                42,
+                44,
+                45,
+                46
+              ],
+              "selected_token": 67075
+            },
+            {
+              "continuation_activation": "q8_k_compat",
+              "diagonal_exact": true,
+              "llama_f16": {
+                "argmax_match": true,
+                "cosine": 0.9967584601144017,
+                "count": 151936,
+                "delta_l2": 65.88866481944645,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 1.0016956329345703,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "rmse": 0.16903644974911558,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "llama_q8_0": {
+                "argmax_match": true,
+                "cosine": 0.9958654290057679,
+                "count": 151936,
+                "delta_l2": 74.71929273320659,
+                "llama": "step-1-logits.f32",
+                "llama_argmax": 67075,
+                "max_abs": 0.9658932685852051,
+                "pass": false,
+                "qx": "step-1-logits.f32",
+                "qx_argmax": 67075,
+                "rmse": 0.19169130238101922,
+                "thresholds": {
+                  "max_abs": 0.1,
+                  "min_cosine": 0.99,
+                  "rmse": 0.1
+                }
+              },
+              "prefix_activation": "q8_k_compat",
+              "routing_changed_layers_vs_diagonal": [],
+              "selected_token": 67075
+            }
+          ],
+          "claims": {
+            "causal_scope": "case_local_cross_activation_replay",
+            "default_promotion": "not_claimed",
+            "global_parity": "not_claimed"
+          },
+          "continuation_step": 1,
+          "kv_format": "int8",
+          "snapshots": {
+            "f32": {
+              "bytes": 49616,
+              "next_token": 1124,
+              "sha256": "a419c290310725f744a96c4d9da0d7b1b9206804b39e9f7002bf9a03622b84a0"
+            },
+            "q8_k_compat": {
+              "bytes": 49616,
+              "next_token": 1124,
+              "sha256": "e3242fa749109359610ab209300c792e9781926b0b59678434097d1e3c3e22eb"
+            }
+          }
+        },
+        "qx_activation_bisect": {
+          "f32": {
+            "logit_comparisons": [
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9985106195486891,
+                  "count": 151936,
+                  "delta_l2": 56.1317107178243,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 1.115006923675537,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.14400512021431966,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9986067487154012,
+                  "count": 151936,
+                  "delta_l2": 54.582703582162544,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 1.0235276222229004,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.14003116403284563,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 0
+              },
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9957928550764539,
+                  "count": 151936,
+                  "delta_l2": 77.92201830341976,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 67075,
+                  "max_abs": 0.8437423706054688,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 67075,
+                  "rmse": 0.19990785011943638,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9957511097756694,
+                  "count": 151936,
+                  "delta_l2": 77.62645146186917,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 67075,
+                  "max_abs": 0.8023912906646729,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 67075,
+                  "rmse": 0.19914957751372822,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 1
+              }
+            ],
+            "qx_tokens": [
+              1124,
+              67075
+            ]
+          },
+          "q8_k_compat": {
+            "logit_comparisons": [
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9998698036944617,
+                  "count": 151936,
+                  "delta_l2": 15.889426548901387,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 0.2161388397216797,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.040764101985307125,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9999140584690862,
+                  "count": 151936,
+                  "delta_l2": 12.90702871129651,
+                  "llama": "step-0-logits.f32",
+                  "llama_argmax": 1124,
+                  "max_abs": 0.1645645946264267,
+                  "pass": false,
+                  "qx": "step-0-logits.f32",
+                  "qx_argmax": 1124,
+                  "rmse": 0.03311280196898964,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 0
+              },
+              {
+                "llama_f16": {
+                  "argmax_match": true,
+                  "cosine": 0.9967584601144017,
+                  "count": 151936,
+                  "delta_l2": 65.88866481944645,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 67075,
+                  "max_abs": 1.0016956329345703,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 67075,
+                  "rmse": 0.16903644974911558,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "llama_q8_0": {
+                  "argmax_match": true,
+                  "cosine": 0.9958654290057679,
+                  "count": 151936,
+                  "delta_l2": 74.71929273320659,
+                  "llama": "step-1-logits.f32",
+                  "llama_argmax": 67075,
+                  "max_abs": 0.9658932685852051,
+                  "pass": false,
+                  "qx": "step-1-logits.f32",
+                  "qx_argmax": 67075,
+                  "rmse": 0.19169130238101922,
+                  "thresholds": {
+                    "max_abs": 0.1,
+                    "min_cosine": 0.99,
+                    "rmse": 0.1
+                  }
+                },
+                "step": 1
+              }
+            ],
+            "qx_tokens": [
+              1124,
+              67075
+            ]
+          }
+        },
+        "qx_tokens": [
+          1124,
+          67075
+        ],
+        "status": "passed"
+      }
+    ],
+    "logit_threshold_summary": {
+      "claim": "case_local_measurement_only",
+      "comparisons": 12,
+      "failed": 12,
+      "passed": 0
+    },
+    "logit_thresholds": {
+      "max_abs": 0.1,
+      "min_cosine": 0.99,
+      "rmse": 0.1
+    },
+    "passed": 3,
+    "status": "passed"
+  },
+  "overall_status": "passed",
+  "schema": "qx-unicode-chat-greedy-report-v1",
+  "source": {
+    "llama_cpp_commit": "768d2a481a99cb75ec9a03b95dadbd35e7acf496",
+    "model_path": "models/Qwen3-30B-A3B-UD-IQ2_M.gguf",
+    "model_sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+    "model_size": 10865578560,
+    "oracle_args": [
+      {
+        "args": [
+          "-m",
+          "<model>",
+          "-p",
+          "<text>",
+          "--ids",
+          "--no-bos",
+          "--no-escape",
+          "--no-parse-special"
+        ],
+        "component": "tokenizer"
+      },
+      {
+        "args": [
+          "llama_chat_apply_template",
+          "source_gguf_template"
+        ],
+        "component": "chat_template"
+      },
+      {
+        "args": [
+          "prompt_token_ids=<case>",
+          "steps=2",
+          "temperature=0",
+          "modes=f16,q8_0"
+        ],
+        "component": "greedy"
+      }
+    ],
+    "oracle_revision": "llama.cpp@768d2a481a99cb75ec9a03b95dadbd35e7acf496",
+    "qxf_path": "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+    "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+    "qxf_size": 10860081152,
+    "runtime": {
+      "chat_template": "cpu/vocab_only",
+      "llama_greedy": [
+        "f16_cpu",
+        "q8_0_cpu"
+      ],
+      "qx_greedy": "int8_kv_f32_activation_cpu",
+      "tokenizer": "cpu/vocab_only"
+    }
+  },
+  "tokenizer": {
+    "cases": [
+      {
+        "decoded_text": "Hello!",
+        "name": "ascii-control",
+        "status": "passed",
+        "token_ids": [
+          9707,
+          0
+        ]
+      },
+      {
+        "decoded_text": "café déjà vu — naïve",
+        "name": "latin1",
+        "status": "passed",
+        "token_ids": [
+          924,
+          58858,
+          45839,
+          32514,
+          1959,
+          94880,
+          586
+        ]
+      },
+      {
+        "decoded_text": "mañana élite",
+        "name": "combining",
+        "status": "passed",
+        "token_ids": [
+          1515,
+          136,
+          225,
+          3362,
+          384,
+          53839,
+          68078
+        ]
+      },
+      {
+        "decoded_text": "你好，世界！",
+        "name": "cjk",
+        "status": "passed",
+        "token_ids": [
+          108386,
+          3837,
+          99489,
+          6313
+        ]
+      },
+      {
+        "decoded_text": "مرحبا بالعالم",
+        "name": "arabic",
+        "status": "passed",
+        "token_ids": [
+          124122,
+          29825,
+          124671,
+          124476,
+          129634
+        ]
+      },
+      {
+        "decoded_text": "🧪🚀✨",
+        "name": "emoji",
+        "status": "passed",
+        "token_ids": [
+          149958,
+          145836,
+          144232
+        ]
+      },
+      {
+        "decoded_text": "東京 🧪 naïve",
+        "name": "mixed",
+        "status": "passed",
+        "token_ids": [
+          102356,
+          46553,
+          11162,
+          100,
+          103,
+          94880,
+          586
+        ]
+      }
+    ],
+    "passed": 7
+  }
+}

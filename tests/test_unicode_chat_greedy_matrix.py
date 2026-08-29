@@ -186,6 +186,132 @@ def test_activation_logit_metrics_keep_qx_modes_separate(tmp_path):
     assert report["q8_k_compat"][0]["llama_q8_0"]["pass"] is True
 
 
+def test_cross_activation_kv_replay_keeps_prefix_and_continuation_modes_separate(tmp_path):
+    matrix = load_matrix_module()
+    activations = ("f32", "q8_k_compat")
+    replay_dirs = {
+        prefix: {
+            continuation: tmp_path / f"prefix-{prefix}-continue-{continuation}"
+            for continuation in activations
+        }
+        for prefix in activations
+    }
+    llama_dirs = {
+        "f16": tmp_path / "llama-f16",
+        "q8_0": tmp_path / "llama-q8_0",
+    }
+    for directory in [
+        *(path for row in replay_dirs.values() for path in row.values()),
+        *llama_dirs.values(),
+    ]:
+        directory.mkdir()
+
+    logits = {
+        replay_dirs["f32"]["f32"]: [3.0, 1.0, 2.0],
+        replay_dirs["f32"]["q8_k_compat"]: [1.0, 3.0, 2.0],
+        replay_dirs["q8_k_compat"]["f32"]: [3.0, 1.0, 2.0],
+        replay_dirs["q8_k_compat"]["q8_k_compat"]: [1.0, 2.0, 3.0],
+        llama_dirs["f16"]: [1.0, 3.0, 2.0],
+        llama_dirs["q8_0"]: [1.0, 2.0, 3.0],
+    }
+    for directory, values in logits.items():
+        (directory / "step-1-logits.f32").write_bytes(
+            struct.pack(f"<{len(values)}f", *values)
+        )
+
+    report = matrix.compare_cross_activation_kv_logits(
+        replay_dirs,
+        llama_dirs,
+        continuation_step=1,
+    )
+
+    assert [(row["prefix_activation"], row["continuation_activation"]) for row in report] == [
+        ("f32", "f32"),
+        ("f32", "q8_k_compat"),
+        ("q8_k_compat", "f32"),
+        ("q8_k_compat", "q8_k_compat"),
+    ]
+    assert report[1]["llama_f16"]["pass"] is True
+    assert report[3]["llama_q8_0"]["pass"] is True
+    assert report[0]["llama_f16"]["pass"] is False
+    assert report[2]["llama_q8_0"]["pass"] is False
+
+
+def test_cross_activation_kv_runner_requires_exact_diagonal_and_reports_routing(tmp_path, monkeypatch):
+    matrix = load_matrix_module()
+    activations = ("f32", "q8_k_compat")
+    uninterrupted = {activation: tmp_path / f"uninterrupted-{activation}" for activation in activations}
+    llama_dirs = {"f16": tmp_path / "llama-f16", "q8_0": tmp_path / "llama-q8_0"}
+    for directory in (*uninterrupted.values(), *llama_dirs.values()):
+        directory.mkdir()
+    diagonal_logits = {
+        "f32": [3.0, 1.0, 2.0],
+        "q8_k_compat": [1.0, 3.0, 2.0],
+    }
+    for activation, directory in uninterrupted.items():
+        (directory / "step-1-logits.f32").write_bytes(struct.pack("<3f", *diagonal_logits[activation]))
+    for modality, values in (("f16", [1.0, 3.0, 2.0]), ("q8_0", [1.0, 2.0, 3.0])):
+        (llama_dirs[modality] / "step-1-logits.f32").write_bytes(struct.pack("<3f", *values))
+
+    def fake_invoke(command):
+        activation = command[command.index("--activation") + 1]
+        dump_dir = Path(command[command.index("--dump-residuals") + 1])
+        if "--kv-snapshot-out" in command:
+            snapshot = Path(command[command.index("--kv-snapshot-out") + 1])
+            snapshot.write_bytes(f"snapshot-{activation}".encode())
+            return {
+                "position_base": 0,
+                "final_token": 1124,
+                "tokens": [{"input_token": 42, "selected_token": 1124, "layers": []}],
+            }
+        snapshot = Path(command[command.index("--kv-snapshot-in") + 1])
+        prefix = snapshot.read_text().removeprefix("snapshot-")
+        values = diagonal_logits[activation] if prefix == activation else [1.0, 2.0, 3.0]
+        (dump_dir / "step-1-logits.f32").write_bytes(struct.pack("<3f", *values))
+        experts = [0, 1] if activation == prefix else [1, 0]
+        return {
+            "position_base": 1,
+            "final_token": 50853,
+            "tokens": [{
+                "input_token": 1124,
+                "selected_token": 50853,
+                "layers": [{"layer": 0, "selected_experts": experts}],
+            }],
+        }
+
+    monkeypatch.setattr(matrix, "_invoke", fake_invoke)
+    report = matrix.run_cross_activation_kv_replay(
+        tmp_path / "qxqxf.exe",
+        tmp_path / "model.qxf",
+        prompt_token=42,
+        work=tmp_path / "cross",
+        uninterrupted_dirs=uninterrupted,
+        llama_dirs=llama_dirs,
+        expected_tokens={"f32": [1124, 50853], "q8_k_compat": [1124, 50853]},
+    )
+
+    assert len(report["cells"]) == 4
+    assert all(cell["diagonal_exact"] is (cell["prefix_activation"] == cell["continuation_activation"]) for cell in report["cells"])
+    assert report["cells"][1]["routing_changed_layers_vs_diagonal"] == [0]
+    assert report["snapshots"]["f32"]["bytes"] > 0
+    assert set(report["axis_effects"]) == {
+        "prefix_activation_change",
+        "continuation_activation_change",
+    }
+    assert set(report["axis_effects"]["prefix_activation_change"]) == {
+        "continuation_f32",
+        "continuation_q8_k_compat",
+    }
+    assert set(report["axis_effects"]["continuation_activation_change"]) == {
+        "prefix_f32",
+        "prefix_q8_k_compat",
+    }
+    for effects in report["axis_effects"].values():
+        for comparison in effects.values():
+            assert comparison["qx"] == "step-1-logits.f32"
+            assert comparison["llama"] == "step-1-logits.f32"
+
+
 def test_matrix_runner_reports_missing_artifacts_fail_closed(tmp_path):
     matrix = load_matrix_module()
     fixture = matrix.load_contract(FIXTURE_PATH)

@@ -242,14 +242,215 @@ def compare_activation_logits(
     }
 
 
+def compare_cross_activation_kv_logits(
+    replay_dirs: dict[str, dict[str, Path]],
+    llama_dirs: dict[str, Path],
+    continuation_step: int,
+) -> list[dict[str, Any]]:
+    activations = ("f32", "q8_k_compat")
+    if tuple(replay_dirs) != activations or continuation_step < 0:
+        raise ValueError("cross-activation prefix modes/order or continuation step invalid")
+    if any(tuple(row) != activations for row in replay_dirs.values()):
+        raise ValueError("cross-activation continuation modes/order must be f32,q8_k_compat")
+    if set(llama_dirs) != {"f16", "q8_0"}:
+        raise ValueError("cross-activation llama modalities invalid")
+
+    rows = []
+    for prefix_activation, replay_row in replay_dirs.items():
+        for continuation_activation, directory in replay_row.items():
+            qx_logits = directory / f"step-{continuation_step}-logits.f32"
+            metrics = {}
+            for modality, key in (("f16", "llama_f16"), ("q8_0", "llama_q8_0")):
+                reference = llama_dirs[modality] / f"step-{continuation_step}-logits.f32"
+                comparison = compare_logit_files(qx_logits, reference, **LOGIT_THRESHOLDS)
+                comparison["qx"] = qx_logits.name
+                comparison["llama"] = reference.name
+                metrics[key] = comparison
+            rows.append({
+                "prefix_activation": prefix_activation,
+                "continuation_activation": continuation_activation,
+                **metrics,
+            })
+    return rows
+
+
+def _routing_by_layer(payload: dict[str, Any]) -> dict[int, tuple[int, ...]]:
+    tokens = payload.get("tokens")
+    if not isinstance(tokens, list) or len(tokens) != 1 or not isinstance(tokens[0], dict):
+        raise ValueError("cross-activation replay token payload invalid")
+    layers = tokens[0].get("layers")
+    if not isinstance(layers, list):
+        raise ValueError("cross-activation replay layers invalid")
+    routing = {}
+    for layer in layers:
+        if not isinstance(layer, dict) or type(layer.get("layer")) is not int:
+            raise ValueError("cross-activation replay layer invalid")
+        experts = layer.get("selected_experts")
+        if not isinstance(experts, list) or any(type(expert) is not int for expert in experts):
+            raise ValueError("cross-activation replay routing invalid")
+        routing[layer["layer"]] = tuple(experts)
+    return routing
+
+
+def run_cross_activation_kv_replay(
+    exe: Path,
+    qxf: Path,
+    *,
+    prompt_token: int,
+    work: Path,
+    uninterrupted_dirs: dict[str, Path],
+    llama_dirs: dict[str, Path],
+    expected_tokens: dict[str, list[int]],
+) -> dict[str, Any]:
+    activations = ("f32", "q8_k_compat")
+    if tuple(uninterrupted_dirs) != activations or tuple(expected_tokens) != activations:
+        raise ValueError("cross-activation uninterrupted modes/order invalid")
+    if any(len(tokens) < 2 for tokens in expected_tokens.values()):
+        raise ValueError("cross-activation replay requires two expected tokens")
+    work.mkdir(parents=True, exist_ok=True)
+    replay_dirs: dict[str, dict[str, Path]] = {}
+    payloads: dict[str, dict[str, dict[str, Any]]] = {}
+    snapshots: dict[str, dict[str, Any]] = {}
+
+    for prefix_activation in activations:
+        prefix_dir = work / f"prefix-{prefix_activation}"
+        capture_dir = prefix_dir / "capture"
+        capture_dir.mkdir(parents=True)
+        snapshot = prefix_dir / "snapshot.bin"
+        capture = _invoke([
+            str(exe), "state-loop-probe", "--in", str(qxf), "--prompt-token", str(prompt_token),
+            "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8",
+            "--activation", prefix_activation, "--temperature", "0", "--seed", "7",
+            "--full-moe", "--final-head", "--top-n", "5", "--dump-residuals", str(capture_dir),
+            "--kv-snapshot-out", str(snapshot),
+        ])
+        capture_tokens = capture.get("tokens")
+        continuation_token = capture.get("final_token")
+        if (
+            capture.get("position_base") != 0
+            or type(continuation_token) is not int
+            or not isinstance(capture_tokens, list)
+            or len(capture_tokens) != 1
+            or not isinstance(capture_tokens[0], dict)
+            or capture_tokens[0].get("selected_token") != expected_tokens[prefix_activation][0]
+            or continuation_token != expected_tokens[prefix_activation][0]
+            or not snapshot.is_file()
+        ):
+            raise ValueError("cross-activation prefix capture mismatch")
+        snapshots[prefix_activation] = {
+            "sha256": _sha256(snapshot),
+            "bytes": snapshot.stat().st_size,
+            "next_token": continuation_token,
+        }
+        replay_dirs[prefix_activation] = {}
+        payloads[prefix_activation] = {}
+        for continuation_activation in activations:
+            replay_dir = prefix_dir / f"continue-{continuation_activation}"
+            replay_dir.mkdir()
+            replay = _invoke([
+                str(exe), "state-loop-probe", "--in", str(qxf), "--prompt-token", str(continuation_token),
+                "--steps", "1", "--layers", "48", "--ctx", "4", "--kv", "int8",
+                "--activation", continuation_activation, "--temperature", "0", "--seed", "7",
+                "--full-moe", "--final-head", "--top-n", "5", "--dump-residuals", str(replay_dir),
+                "--kv-snapshot-in", str(snapshot),
+            ])
+            replay_tokens = replay.get("tokens")
+            if (
+                replay.get("position_base") != 1
+                or not isinstance(replay_tokens, list)
+                or len(replay_tokens) != 1
+                or not isinstance(replay_tokens[0], dict)
+                or replay_tokens[0].get("input_token") != continuation_token
+                or type(replay_tokens[0].get("selected_token")) is not int
+            ):
+                raise ValueError("cross-activation continuation replay mismatch")
+            logits_path = replay_dir / "step-1-logits.f32"
+            if not logits_path.is_file():
+                raise ValueError("cross-activation continuation logits missing")
+            if prefix_activation == continuation_activation:
+                uninterrupted = uninterrupted_dirs[prefix_activation] / "step-1-logits.f32"
+                if (
+                    logits_path.read_bytes() != uninterrupted.read_bytes()
+                    or replay_tokens[0]["selected_token"] != expected_tokens[prefix_activation][1]
+                ):
+                    raise ValueError("cross-activation diagonal replay is not exact")
+            replay_dirs[prefix_activation][continuation_activation] = replay_dir
+            payloads[prefix_activation][continuation_activation] = replay
+
+    comparisons = compare_cross_activation_kv_logits(replay_dirs, llama_dirs, continuation_step=1)
+    cells = []
+    for comparison in comparisons:
+        prefix = comparison["prefix_activation"]
+        continuation = comparison["continuation_activation"]
+        payload = payloads[prefix][continuation]
+        diagonal_routing = _routing_by_layer(payloads[prefix][prefix])
+        routing = _routing_by_layer(payload)
+        changed_layers = sorted(
+            layer for layer in set(diagonal_routing) | set(routing)
+            if diagonal_routing.get(layer) != routing.get(layer)
+        )
+        cells.append({
+            **comparison,
+            "selected_token": payload["tokens"][0]["selected_token"],
+            "diagonal_exact": prefix == continuation,
+            "routing_changed_layers_vs_diagonal": changed_layers,
+        })
+
+    def axis_comparison(left: Path, right: Path) -> dict[str, Any]:
+        left_logits = left / "step-1-logits.f32"
+        right_logits = right / "step-1-logits.f32"
+        comparison = compare_logit_files(
+            left_logits,
+            right_logits,
+            **LOGIT_THRESHOLDS,
+        )
+        comparison["qx"] = left_logits.name
+        comparison["llama"] = right_logits.name
+        comparison["left"] = str(left.relative_to(work))
+        comparison["right"] = str(right.relative_to(work))
+        return comparison
+
+    axis_effects = {
+        "prefix_activation_change": {
+            f"continuation_{continuation}": axis_comparison(
+                replay_dirs["f32"][continuation],
+                replay_dirs["q8_k_compat"][continuation],
+            )
+            for continuation in activations
+        },
+        "continuation_activation_change": {
+            f"prefix_{prefix}": axis_comparison(
+                replay_dirs[prefix]["f32"],
+                replay_dirs[prefix]["q8_k_compat"],
+            )
+            for prefix in activations
+        },
+    }
+    return {
+        "continuation_step": 1,
+        "kv_format": "int8",
+        "snapshots": snapshots,
+        "cells": cells,
+        "axis_effects": axis_effects,
+        "claims": {
+            "causal_scope": "case_local_cross_activation_replay",
+            "global_parity": "not_claimed",
+            "default_promotion": "not_claimed",
+        },
+    }
+
+
 def run_contract(
     contract: dict[str, Any],
     root: Path,
     work: Path,
     run_greedy: bool = False,
     qx_activation_bisect: bool = False,
+    qx_kv_activation_bisect: bool = False,
 ) -> dict[str, Any]:
     validate_contract(contract)
+    if qx_kv_activation_bisect and (not run_greedy or not qx_activation_bisect):
+        raise ValueError("QX KV activation bisect requires greedy and activation bisect")
     root = root.resolve()
     work.mkdir(parents=True, exist_ok=True)
     exe_path = root / "build/qxqxf.exe"
@@ -342,6 +543,19 @@ def run_contract(
                 activation: compare_case_logits(directory, llama_logits, case["generation_steps"])
                 for activation, directory in qx_logits.items()
             }
+            kv_activation_bisect = None
+            if qx_kv_activation_bisect:
+                if case["generation_steps"] != 2:
+                    raise ValueError("QX KV activation bisect requires exactly two generation steps")
+                kv_activation_bisect = run_cross_activation_kv_replay(
+                    exe,
+                    qxf,
+                    prompt_token=case["prompt_token_ids"][0],
+                    work=case_work / "qx-kv-activation-bisect",
+                    uninterrupted_dirs=qx_logits,
+                    llama_dirs=llama_logits,
+                    expected_tokens=qx_tokens,
+                )
             greedy_results.append({
                 "name": case["name"],
                 "llama_f16_tokens": llama_tokens["f16"],
@@ -355,6 +569,7 @@ def run_contract(
                     }
                     for activation, comparisons in activation_comparisons.items()
                 },
+                "qx_accumulated_kv_activation_bisect": kv_activation_bisect,
                 "modalities_reported_separately": True,
                 "status": "passed",
             })
@@ -429,6 +644,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--run-greedy", action="store_true")
     parser.add_argument("--qx-activation-bisect", action="store_true")
+    parser.add_argument("--qx-kv-activation-bisect", action="store_true")
     args = parser.parse_args()
     contract = load_contract(args.contract)
     with tempfile.TemporaryDirectory(prefix="qx-unicode-chat-") as temp:
@@ -438,6 +654,7 @@ def main() -> int:
             Path(temp),
             run_greedy=args.run_greedy,
             qx_activation_bisect=args.qx_activation_bisect,
+            qx_kv_activation_bisect=args.qx_kv_activation_bisect,
         )
     publish_report(args.out, report)
     return 0

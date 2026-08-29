@@ -48,6 +48,8 @@ The real CPU matrix now records complete logits for three fixed-token cases over
 
 The activation bisect localizes the first material amplification to the layer-1 MoE: the layer-input delta grows about 35x across the MoE while routing top-8 remains exact. Replaying the exact llama F16 `ffn_inp` keeps the F32 MoE error (`RMSE 0.0345051`) but closes it under `q8_k_compat` (`RMSE 9.62582e-7`). The repeated real matrix preserves 3/3 greedy and 12/12 argmax for both QX modes; Q8_K improves full-logit thresholds from 0/12 to 1/12, including token-42 step 0 vs llama Q8_0 (`max_abs 0.0997415`, `RMSE 0.0220756`, cosine `0.9999756`). This is a causal, case-local diagnostic—not parity, semantic equivalence, or permission to promote defaults. Evidence: `wiki/evidence/issue-76-first-divergence-localization.json` and `wiki/evidence/issue-76-activation-parity-bisect-report.json`.
 
+The accumulated-KV cross-activation bisect reuses the published snapshot seam instead of rebuilding it. Across three cases it executes 12 cells (`prefix activation × continuation activation`) with INT8 KV; all six diagonal capture/replay controls are byte-exact. None of the 24 QX-vs-llama full-logit comparisons pass the unchanged thresholds, while 22/24 preserve argmax. The effect is token-dependent interaction rather than one globally dominant axis: token 42 and token 56 preserve their continuation argmax in all four cells, but token 1000 flips from `67075` to `1318` only for an F32-produced prefix snapshot consumed by a Q8_K continuation. This narrows the next gate to current-step residual/routing under that fixed snapshot; it does not justify a kernel fix or default promotion. Evidence: `wiki/evidence/issue-77-cross-activation-localization.json` and `wiki/evidence/issue-77-accumulated-kv-cross-activation-report.json`.
+
 ## Honest performance state
 
 Measured on the current scalar CPU path:
@@ -212,12 +214,10 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. Add an accumulated KV snapshot/replay seam before making multi-token perturbation claims.
-2. Expand tokenizer parity beyond the fixed prompt matrix and add chat-template application.
-3. Add QXF mmap and persistent scratch buffers.
-4. Add fused quant-dot, thread pool and AVX2 CPU kernels.
-5. Add a hybrid CUDA backend with dense residency and expert cache.
-6. Run context 4K, RSS, quality and sustained thermal gates.
+1. For token 1000, hold the F32-produced KV snapshot fixed and replay the exact continuation residual around the first changed routing layer to separate pre-layer sensitivity from current-step MoE routing.
+2. Repeat that causal gate on additional fixed cases only after the token-1000 seam is closed; do not infer global parity from the current three cases.
+3. Convert the existing 4K/RSS/KV-quality/soak contracts into real measurements outside heavy default CI.
+4. Design a hybrid CUDA backend only after the CPU/parity milestone closes and transfer/residency costs are measured.
 
 ## License
 
