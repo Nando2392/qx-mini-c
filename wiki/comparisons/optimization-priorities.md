@@ -55,6 +55,7 @@ confidence: medium
 | 41 | profile aggregator container hardening | Issue #65 exige lista exacta | fail-closed report-level; sin benchmark nuevo ni claims |
 | 42 | measured run emptiness hardening | Issue #66 rechaza run sets vacíos | fail-closed report-level; sin benchmark nuevo ni claims |
 | 43 | measured run container hardening | Issue #67 exige lista exacta | fail-closed report-level; sin benchmark nuevo ni claims |
+| 44 | measured run shape hardening | Issue #68 exige objetos first/later | fail-closed report-level; sin benchmark nuevo ni claims |
 
 ## No priorizar todavía
 
@@ -148,5 +149,7 @@ La prioridad 41 empieza en Issue #65: el agregador compartido `summarize_cells_l
 La prioridad 42 empieza en Issue #66: `summarize_runs` rechaza explícitamente un run set vacío antes de indexar el primer profile, reemplazando `IndexError` por error contractual.
 
 La prioridad 43 empieza en Issue #67: `summarize_runs` exige una lista exacta antes de emptiness o indexado, rechazando null, tupla, mapping y string con error explícito.
+
+La prioridad 44 empieza en Issue #68: cada run first/later debe ser objeto antes de extraer o comparar `long_context_profile`, reemplazando `AttributeError` por error contractual.
 
 Base cuantitativa: [[performance-model]]. Disciplina: [[auto-research-loop]].

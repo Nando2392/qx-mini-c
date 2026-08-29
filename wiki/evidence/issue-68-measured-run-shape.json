@@ -1,0 +1,16 @@
+{
+  "issue": 68,
+  "title": "Reject non-object measured runs",
+  "scope": "summarize_runs element shape contract only",
+  "red": "first and later string runs leaked AttributeError before profile extraction/equality",
+  "green": "first/later non-object runs reject explicitly and object controls pass",
+  "local_gates": ["MSVC PASS", "pytest 100 passed", "smoke PASS", "wiki lint PASS", "diff check PASS"],
+  "out_of_scope": ["benchmark", "OS RSS limit", "allocator change", "KV sweep", "soak runner", "default promotion", "claims"],
+  "staged_blob_sha256": {
+    "README.md": "5f7f52351d73d26791590b83a134e875c127edd372d5f0fe531b04ea87414982",
+    "scripts/q8k_perf_experiment.py": "a86c39359e37029d9aa3151d7edae41c431fa233381def5ad116b44e11a5ea40",
+    "tests/test_q8k_perf_experiment.py": "1b338a5009441ac63e6c9c39403a7ce154d64ff2b4c284a851f608356d4759e2",
+    "wiki/comparisons/optimization-priorities.md": "af5e1ee181a5da16eccb94006ecd9f3cdc75093f614e0c683430f9cfa0bdc223",
+    "wiki/queries/current-status-and-roadmap.md": "6aa7203a653799846dd06786b1300ae080c26c706d1808c00586ba3b9800ff44"
+  }
+}

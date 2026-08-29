@@ -103,6 +103,8 @@ Measured run aggregation rejects an empty run set explicitly before reading the
 first run's long-context profile.
 It also requires the run container itself to be an exact list before emptiness
 or indexing, rejecting null, tuples, mappings, and strings consistently.
+Every first and later measured run must also be an object before profile
+extraction or equality checks.
 RSS summaries with non-positive sample counts also fail closed before reporting
 measured runs.
 RSS summaries that omit the sample count fail closed with an explicit validation
