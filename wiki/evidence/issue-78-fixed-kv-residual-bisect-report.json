@@ -1,0 +1,315 @@
+{
+  "case": "token-1000",
+  "claims": {
+    "causal_scope": "case_local_fixed_f32_snapshot_exact_residual_replay",
+    "default_promotion": "not_claimed",
+    "global_logit_parity": "not_claimed",
+    "kernel_root_cause": "not_claimed",
+    "semantic_equivalence": "not_claimed"
+  },
+  "command": [
+    "python",
+    "scripts/run_unicode_chat_greedy_matrix.py",
+    "--contract",
+    "tests/fixtures/qwen3-unicode-chat-greedy-matrix.json",
+    "--root",
+    ".",
+    "--out",
+    "issue-78-reproduction-report.json",
+    "--run-greedy",
+    "--qx-activation-bisect",
+    "--qx-kv-activation-bisect",
+    "--qx-kv-residual-bisect"
+  ],
+  "working_directory": "repository_root",
+  "output_precondition": "issue-78-reproduction-report.json must not exist; choose a new output path for each run",
+  "routing_comparison": "exact ordered selected_experts IDs; not set membership or numeric layer-output equality",
+  "issue": 78,
+  "normalized_repeat_exact": true,
+  "parent_report_sha256": "a79fcab5d18253bf5fd5edc31a4b1df103661033886352a3ae711a58579a3b73",
+  "result": {
+    "continuation_activation": "q8_k_compat",
+    "controls": {
+      "f32": {
+        "exact": true
+      },
+      "q8_k_compat": {
+        "exact": true
+      }
+    },
+    "diagnostic": {
+      "final_residual_vs_f32": {
+        "argmax_match": true,
+        "cosine": 0.9993481483762738,
+        "count": 2048,
+        "delta_l2": 8.376243355807949,
+        "llama": "step-1-layer-47-output.f32",
+        "llama_argmax": 567,
+        "max_abs": 3.781280517578125,
+        "pass": false,
+        "qx": "step-1-layer-47-output.f32",
+        "qx_argmax": 567,
+        "rmse": 0.1850905774300176,
+        "thresholds": {
+          "max_abs": 0.1,
+          "min_cosine": 0.99,
+          "rmse": 0.1
+        }
+      },
+      "final_residual_vs_q8_k_compat": {
+        "argmax_match": true,
+        "cosine": 0.9990217599545616,
+        "count": 2048,
+        "delta_l2": 9.36510112028265,
+        "llama": "step-1-layer-47-output.f32",
+        "llama_argmax": 567,
+        "max_abs": 1.8394222259521484,
+        "pass": false,
+        "qx": "step-1-layer-47-output.f32",
+        "qx_argmax": 567,
+        "rmse": 0.20694145339529985,
+        "thresholds": {
+          "max_abs": 0.1,
+          "min_cosine": 0.99,
+          "rmse": 0.1
+        }
+      },
+      "logits_vs_f32": {
+        "argmax_match": false,
+        "cosine": 0.9979832222883686,
+        "count": 151936,
+        "delta_l2": 53.085376688774154,
+        "llama": "step-1-logits.f32",
+        "llama_argmax": 67075,
+        "max_abs": 0.6553454399108887,
+        "pass": false,
+        "qx": "step-1-logits.f32",
+        "qx_argmax": 1318,
+        "rmse": 0.1361897927914368,
+        "thresholds": {
+          "max_abs": 0.1,
+          "min_cosine": 0.99,
+          "rmse": 0.1
+        }
+      },
+      "logits_vs_q8_k_compat": {
+        "argmax_match": true,
+        "cosine": 0.9928435666807365,
+        "count": 151936,
+        "delta_l2": 113.39218612674667,
+        "llama": "step-1-logits.f32",
+        "llama_argmax": 1318,
+        "max_abs": 0.9490605592727661,
+        "pass": false,
+        "qx": "step-1-logits.f32",
+        "qx_argmax": 1318,
+        "rmse": 0.2909060704854211,
+        "thresholds": {
+          "max_abs": 0.1,
+          "min_cosine": 0.99,
+          "rmse": 0.1
+        }
+      },
+      "routing_changed_layers_vs_f32": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        21,
+        22,
+        23,
+        24,
+        26,
+        27,
+        28,
+        30,
+        31,
+        32,
+        34,
+        35,
+        37,
+        38,
+        39,
+        40,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47
+      ],
+      "routing_changed_layers_vs_q8_k_compat": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        12,
+        13,
+        14,
+        16,
+        17,
+        18,
+        21,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        30,
+        31,
+        34,
+        36,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47
+      ],
+      "selected_token": 1318
+    },
+    "first_routing_change_layer": 2,
+    "provenance": {
+      "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+      "qxqxf_sha256": "637ecaab7248b0ddabc8e0559b20efa2bdd7d5347f3303cf8a093de069823fdf",
+      "snapshot_sha256": "a419c290310725f744a96c4d9da0d7b1b9206804b39e9f7002bf9a03622b84a0"
+    },
+    "residual_sources": {
+      "f32": "step-1-layer-1-output.f32",
+      "q8_k_compat": "step-1-layer-1-output.f32"
+    },
+    "residual_values": 2048,
+    "routing_changed_layers": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      15,
+      16,
+      17,
+      18,
+      19,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      32,
+      34,
+      35,
+      36,
+      37,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47
+    ],
+    "schema": "qx-fixed-snapshot-continuation-residual-bisect-v1",
+    "snapshot_activation": "f32"
+  },
+  "schema": "qx-issue-78-fixed-kv-residual-bisect-report-v1",
+  "source": {
+    "llama_cpp_commit": "768d2a481a99cb75ec9a03b95dadbd35e7acf496",
+    "model_path": "models/Qwen3-30B-A3B-UD-IQ2_M.gguf",
+    "model_sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+    "model_size": 10865578560,
+    "oracle_args": [
+      {
+        "args": [
+          "-m",
+          "<model>",
+          "-p",
+          "<text>",
+          "--ids",
+          "--no-bos",
+          "--no-escape",
+          "--no-parse-special"
+        ],
+        "component": "tokenizer"
+      },
+      {
+        "args": [
+          "llama_chat_apply_template",
+          "source_gguf_template"
+        ],
+        "component": "chat_template"
+      },
+      {
+        "args": [
+          "prompt_token_ids=<case>",
+          "steps=2",
+          "temperature=0",
+          "modes=f16,q8_0"
+        ],
+        "component": "greedy"
+      }
+    ],
+    "oracle_revision": "llama.cpp@768d2a481a99cb75ec9a03b95dadbd35e7acf496",
+    "qxf_path": "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+    "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+    "qxf_size": 10860081152,
+    "runtime": {
+      "chat_template": "cpu/vocab_only",
+      "llama_greedy": [
+        "f16_cpu",
+        "q8_0_cpu"
+      ],
+      "qx_greedy": "int8_kv_f32_activation_cpu",
+      "tokenizer": "cpu/vocab_only"
+    }
+  },
+  "source_test_artifact_freeze": {
+    "script_test_hash_scope": "raw worktree bytes executed during the matrix (CRLF), not Git index blobs",
+    "git_blob_binding": {
+      "normalization": "replace CRLF with LF only; normalized executed bytes equal staged blob bytes exactly",
+      "script_sha256": "7fbb60877a3783aef86907d3d65cb21817d5f6ba4ffc1f6696c656b00a1b17b7",
+      "test_sha256": "36eb516616aab27d9ff5c2d1338bfd5c8e0f0891062feaec96846d52cc5fbd94"
+    },
+    "before_after_exact": true,
+    "gguf_sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+    "llama_reference_oracle_sha256": "167a7f47a30b948a1d26af6109d3fcddd3fe24c43aee36ae73fb7e05568a11c8",
+    "llama_sequence_oracle_sha256": "f7b2bc41a3634e813f0aeef22d653e5109832cce94ebd67a8c21ff9d34985f5a",
+    "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+    "qxqxf_sha256": "637ecaab7248b0ddabc8e0559b20efa2bdd7d5347f3303cf8a093de069823fdf",
+    "script_sha256": "8fd9e00a951d049d96f2e461547304c5041d8816933a87bf4a857e3baf548cb8",
+    "test_sha256": "619a01c99e8e9b22e3cc82ea48ab4848b4a4ac3d8c8872fe657e917f64cd54b9"
+  }
+}

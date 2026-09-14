@@ -50,6 +50,10 @@ The activation bisect localizes the first material amplification to the layer-1 
 
 The accumulated-KV cross-activation bisect reuses the published snapshot seam instead of rebuilding it. Across three cases it executes 12 cells (`prefix activation × continuation activation`) with INT8 KV; all six diagonal capture/replay controls are byte-exact. None of the 24 QX-vs-llama full-logit comparisons pass the unchanged thresholds, while 22/24 preserve argmax. The effect is token-dependent interaction rather than one globally dominant axis: token 42 and token 56 preserve their continuation argmax in all four cells, but token 1000 flips from `67075` to `1318` only for an F32-produced prefix snapshot consumed by a Q8_K continuation. This narrows the next gate to current-step residual/routing under that fixed snapshot; it does not justify a kernel fix or default promotion. Evidence: `wiki/evidence/issue-77-cross-activation-localization.json` and `wiki/evidence/issue-77-accumulated-kv-cross-activation-report.json`.
 
+The fixed-snapshot residual replay now holds token 1000's F32-produced INT8 KV snapshot constant and resumes at the first cross-activation routing change, layer 2. Both F32 and Q8_K same-mode controls reproduce suffix routing, final residual, logits and selected token exactly. Injecting the exact F32 layer-1 residual into a Q8_K suffix still selects `1318`, not the F32 continuation's `67075`; layer-2 expert selection remains F32-exact and routing first departs from F32 at layer 3. The diagnostic logits pass neither unchanged full-logit comparison (`vs F32: max_abs 0.655345, RMSE 0.136190, cosine 0.997983`; `vs Q8_K: max_abs 0.949061, RMSE 0.290906, cosine 0.992844`). This localizes the next boundary to layer-2 output / layer-3 input for this case only; it is not global parity, semantic equivalence, a kernel root cause or permission to promote Q8_K. Evidence: `wiki/evidence/issue-78-fixed-kv-residual-bisect-report.json` and `wiki/evidence/issue-78-continuation-localization.json`.
+
+Here, routing equality means exact equality of the ordered `selected_experts` IDs, not just set membership. It does not establish equal expert weights or equal numeric layer outputs. Layer 3 is the first observed ordered-ID difference after injection, not proof that the numeric error originates there.
+
 ## Honest performance state
 
 Measured on the current scalar CPU path:
@@ -214,7 +218,7 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. For token 1000, hold the F32-produced KV snapshot fixed and replay the exact continuation residual around the first changed routing layer to separate pre-layer sensitivity from current-step MoE routing.
+1. For token 1000, hold the same F32-produced KV snapshot fixed and inject the exact F32/Q8_K layer-2 output at start-layer 3. Require exact same-mode controls and compare ordered expert IDs, logits and selected token against both continuations. Layer 3 is the next observed routing boundary, not an identified error origin.
 2. Repeat that causal gate on additional fixed cases only after the token-1000 seam is closed; do not infer global parity from the current three cases.
 3. Convert the existing 4K/RSS/KV-quality/soak contracts into real measurements outside heavy default CI.
 4. Design a hybrid CUDA backend only after the CPU/parity milestone closes and transfer/residency costs are measured.

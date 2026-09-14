@@ -64,6 +64,7 @@ confidence: medium
 | 50 | real case-local full-logit matrix | Issue #75 mide 3 casos × 2 pasos × 2 modalidades | 12/12 argmax; 0/12 tolerancia numérica; paridad refutada localmente |
 | 51 | activation parity bisect | Issue #76 localiza amplificación en MoE layer 1 y repite F32/Q8_K | 3/3 greedy, 12/12 argmax; Q8_K 1/12 thresholds; sin default promotion |
 | 52 | accumulated-KV cross-activation bisect | Issue #77 cruza activación del prefijo y de la continuación sobre snapshots reales | 6/6 diagonales exactas; 0/24 thresholds, 22/24 argmax; interacción token-dependiente |
+| 53 | fixed-KV continuation residual replay | Issue #78 fija snapshot F32 de token 1000 y reanuda en layer 2 con residual F32/Q8_K exacto | 2/2 controles exactos; Q8_K conserva `1318` con residual F32; siguiente frontera layer-2 output/layer-3 input |
 
 ## Estado tras el hardening report-level
 
@@ -78,6 +79,8 @@ Issue #75 completa el milestone CPU/read-only inicial con ejecución real sobre 
 Issue #76 localiza el primer cambio material en el MoE de layer 1: el delta L2 crece aproximadamente 35x entre `ffn_inp` y `ffn_moe_out`, con routing top-8 exacto. El replay con el mismo `ffn_inp` conserva error en F32 y lo cierra con el temporal `q8_k_compat`; el contrafactual end-to-end mejora de 0/12 a 1/12 threshold PASS sin cambiar 3/3 greedy ni 12/12 argmax. F32 permanece control/default y la divergencia multi-token restante requiere snapshot/replay del KV acumulado antes de cualquier promoción o kernel nuevo.
 
 Issue #77 reutiliza el snapshot/replay publicado y cruza activación productora del KV acumulado con activación consumidora del siguiente paso. Las seis diagonales son byte-exactas; las 12 celdas producen 24 comparaciones contra llama F16/Q8_0, con 0 threshold PASS y 22 argmax matches. No emerge un eje global dominante: token 1000 cambia a `1318` sólo con snapshot F32 + continuación Q8_K, mientras las otras tres combinaciones eligen `67075`. El siguiente gate debe fijar ese snapshot e inyectar el residual exacto de continuación alrededor del primer cambio de routing antes de tocar runtime.
+
+Issue #78 fija ese snapshot F32 y reanuda token 1000 en layer 2. Los controles F32/F32 y Q8_K/Q8_K son exactos. Con el residual F32 exacto de salida de layer 1, el sufijo Q8_K aún selecciona `1318`; el routing de layer 2 coincide con F32 y la primera salida de routing distinta reaparece en layer 3. Ninguna comparación full-logit del diagnóstico pasa. El siguiente gate debe inyectar la salida exacta de layer 2 al iniciar layer 3; no se atribuye root cause a un kernel ni se promueve `q8_k_compat`.
 
 ## No priorizar todavía
 

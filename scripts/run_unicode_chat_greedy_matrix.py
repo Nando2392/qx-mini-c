@@ -285,11 +285,202 @@ def _routing_by_layer(payload: dict[str, Any]) -> dict[int, tuple[int, ...]]:
     for layer in layers:
         if not isinstance(layer, dict) or type(layer.get("layer")) is not int:
             raise ValueError("cross-activation replay layer invalid")
+        if layer["layer"] in routing:
+            raise ValueError("cross-activation replay duplicate layer")
         experts = layer.get("selected_experts")
         if not isinstance(experts, list) or any(type(expert) is not int for expert in experts):
             raise ValueError("cross-activation replay routing invalid")
         routing[layer["layer"]] = tuple(experts)
     return routing
+
+
+def run_fixed_snapshot_residual_bisect(
+    exe: Path,
+    qxf: Path,
+    *,
+    snapshot: Path,
+    continuation_token: int,
+    work: Path,
+    continuation_dirs: dict[str, Path],
+    continuation_payloads: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    activations = ("f32", "q8_k_compat")
+    if tuple(continuation_dirs) != activations or tuple(continuation_payloads) != activations:
+        raise ValueError("fixed-snapshot continuation modes/order must be f32,q8_k_compat")
+    if type(continuation_token) is not int or continuation_token < 0:
+        raise ValueError("fixed-snapshot continuation token invalid")
+    if not snapshot.is_file():
+        raise ValueError("fixed-snapshot payload is missing")
+
+    routings: dict[str, dict[int, tuple[int, ...]]] = {}
+    for activation in activations:
+        payload = continuation_payloads[activation]
+        if (
+            payload.get("probe") != "state_loop"
+            or payload.get("activation_format") != activation
+            or payload.get("kv_format") != "int8"
+            or payload.get("position_base") != 1
+            or payload.get("prompt_token") != continuation_token
+            or payload.get("steps") != 1
+            or payload.get("layers_run") != 48
+        ):
+            raise ValueError(f"{activation}: fixed-snapshot continuation metadata invalid")
+        tokens = payload.get("tokens")
+        if (
+            not isinstance(tokens, list)
+            or len(tokens) != 1
+            or not isinstance(tokens[0], dict)
+            or tokens[0].get("position") != 1
+            or tokens[0].get("input_token") != continuation_token
+            or tokens[0].get("selected_token") != payload.get("final_token")
+        ):
+            raise ValueError(f"{activation}: fixed-snapshot continuation token invalid")
+        routing = _routing_by_layer(payload)
+        if list(routing) != list(range(48)):
+            raise ValueError(f"{activation}: fixed-snapshot routing is partial or disordered")
+        routings[activation] = routing
+
+    changed_layers = [
+        layer for layer in range(48)
+        if routings["f32"][layer] != routings["q8_k_compat"][layer]
+    ]
+    if not changed_layers or changed_layers[0] <= 0:
+        raise ValueError("fixed-snapshot first routing change must follow layer 0")
+    start_layer = changed_layers[0]
+
+    def residual_dump(directory: Path, layer: int) -> Path:
+        candidates = [directory / f"l_out-{layer}.f32"]
+        candidates.extend(sorted(directory.glob(f"step-*-layer-{layer}-output.f32")))
+        matches = [path for path in candidates if path.is_file()]
+        if len(matches) != 1:
+            raise ValueError(f"expected one residual dump for layer {layer} in {directory}")
+        return matches[0]
+
+    residuals: dict[str, Path] = {}
+    finals: dict[str, Path] = {}
+    for activation in activations:
+        directory = continuation_dirs[activation]
+        residual = residual_dump(directory, start_layer - 1)
+        final = residual_dump(directory, 47)
+        logits = directory / "step-1-logits.f32"
+        if not residual.is_file() or not final.is_file() or not logits.is_file():
+            raise ValueError(f"{activation}: fixed-snapshot sidecars are incomplete")
+        if residual.stat().st_size == 0 or residual.stat().st_size % 4 != 0:
+            raise ValueError(f"{activation}: fixed-snapshot residual size invalid")
+        residuals[activation] = residual
+        finals[activation] = final
+    residual_values = residuals["f32"].stat().st_size // 4
+    if any(path.stat().st_size // 4 != residual_values for path in residuals.values()):
+        raise ValueError("fixed-snapshot residual counts differ")
+
+    def run_replay(label: str, activation: str, residual: Path) -> tuple[dict[str, Any], Path]:
+        output = work / label
+        output.mkdir(parents=True, exist_ok=False)
+        payload = _invoke([
+            str(exe), "state-loop-probe", "--in", str(qxf),
+            "--prompt-token", str(continuation_token), "--steps", "1",
+            "--layers", "48", "--ctx", "4", "--kv", "int8",
+            "--activation", activation, "--temperature", "0", "--seed", "7",
+            "--full-moe", "--final-head", "--top-n", "5",
+            "--dump-residuals", str(output), "--kv-snapshot-in", str(snapshot),
+            "--start-layer", str(start_layer), "--residual-in", str(residual),
+        ])
+        replay = payload.get("residual_replay")
+        tokens = payload.get("tokens")
+        if (
+            payload.get("probe") != "state_loop"
+            or payload.get("prompt_token") != continuation_token
+            or payload.get("steps") != 1
+            or payload.get("layers_run") != 48 - start_layer
+            or payload.get("position_base") != 1
+            or payload.get("kv_format") != "int8"
+            or payload.get("activation_format") != activation
+            or payload.get("start_layer") != start_layer
+            or payload.get("residual_source") != "injected_f32_replay"
+            or not isinstance(replay, dict)
+            or replay.get("enabled") is not True
+            or replay.get("source") != "f32_sidecar"
+            or replay.get("values") != residual_values
+            or not isinstance(tokens, list)
+            or len(tokens) != 1
+            or not isinstance(tokens[0], dict)
+            or tokens[0].get("position") != 1
+            or tokens[0].get("input_token") != continuation_token
+            or tokens[0].get("selected_token") != payload.get("final_token")
+        ):
+            raise ValueError(f"{label}: residual replay metadata invalid")
+        routing = _routing_by_layer(payload)
+        if list(routing) != list(range(start_layer, 48)):
+            raise ValueError(f"{label}: residual replay routing is partial or disordered")
+        residual_dump(output, 47)
+        if not (output / "step-1-logits.f32").is_file():
+            raise ValueError(f"{label}: residual replay logits missing")
+        return payload, output
+
+    controls: dict[str, dict[str, bool]] = {}
+    for activation in activations:
+        payload, output = run_replay(
+            f"control-{activation}", activation, residuals[activation]
+        )
+        baseline_token = continuation_payloads[activation]["tokens"][0]
+        exact = (
+            payload.get("final_token") == continuation_payloads[activation].get("final_token")
+            and payload["tokens"][0]["layers"] == baseline_token["layers"][start_layer:]
+            and residual_dump(output, 47).read_bytes() == finals[activation].read_bytes()
+            and (output / "step-1-logits.f32").read_bytes()
+            == (continuation_dirs[activation] / "step-1-logits.f32").read_bytes()
+        )
+        if not exact:
+            raise ValueError(f"{activation}: fixed-snapshot residual control is not exact")
+        controls[activation] = {"exact": True}
+
+    diagnostic_payload, diagnostic_dir = run_replay(
+        "diagnostic-q8-from-f32", "q8_k_compat", residuals["f32"]
+    )
+    diagnostic_routing = _routing_by_layer(diagnostic_payload)
+
+    def compare_to(activation: str, filename: str) -> dict[str, Any]:
+        if filename == "final_residual":
+            left = residual_dump(diagnostic_dir, 47)
+            right = finals[activation]
+        else:
+            left = diagnostic_dir / filename
+            right = continuation_dirs[activation] / filename
+        comparison = compare_logit_files(left, right, **LOGIT_THRESHOLDS)
+        comparison["qx"] = left.name
+        comparison["llama"] = right.name
+        return comparison
+
+    return {
+        "schema": "qx-fixed-snapshot-continuation-residual-bisect-v1",
+        "snapshot_activation": "f32",
+        "continuation_activation": "q8_k_compat",
+        "provenance": {
+            "qxqxf_sha256": _sha256(exe),
+            "qxf_sha256": _sha256(qxf),
+            "snapshot_sha256": _sha256(snapshot),
+        },
+        "first_routing_change_layer": start_layer,
+        "routing_changed_layers": changed_layers,
+        "residual_values": residual_values,
+        "residual_sources": {activation: residuals[activation].name for activation in activations},
+        "controls": controls,
+        "diagnostic": {
+            "selected_token": diagnostic_payload.get("final_token"),
+            "routing_changed_layers_vs_f32": [
+                layer for layer in range(start_layer, 48)
+                if diagnostic_routing[layer] != routings["f32"][layer]
+            ],
+            "routing_changed_layers_vs_q8_k_compat": [
+                layer for layer in range(start_layer, 48)
+                if diagnostic_routing[layer] != routings["q8_k_compat"][layer]
+            ],
+            "logits_vs_f32": compare_to("f32", "step-1-logits.f32"),
+            "logits_vs_q8_k_compat": compare_to("q8_k_compat", "step-1-logits.f32"),
+            "final_residual_vs_f32": compare_to("f32", "final_residual"),
+            "final_residual_vs_q8_k_compat": compare_to("q8_k_compat", "final_residual"),
+        },
+    }
 
 
 def run_cross_activation_kv_replay(
@@ -301,6 +492,7 @@ def run_cross_activation_kv_replay(
     uninterrupted_dirs: dict[str, Path],
     llama_dirs: dict[str, Path],
     expected_tokens: dict[str, list[int]],
+    residual_bisect: bool = False,
 ) -> dict[str, Any]:
     activations = ("f32", "q8_k_compat")
     if tuple(uninterrupted_dirs) != activations or tuple(expected_tokens) != activations:
@@ -426,12 +618,27 @@ def run_cross_activation_kv_replay(
             for prefix in activations
         },
     }
+    fixed_snapshot_residual_bisect = None
+    if residual_bisect:
+        continuation_tokens = {tokens[0] for tokens in expected_tokens.values()}
+        if len(continuation_tokens) != 1:
+            raise ValueError("fixed-snapshot residual bisect requires one shared continuation token")
+        fixed_snapshot_residual_bisect = run_fixed_snapshot_residual_bisect(
+            exe,
+            qxf,
+            snapshot=work / "prefix-f32" / "snapshot.bin",
+            continuation_token=continuation_tokens.pop(),
+            work=work / "fixed-snapshot-residual-bisect",
+            continuation_dirs=replay_dirs["f32"],
+            continuation_payloads=payloads["f32"],
+        )
     return {
         "continuation_step": 1,
         "kv_format": "int8",
         "snapshots": snapshots,
         "cells": cells,
         "axis_effects": axis_effects,
+        "fixed_snapshot_residual_bisect": fixed_snapshot_residual_bisect,
         "claims": {
             "causal_scope": "case_local_cross_activation_replay",
             "global_parity": "not_claimed",
@@ -447,10 +654,21 @@ def run_contract(
     run_greedy: bool = False,
     qx_activation_bisect: bool = False,
     qx_kv_activation_bisect: bool = False,
+    qx_kv_residual_bisect: bool = False,
 ) -> dict[str, Any]:
     validate_contract(contract)
     if qx_kv_activation_bisect and (not run_greedy or not qx_activation_bisect):
         raise ValueError("QX KV activation bisect requires greedy and activation bisect")
+    if qx_kv_residual_bisect and (
+        not run_greedy or not qx_activation_bisect or not qx_kv_activation_bisect
+    ):
+        raise ValueError(
+            "QX KV residual bisect requires greedy, activation, and KV activation bisect"
+        )
+    if qx_kv_residual_bisect and [case["name"] for case in contract["greedy_cases"]].count(
+        "token-1000"
+    ) != 1:
+        raise ValueError("QX KV residual bisect requires exactly one token-1000 case")
     root = root.resolve()
     work.mkdir(parents=True, exist_ok=True)
     exe_path = root / "build/qxqxf.exe"
@@ -555,6 +773,7 @@ def run_contract(
                     uninterrupted_dirs=qx_logits,
                     llama_dirs=llama_logits,
                     expected_tokens=qx_tokens,
+                    residual_bisect=qx_kv_residual_bisect and case["name"] == "token-1000",
                 )
             greedy_results.append({
                 "name": case["name"],
@@ -645,6 +864,7 @@ def main() -> int:
     parser.add_argument("--run-greedy", action="store_true")
     parser.add_argument("--qx-activation-bisect", action="store_true")
     parser.add_argument("--qx-kv-activation-bisect", action="store_true")
+    parser.add_argument("--qx-kv-residual-bisect", action="store_true")
     args = parser.parse_args()
     contract = load_contract(args.contract)
     with tempfile.TemporaryDirectory(prefix="qx-unicode-chat-") as temp:
@@ -655,6 +875,7 @@ def main() -> int:
             run_greedy=args.run_greedy,
             qx_activation_bisect=args.qx_activation_bisect,
             qx_kv_activation_bisect=args.qx_kv_activation_bisect,
+            qx_kv_residual_bisect=args.qx_kv_residual_bisect,
         )
     publish_report(args.out, report)
     return 0

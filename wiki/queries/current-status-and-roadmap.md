@@ -65,7 +65,8 @@ full-logit reusable #74: COMPLETED y publicado
 matriz CPU/read-only real #75: 3/3 greedy y 12/12 argmax; 0/12 tolerancia full-logit, paridad numérica refutada case-local
 bisect de activación #76: amplificación material localizada en MoE layer 1; Q8_K cierra el seam same-input y mejora la matriz a 1/12 sin regresión greedy/argmax
 bisect KV acumulado × activación #77: 6/6 diagonales exactas; 0/24 thresholds y 22/24 argmax; interacción token-dependiente localizada
-→ milestone activo siguiente: fijar el snapshot F32 de token 1000 e inyectar residual exacto de continuación alrededor del primer cambio de routing; no promover defaults
+replay residual con KV fijo #78: 2/2 controles exactos; Q8_K conserva `1318` con residual F32 en layer 2 y diverge de routing F32 desde layer 3
+→ milestone activo siguiente: fijar el mismo snapshot e inyectar output exacto de layer 2 al iniciar layer 3; no promover defaults
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -180,7 +181,7 @@ Issue #72 exige presencia explícita de `long_context_profile` en cada run first
 
 ## Después
 
-1. Para token 1000, fijar el snapshot F32 e inyectar el residual exacto de continuación alrededor del primer layer cuyo routing cambia al alternar la activación consumidora.
+1. Para token 1000, fijar el mismo snapshot F32 e inyectar la salida exacta F32/Q8_K de layer 2 al iniciar layer 3; exigir controles same-mode exactos y comparar routing/logits/token contra ambos continua.
 2. Repetir ese gate causal sobre más casos sólo después de cerrar el seam; no extrapolar 22/24 argmax a paridad global.
 3. Convertir contratos 4K/RSS/calidad KV/soak en mediciones reales sólo con gates reproducibles y fuera del CI pesado por defecto.
 4. Diseñar CUDA híbrido únicamente después de cerrar el milestone CPU/paridad y medir transferencias/residency; no asumir que el temporal Q8_K CPU es un contrato CUDA.

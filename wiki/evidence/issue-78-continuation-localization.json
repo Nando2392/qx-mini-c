@@ -1,0 +1,62 @@
+{
+  "case": "token-1000",
+  "issue": 78,
+  "localization": "The token flip remains under the Q8_K suffix after an exact F32 layer-1 residual is injected at layer 2. Layer-2 expert selection still matches F32, while routing first departs from F32 at layer 3; this localizes the next bisect boundary to the layer-2 output / layer-3 input, not to a kernel root cause.",
+  "next_hypothesis": "Hold the same F32 snapshot fixed, inject exact F32 versus Q8_K layer-2 output at start-layer 3 under Q8_K, and require exact same-mode controls before interpreting the diagnostic cell.",
+  "not_claimed": [
+    "global logit parity",
+    "semantic equivalence",
+    "single kernel root cause",
+    "default promotion"
+  ],
+  "observation": {
+    "diagnostic_activation": "q8_k_compat",
+    "diagnostic_first_routing_change_vs_f32": 3,
+    "diagnostic_layer_2_routing_matches_f32": true,
+    "diagnostic_residual_source": "f32_layer_1_output",
+    "diagnostic_selected_token": 1318,
+    "f32_selected_token": 67075,
+    "first_uninterrupted_routing_change_layer": 2,
+    "fixed_snapshot_activation": "f32",
+    "kv_format": "int8",
+    "logits_vs_f32": {
+      "argmax_match": false,
+      "cosine": 0.9979832222883686,
+      "count": 151936,
+      "delta_l2": 53.085376688774154,
+      "llama": "step-1-logits.f32",
+      "llama_argmax": 67075,
+      "max_abs": 0.6553454399108887,
+      "pass": false,
+      "qx": "step-1-logits.f32",
+      "qx_argmax": 1318,
+      "rmse": 0.1361897927914368,
+      "thresholds": {
+        "max_abs": 0.1,
+        "min_cosine": 0.99,
+        "rmse": 0.1
+      }
+    },
+    "logits_vs_q8_k_compat": {
+      "argmax_match": true,
+      "cosine": 0.9928435666807365,
+      "count": 151936,
+      "delta_l2": 113.39218612674667,
+      "llama": "step-1-logits.f32",
+      "llama_argmax": 1318,
+      "max_abs": 0.9490605592727661,
+      "pass": false,
+      "qx": "step-1-logits.f32",
+      "qx_argmax": 1318,
+      "rmse": 0.2909060704854211,
+      "thresholds": {
+        "max_abs": 0.1,
+        "min_cosine": 0.99,
+        "rmse": 0.1
+      }
+    },
+    "q8_cross_activation_selected_token": 1318,
+    "same_mode_controls_exact": 2
+  },
+  "schema": "qx-issue-78-continuation-localization-v1"
+}
