@@ -1,0 +1,262 @@
+{
+  "case": "token-1000",
+  "command": [
+    "python",
+    "scripts/run_unicode_chat_greedy_matrix.py",
+    "--contract",
+    "tests/fixtures/qwen3-unicode-chat-greedy-matrix.json",
+    "--root",
+    ".",
+    "--out",
+    "issue-79-reproduction-report.json",
+    "--run-greedy",
+    "--qx-activation-bisect",
+    "--qx-kv-activation-bisect",
+    "--qx-kv-residual-bisect",
+    "--qx-kv-residual-start-layer",
+    "3"
+  ],
+  "freeze_scope": "Raw bytes of executed worktree files; before/after identical during final run. Python normalized hashes replace CRLF with LF only for Git binding.",
+  "interpretation": "Exact F32 layer-2 output injected at layer 3 under Q8_K suffix and fixed F32-produced INT8 KV is insufficient to restore F32 token 67075: diagnostic retains1318. Ordered expert IDs depart from both continuations starting at3. Neither full-logit comparison passes unchanged thresholds. This does not identify a kernel root cause, exclude an effect of layer2, establish global parity or justify default promotion.",
+  "issue": 79,
+  "output_precondition": "Output must not already exist. Choose a new path per run.",
+  "parent_report_sha256": "1746cebb56ea24b3cef95c1f27a8fbac0cf97a6f39ac88a70625a39ca00a63b0",
+  "repeat_comparison": "Initial and final bisect results identical excluding newly added residual_source_sha256 field.",
+  "result": {
+    "continuation_activation": "q8_k_compat",
+    "controls": {
+      "f32": {
+        "exact": true
+      },
+      "q8_k_compat": {
+        "exact": true
+      }
+    },
+    "diagnostic": {
+      "final_residual_vs_f32": {
+        "argmax_match": true,
+        "cosine": 0.9996632939087445,
+        "count": 2048,
+        "delta_l2": 6.504232328890337,
+        "llama": "step-1-layer-47-output.f32",
+        "llama_argmax": 567,
+        "max_abs": 2.8424530029296875,
+        "pass": false,
+        "qx": "step-1-layer-47-output.f32",
+        "qx_argmax": 567,
+        "rmse": 0.14372458706784774,
+        "thresholds": {
+          "max_abs": 0.1,
+          "min_cosine": 0.99,
+          "rmse": 0.1
+        }
+      },
+      "final_residual_vs_q8_k_compat": {
+        "argmax_match": true,
+        "cosine": 0.9992190756275997,
+        "count": 2048,
+        "delta_l2": 8.39242139702327,
+        "llama": "step-1-layer-47-output.f32",
+        "llama_argmax": 567,
+        "max_abs": 1.7345027923583984,
+        "pass": false,
+        "qx": "step-1-layer-47-output.f32",
+        "qx_argmax": 567,
+        "rmse": 0.18544806501281977,
+        "thresholds": {
+          "max_abs": 0.1,
+          "min_cosine": 0.99,
+          "rmse": 0.1
+        }
+      },
+      "logits_vs_f32": {
+        "argmax_match": false,
+        "cosine": 0.9989085707127635,
+        "count": 151936,
+        "delta_l2": 39.192430792609585,
+        "llama": "step-1-logits.f32",
+        "llama_argmax": 67075,
+        "max_abs": 0.4658138155937195,
+        "pass": false,
+        "qx": "step-1-logits.f32",
+        "qx_argmax": 1318,
+        "rmse": 0.10054763404866184,
+        "thresholds": {
+          "max_abs": 0.1,
+          "min_cosine": 0.99,
+          "rmse": 0.1
+        }
+      },
+      "logits_vs_q8_k_compat": {
+        "argmax_match": true,
+        "cosine": 0.994531274763143,
+        "count": 151936,
+        "delta_l2": 100.665539903044,
+        "llama": "step-1-logits.f32",
+        "llama_argmax": 1318,
+        "max_abs": 0.9067068099975586,
+        "pass": false,
+        "qx": "step-1-logits.f32",
+        "qx_argmax": 1318,
+        "rmse": 0.2582560372701061,
+        "thresholds": {
+          "max_abs": 0.1,
+          "min_cosine": 0.99,
+          "rmse": 0.1
+        }
+      },
+      "routing_changed_layers_vs_f32": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        12,
+        13,
+        15,
+        16,
+        17,
+        18,
+        21,
+        22,
+        24,
+        25,
+        26,
+        27,
+        28,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        40,
+        41,
+        42,
+        45
+      ],
+      "routing_changed_layers_vs_q8_k_compat": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        11,
+        12,
+        13,
+        15,
+        16,
+        18,
+        19,
+        22,
+        23,
+        24,
+        26,
+        27,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47
+      ],
+      "selected_token": 1318
+    },
+    "first_routing_change_layer": 2,
+    "provenance": {
+      "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+      "qxqxf_sha256": "637ecaab7248b0ddabc8e0559b20efa2bdd7d5347f3303cf8a093de069823fdf",
+      "snapshot_sha256": "a419c290310725f744a96c4d9da0d7b1b9206804b39e9f7002bf9a03622b84a0"
+    },
+    "residual_injection_start_layer": 3,
+    "residual_source_sha256": {
+      "f32": "bae4f7ece48b8df77d564943b1e737bbc65824c9fc12adce53bd8f201f2e4662",
+      "q8_k_compat": "a28bc05c5b31d244f5b6ee8a99465ab1af8081f275077f0869c9e74f56a432bd"
+    },
+    "residual_sources": {
+      "f32": "step-1-layer-2-output.f32",
+      "q8_k_compat": "step-1-layer-2-output.f32"
+    },
+    "residual_values": 2048,
+    "routing_changed_layers": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      15,
+      16,
+      17,
+      18,
+      19,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      32,
+      34,
+      35,
+      36,
+      37,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47
+    ],
+    "schema": "qx-fixed-snapshot-continuation-residual-bisect-v1",
+    "snapshot_activation": "f32"
+  },
+  "schema": "qx-layer3-fixed-kv-evidence-v1",
+  "source_binary_freeze": {
+    "build/llama_reference_oracle.exe": {
+      "raw_sha256": "48a0c39c386523fd32c65414d12e00d2b984a3dab5ffa0e1b33d4ab7aeb28dbb"
+    },
+    "build/llama_sequence_oracle.exe": {
+      "raw_sha256": "e5d56c26bc0e42c534cfdc697d3da24693a66893db89cfa52cd41b4c4ab1427f"
+    },
+    "build/qxqxf.exe": {
+      "raw_sha256": "637ecaab7248b0ddabc8e0559b20efa2bdd7d5347f3303cf8a093de069823fdf"
+    },
+    "scripts/run_unicode_chat_greedy_matrix.py": {
+      "crlf_to_lf_sha256": "510e64fd6fcdf2be2a1971541c9fff302997157d15287152102b4e2c55a1c5f7",
+      "raw_sha256": "75630320fe28ca8b08ba1b6fe9ae5fb3c2830c27f49484c4c80a56b4beeadec5"
+    },
+    "tests/test_unicode_chat_greedy_matrix.py": {
+      "crlf_to_lf_sha256": "d0bd722adb3325d0b4c2d51c88d5dba2c0ce4780acc8c051fa284455e30abc66",
+      "raw_sha256": "62ba734f981232869c5295cdde495737d9e310df81d3787a17fc6cfd26f3f85d"
+    }
+  },
+  "working_directory": "repository_root"
+}

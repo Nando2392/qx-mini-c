@@ -66,7 +66,8 @@ matriz CPU/read-only real #75: 3/3 greedy y 12/12 argmax; 0/12 tolerancia full-l
 bisect de activación #76: amplificación material localizada en MoE layer 1; Q8_K cierra el seam same-input y mejora la matriz a 1/12 sin regresión greedy/argmax
 bisect KV acumulado × activación #77: 6/6 diagonales exactas; 0/24 thresholds y 22/24 argmax; interacción token-dependiente localizada
 replay residual con KV fijo #78: 2/2 controles exactos; Q8_K conserva `1318` con residual F32 en layer 2 y diverge de routing F32 desde layer 3
-→ milestone activo siguiente: fijar el mismo snapshot e inyectar output exacto de layer 2 al iniciar layer 3; no promover defaults
+replay layer 3 con KV fijo #79: controles same-mode exactos; retiene `1318`, los IDs ordenados difieren de ambos baselines desde layer 3 y 0/2 comparaciones full-logit pasan thresholds
+→ milestone propuesto siguiente, aún no implementado: same-input de attention/MoE en layer 3 con el mismo KV fijo; no caminar automáticamente a layer 4 ni promover defaults
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -179,9 +180,11 @@ Issue #71 aplica el contrato report-level existente a cada profile first/later d
 
 Issue #72 exige presencia explícita de `long_context_profile` en cada run first/later antes de shape/contract/equality. Distingue missing de null/non-object y no cambia defaults.
 
+Issue #79 completa la inyección pendiente: fija el mismo snapshot INT8 KV producido por F32 e inyecta la salida F32 exacta de layer 2 al iniciar layer 3 bajo el sufijo Q8_K. Ambos controles same-mode son exactos, pero el diagnóstico conserva `1318`; los IDs de expertos ordenados difieren tanto del baseline F32 como del Q8_K desde layer 3 y ninguna de las dos comparaciones full-logit pasa los thresholds sin cambios. El probe por layer ya expone output de attention, residual post-attention, entrada FFN normalizada e IDs ordenados; falta implementar el experimento same-input de attention/MoE de layer 3 bajo ese KV fijo para separar una diferencia de routing nacida dentro de layer 3 de otra ya presente en el residual entrante. No se inicia por inercia un recorrido de layer 4 ni se afirma root cause, paridad global o promoción de Q8_K/CUDA; F32 sigue default.
+
 ## Después
 
-1. Para token 1000, fijar el mismo snapshot F32 e inyectar la salida exacta F32/Q8_K de layer 2 al iniciar layer 3; exigir controles same-mode exactos y comparar routing/logits/token contra ambos continua.
+1. Implementar para token 1000 el slice same-input de attention/MoE de layer 3 bajo el mismo snapshot KV fijo, comparando los seams ya disponibles de output de attention, residual post-attention, entrada FFN normalizada e IDs ordenados para distinguir routing generado dentro de layer 3 de residual entrante.
 2. Repetir ese gate causal sobre más casos sólo después de cerrar el seam; no extrapolar 22/24 argmax a paridad global.
 3. Convertir contratos 4K/RSS/calidad KV/soak en mediciones reales sólo con gates reproducibles y fuera del CI pesado por defecto.
 4. Diseñar CUDA híbrido únicamente después de cerrar el milestone CPU/paridad y medir transferencias/residency; no asumir que el temporal Q8_K CPU es un contrato CUDA.

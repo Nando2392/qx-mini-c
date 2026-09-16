@@ -303,8 +303,11 @@ def run_fixed_snapshot_residual_bisect(
     work: Path,
     continuation_dirs: dict[str, Path],
     continuation_payloads: dict[str, dict[str, Any]],
+    start_layer: int | None = None,
 ) -> dict[str, Any]:
     activations = ("f32", "q8_k_compat")
+    if start_layer is not None and (type(start_layer) is not int or not 1 <= start_layer < 48):
+        raise ValueError("fixed-snapshot start layer must be an integer in range 1..47")
     if tuple(continuation_dirs) != activations or tuple(continuation_payloads) != activations:
         raise ValueError("fixed-snapshot continuation modes/order must be f32,q8_k_compat")
     if type(continuation_token) is not int or continuation_token < 0:
@@ -346,7 +349,9 @@ def run_fixed_snapshot_residual_bisect(
     ]
     if not changed_layers or changed_layers[0] <= 0:
         raise ValueError("fixed-snapshot first routing change must follow layer 0")
-    start_layer = changed_layers[0]
+    first_routing_change_layer = changed_layers[0]
+    if start_layer is None:
+        start_layer = first_routing_change_layer
 
     def residual_dump(directory: Path, layer: int) -> Path:
         candidates = [directory / f"l_out-{layer}.f32"]
@@ -460,10 +465,12 @@ def run_fixed_snapshot_residual_bisect(
             "qxf_sha256": _sha256(qxf),
             "snapshot_sha256": _sha256(snapshot),
         },
-        "first_routing_change_layer": start_layer,
+        "first_routing_change_layer": first_routing_change_layer,
+        "residual_injection_start_layer": start_layer,
         "routing_changed_layers": changed_layers,
         "residual_values": residual_values,
         "residual_sources": {activation: residuals[activation].name for activation in activations},
+        "residual_source_sha256": {activation: _sha256(residuals[activation]) for activation in activations},
         "controls": controls,
         "diagnostic": {
             "selected_token": diagnostic_payload.get("final_token"),
@@ -493,8 +500,11 @@ def run_cross_activation_kv_replay(
     llama_dirs: dict[str, Path],
     expected_tokens: dict[str, list[int]],
     residual_bisect: bool = False,
+    residual_start_layer: int | None = None,
 ) -> dict[str, Any]:
     activations = ("f32", "q8_k_compat")
+    if residual_start_layer is not None and not residual_bisect:
+        raise ValueError("explicit residual start layer requires QX KV residual bisect")
     if tuple(uninterrupted_dirs) != activations or tuple(expected_tokens) != activations:
         raise ValueError("cross-activation uninterrupted modes/order invalid")
     if any(len(tokens) < 2 for tokens in expected_tokens.values()):
@@ -631,6 +641,7 @@ def run_cross_activation_kv_replay(
             work=work / "fixed-snapshot-residual-bisect",
             continuation_dirs=replay_dirs["f32"],
             continuation_payloads=payloads["f32"],
+            start_layer=residual_start_layer,
         )
     return {
         "continuation_step": 1,
@@ -655,8 +666,16 @@ def run_contract(
     qx_activation_bisect: bool = False,
     qx_kv_activation_bisect: bool = False,
     qx_kv_residual_bisect: bool = False,
+    qx_kv_residual_start_layer: int | None = None,
 ) -> dict[str, Any]:
     validate_contract(contract)
+    if qx_kv_residual_start_layer is not None and (
+        type(qx_kv_residual_start_layer) is not int
+        or not 1 <= qx_kv_residual_start_layer < 48
+    ):
+        raise ValueError("QX KV residual start layer must be an integer in range 1..47")
+    if qx_kv_residual_start_layer is not None and not qx_kv_residual_bisect:
+        raise ValueError("explicit residual start layer requires QX KV residual bisect")
     if qx_kv_activation_bisect and (not run_greedy or not qx_activation_bisect):
         raise ValueError("QX KV activation bisect requires greedy and activation bisect")
     if qx_kv_residual_bisect and (
@@ -774,6 +793,9 @@ def run_contract(
                     llama_dirs=llama_logits,
                     expected_tokens=qx_tokens,
                     residual_bisect=qx_kv_residual_bisect and case["name"] == "token-1000",
+                    residual_start_layer=(
+                        qx_kv_residual_start_layer if case["name"] == "token-1000" else None
+                    ),
                 )
             greedy_results.append({
                 "name": case["name"],
@@ -865,6 +887,7 @@ def main() -> int:
     parser.add_argument("--qx-activation-bisect", action="store_true")
     parser.add_argument("--qx-kv-activation-bisect", action="store_true")
     parser.add_argument("--qx-kv-residual-bisect", action="store_true")
+    parser.add_argument("--qx-kv-residual-start-layer", type=int)
     args = parser.parse_args()
     contract = load_contract(args.contract)
     with tempfile.TemporaryDirectory(prefix="qx-unicode-chat-") as temp:
@@ -876,6 +899,7 @@ def main() -> int:
             qx_activation_bisect=args.qx_activation_bisect,
             qx_kv_activation_bisect=args.qx_kv_activation_bisect,
             qx_kv_residual_bisect=args.qx_kv_residual_bisect,
+            qx_kv_residual_start_layer=args.qx_kv_residual_start_layer,
         )
     publish_report(args.out, report)
     return 0

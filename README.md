@@ -52,6 +52,8 @@ The accumulated-KV cross-activation bisect reuses the published snapshot seam in
 
 The fixed-snapshot residual replay now holds token 1000's F32-produced INT8 KV snapshot constant and resumes at the first cross-activation routing change, layer 2. Both F32 and Q8_K same-mode controls reproduce suffix routing, final residual, logits and selected token exactly. Injecting the exact F32 layer-1 residual into a Q8_K suffix still selects `1318`, not the F32 continuation's `67075`; layer-2 expert selection remains F32-exact and routing first departs from F32 at layer 3. The diagnostic logits pass neither unchanged full-logit comparison (`vs F32: max_abs 0.655345, RMSE 0.136190, cosine 0.997983`; `vs Q8_K: max_abs 0.949061, RMSE 0.290906, cosine 0.992844`). This localizes the next boundary to layer-2 output / layer-3 input for this case only; it is not global parity, semantic equivalence, a kernel root cause or permission to promote Q8_K. Evidence: `wiki/evidence/issue-78-fixed-kv-residual-bisect-report.json` and `wiki/evidence/issue-78-continuation-localization.json`.
 
+The layer-3 fixed-KV replay completes that boundary experiment by injecting the exact F32 layer-2 output into the Q8_K suffix. Both same-mode controls are exact, but the diagnostic retains token `1318`; its ordered expert IDs differ from both the F32 and Q8_K baselines starting at layer 3, and neither unchanged full-logit threshold comparison passes. The existing layer probe exposes attention output, post-attention residual, FFN-normalized input and ordered expert IDs, but a same-input layer-3 attention/MoE experiment under the fixed KV snapshot is not implemented. That is the next proposed causal slice: separate a routing difference arising inside layer 3 from one already present in its incoming residual, without automatically walking to layer 4 or claiming a root cause. F32 remains the default; this case-local result does not establish global parity or promote Q8_K/CUDA. Evidence: `wiki/evidence/issue-79-layer3-fixed-kv-report.json`.
+
 Here, routing equality means exact equality of the ordered `selected_experts` IDs, not just set membership. It does not establish equal expert weights or equal numeric layer outputs. Layer 3 is the first observed ordered-ID difference after injection, not proof that the numeric error originates there.
 
 ## Honest performance state
@@ -218,7 +220,7 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. For token 1000, hold the same F32-produced KV snapshot fixed and inject the exact F32/Q8_K layer-2 output at start-layer 3. Require exact same-mode controls and compare ordered expert IDs, logits and selected token against both continuations. Layer 3 is the next observed routing boundary, not an identified error origin.
+1. For token 1000, implement the proposed same-input layer-3 attention/MoE experiment under the fixed KV snapshot. Compare attention output, post-attention residual, normalized FFN input and ordered expert IDs; the required fixed-KV experiment is not yet implemented. Layer-3 residual injection is completed in Issue #79, not an identified kernel error origin.
 2. Repeat that causal gate on additional fixed cases only after the token-1000 seam is closed; do not infer global parity from the current three cases.
 3. Convert the existing 4K/RSS/KV-quality/soak contracts into real measurements outside heavy default CI.
 4. Design a hybrid CUDA backend only after the CPU/parity milestone closes and transfer/residency costs are measured.

@@ -335,7 +335,10 @@ def test_routing_rejects_duplicate_layers_before_dictionary_normalization(duplic
         matrix._routing_by_layer({"tokens": [{"layers": layers}]})
 
 
-def test_fixed_snapshot_residual_bisect_closes_at_first_routing_change(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("requested_start_layer", "expected_start_layer"), [(None, 2), (3, 3)])
+def test_fixed_snapshot_residual_bisect_closes_at_requested_layer(
+    tmp_path, monkeypatch, requested_start_layer, expected_start_layer
+):
     matrix = load_matrix_module()
     exe = tmp_path / "qxqxf.exe"
     qxf = tmp_path / "model.qxf"
@@ -353,6 +356,7 @@ def test_fixed_snapshot_residual_bisect_closes_at_first_routing_change(tmp_path,
     final_vectors = {"f32": [5.0, 1.0, 0.0], "q8_k_compat": [1.0, 5.0, 0.0]}
     for mode, values in (("f32", f32_input), ("q8_k_compat", q8_input)):
         (continuation_dirs[mode] / "step-1-layer-1-output.f32").write_bytes(struct.pack("<3f", *values))
+        (continuation_dirs[mode] / "step-1-layer-2-output.f32").write_bytes(struct.pack("<3f", *(v + 10 for v in values)))
         (continuation_dirs[mode] / "step-1-layer-47-output.f32").write_bytes(
             struct.pack("<3f", *final_vectors[mode])
         )
@@ -391,10 +395,12 @@ def test_fixed_snapshot_residual_bisect_closes_at_first_routing_change(tmp_path,
     def fake_invoke(command):
         mode = command[command.index("--activation") + 1]
         start_layer = int(command[command.index("--start-layer") + 1])
+        assert start_layer == expected_start_layer
+        assert Path(command[command.index("--kv-snapshot-in") + 1]) == snapshot
         residual = Path(command[command.index("--residual-in") + 1]).read_bytes()
         dump_dir = Path(command[command.index("--dump-residuals") + 1])
         source_mode = "f32" if residual == (
-            continuation_dirs["f32"] / "step-1-layer-1-output.f32"
+            continuation_dirs["f32"] / f"step-1-layer-{start_layer - 1}-output.f32"
         ).read_bytes() else "q8_k_compat"
         outcome_mode = "f32" if source_mode == "f32" else mode
         final = final_vectors[outcome_mode]
@@ -422,6 +428,9 @@ def test_fixed_snapshot_residual_bisect_closes_at_first_routing_change(tmp_path,
         }
 
     monkeypatch.setattr(matrix, "_invoke", fake_invoke)
+    kwargs = {}
+    if requested_start_layer is not None:
+        kwargs["start_layer"] = requested_start_layer
     report = matrix.run_fixed_snapshot_residual_bisect(
         exe,
         qxf,
@@ -430,9 +439,15 @@ def test_fixed_snapshot_residual_bisect_closes_at_first_routing_change(tmp_path,
         work=tmp_path / "bisect",
         continuation_dirs=continuation_dirs,
         continuation_payloads=continuation_payloads,
+        **kwargs,
     )
 
     assert report["first_routing_change_layer"] == 2
+    assert report["residual_injection_start_layer"] == expected_start_layer
+    assert report["residual_source_sha256"] == {
+        mode: hashlib.sha256((continuation_dirs[mode] / f"step-1-layer-{expected_start_layer - 1}-output.f32").read_bytes()).hexdigest()
+        for mode in modes
+    }
     assert report["provenance"] == {
         "qxqxf_sha256": hashlib.sha256(b"runtime").hexdigest(),
         "qxf_sha256": hashlib.sha256(b"model").hexdigest(),
@@ -444,9 +459,114 @@ def test_fixed_snapshot_residual_bisect_closes_at_first_routing_change(tmp_path,
     assert report["diagnostic"]["logits_vs_f32"]["pass"] is True
     assert report["diagnostic"]["logits_vs_q8_k_compat"]["pass"] is False
     assert report["residual_sources"] == {
-        "f32": "step-1-layer-1-output.f32",
-        "q8_k_compat": "step-1-layer-1-output.f32",
+        "f32": f"step-1-layer-{expected_start_layer - 1}-output.f32",
+        "q8_k_compat": f"step-1-layer-{expected_start_layer - 1}-output.f32",
     }
+
+
+@pytest.mark.parametrize(
+    ("invalid_case", "error"),
+    [
+        ("absent", "expected one residual dump for layer 1"),
+        ("empty", "f32: fixed-snapshot residual size invalid"),
+        ("unaligned", "f32: fixed-snapshot residual size invalid"),
+        ("mismatched-counts", "fixed-snapshot residual counts differ"),
+    ],
+)
+def test_fixed_snapshot_residual_bisect_rejects_invalid_residual_sidecars_before_invoke(
+    tmp_path, monkeypatch, invalid_case, error
+):
+    matrix = load_matrix_module()
+    modes = ("f32", "q8_k_compat")
+    continuation_dirs = {mode: tmp_path / mode for mode in modes}
+    for directory in continuation_dirs.values():
+        directory.mkdir()
+        (directory / "step-1-layer-1-output.f32").write_bytes(struct.pack("<3f", 1.0, 2.0, 3.0))
+        (directory / "step-1-layer-47-output.f32").write_bytes(struct.pack("<3f", 4.0, 5.0, 6.0))
+        (directory / "step-1-logits.f32").write_bytes(struct.pack("<3f", 4.0, 5.0, 6.0))
+
+    residuals = {
+        mode: continuation_dirs[mode] / "step-1-layer-1-output.f32" for mode in modes
+    }
+    if invalid_case == "absent":
+        residuals["f32"].unlink()
+    elif invalid_case == "empty":
+        residuals["f32"].write_bytes(b"")
+    elif invalid_case == "unaligned":
+        residuals["f32"].write_bytes(b"\x00")
+    else:
+        residuals["q8_k_compat"].write_bytes(struct.pack("<2f", 1.0, 2.0))
+
+    def payload(mode):
+        return {
+            "probe": "state_loop",
+            "prompt_token": 1124,
+            "steps": 1,
+            "layers_run": 48,
+            "position_base": 1,
+            "kv_format": "int8",
+            "activation_format": mode,
+            "final_token": 67075,
+            "tokens": [{
+                "position": 1,
+                "input_token": 1124,
+                "selected_token": 67075,
+                "layers": [
+                    {
+                        "layer": layer,
+                        "selected_experts": [layer, layer + 1]
+                        if mode == "f32" or layer < 2
+                        else [layer + 1, layer],
+                    }
+                    for layer in range(48)
+                ],
+            }],
+        }
+
+    def unexpected_invoke(_command):
+        pytest.fail("_invoke must not run before residual sidecar preflight completes")
+
+    monkeypatch.setattr(matrix, "_invoke", unexpected_invoke)
+    snapshot = tmp_path / "prefix-f32.snapshot"
+    snapshot.write_bytes(b"fixed-f32-prefix")
+    with pytest.raises(ValueError, match=error):
+        matrix.run_fixed_snapshot_residual_bisect(
+            tmp_path / "qxqxf.exe",
+            tmp_path / "model.qxf",
+            snapshot=snapshot,
+            continuation_token=1124,
+            work=tmp_path / "bisect",
+            continuation_dirs=continuation_dirs,
+            continuation_payloads={mode: payload(mode) for mode in modes},
+        )
+
+
+@pytest.mark.parametrize("start_layer", [True, 0, 48])
+def test_fixed_snapshot_residual_bisect_rejects_invalid_explicit_start_layer(tmp_path, start_layer):
+    matrix = load_matrix_module()
+    with pytest.raises(ValueError, match="start layer must be an integer in range 1..47"):
+        matrix.run_fixed_snapshot_residual_bisect(
+            tmp_path / "qxqxf.exe",
+            tmp_path / "model.qxf",
+            snapshot=tmp_path / "snapshot.bin",
+            continuation_token=1000,
+            work=tmp_path / "bisect",
+            continuation_dirs={"f32": tmp_path / "f32", "q8_k_compat": tmp_path / "q8"},
+            continuation_payloads={"f32": {}, "q8_k_compat": {}},
+            start_layer=start_layer,
+        )
+
+
+def test_explicit_residual_start_layer_requires_residual_bisect(tmp_path):
+    matrix = load_matrix_module()
+    fixture = matrix.load_contract(FIXTURE_PATH)
+    with pytest.raises(ValueError, match="explicit residual start layer requires QX KV residual bisect"):
+        matrix.run_contract(
+            fixture,
+            tmp_path,
+            tmp_path / "work",
+            qx_kv_residual_start_layer=3,
+        )
 
 
 def test_matrix_runner_reports_missing_artifacts_fail_closed(tmp_path):
