@@ -51,7 +51,7 @@ static void usage(const char *argv0) {
         "  %s rope-gqa-golden-probe --tokens 2 --q-heads-run 9 --seed 7\n"
         "  qxqxf real-qkv-golden-probe --in model.qxf --layer 0 --token-a 42 --token-b 43 --q-heads-run 9 --seed 7\n"
         "  qxqxf attention-stage-probe --in model.qxf --layer 1 --layer-in layer-1.f32 --out-dir sidecars --activation q8_k_compat --kv f16\n"
-        "  qxqxf moe-stage-probe --in model.qxf --layer 0 --ffn-inp ffn_inp-0.f32 --out-dir sidecars\n"
+        "  qxqxf moe-stage-probe --in model.qxf --layer 0 --ffn-inp ffn_inp-0.f32 --out-dir sidecars [--router-precision legacy_f32|integrated_double]\n"
         "  qxqxf final-head-probe --in model.qxf --residual l_out-47.f32 --out-dir sidecars --activation q8_k_compat --top-n 5\n"
         "  qxqxf expert-q8-k-dot-probe --in model.qxf --name blk.0.ffn_gate_exps.weight --expert 49 --row 0 --activation ffn_norm-0.f32\n"
         "  %s token-embedding --in model.qxf --token-id 42\n"
@@ -1654,11 +1654,13 @@ chat_fail:
         const char *ffn_input_path = NULL;
         const char *output_dir = NULL;
         const char *activation_mode = "f32";
+        const char *router_precision = "legacy_f32";
         uint32_t layer = 0u;
         for (int i = 2; i < argc; ++i) {
             if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
             else if (strcmp(argv[i], "--ffn-inp") == 0 && i + 1 < argc) ffn_input_path = argv[++i];
             else if (strcmp(argv[i], "--out-dir") == 0 && i + 1 < argc) output_dir = argv[++i];
+            else if (strcmp(argv[i], "--router-precision") == 0 && i + 1 < argc) router_precision = argv[++i];
             else if (strcmp(argv[i], "--activation") == 0 && i + 1 < argc) activation_mode = argv[++i];
             else if (strcmp(argv[i], "--layer") == 0 && i + 1 < argc) {
                 char *end = NULL;
@@ -1670,7 +1672,7 @@ chat_fail:
         }
         if (!in_path || !ffn_input_path || !output_dir) { usage(argv[0]); return 2; }
         char err[256];
-        if (!qx_dump_moe_stage_probe_summary(in_path, layer, ffn_input_path, output_dir, activation_mode, stdout, err, sizeof(err))) {
+        if (!qx_dump_moe_stage_probe_summary_mode(in_path, layer, ffn_input_path, output_dir, activation_mode, router_precision, stdout, err, sizeof(err))) {
             fprintf(stderr, "moe-stage-probe failed: %s\n", err);
             return 1;
         }

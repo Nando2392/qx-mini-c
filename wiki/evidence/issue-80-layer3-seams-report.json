@@ -1,0 +1,423 @@
+{
+  "claims": {
+    "not_supported": [
+      "kernel-bug attribution",
+      "global numeric or semantic parity",
+      "default promotion",
+      "release readiness",
+      "all-gates-passed status",
+      "a choice of the next experimental slice"
+    ],
+    "supported": [
+      "The parent-verified real command exited 0 and its bound model, snapshot, residual, executable, and source freeze remained stable.",
+      "For both activation modes, independently reconstructed opt-in integrated_double MoE and layer outputs are byte-exact with the integrated state-loop outputs.",
+      "With the same layer-3 input, activation mode changes attention outputs and FFN input; integrated routing then differs only at the final ordered top-8 ID (89 versus 22).",
+      "Holding the F32 FFN input fixed restores identical ordered routing ending in 89, while expert-stage and final MoE outputs still differ numerically.",
+      "The native moe-stage-probe default remains legacy_f32; integrated_double is explicit opt-in for this diagnostic."
+    ]
+  },
+  "input_freeze": {
+    "after": {
+      "executable": "c65c11d12c17a7ea7fb572e89e443d1b2d17fd0b1d6f6c32dd95980886a487dd",
+      "model": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+      "residual": "bae4f7ece48b8df77d564943b1e737bbc65824c9fc12adce53bd8f201f2e4662",
+      "snapshot": "a419c290310725f744a96c4d9da0d7b1b9206804b39e9f7002bf9a03622b84a0"
+    },
+    "before": {
+      "executable": "c65c11d12c17a7ea7fb572e89e443d1b2d17fd0b1d6f6c32dd95980886a487dd",
+      "model": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+      "residual": "bae4f7ece48b8df77d564943b1e737bbc65824c9fc12adce53bd8f201f2e4662",
+      "snapshot": "a419c290310725f744a96c4d9da0d7b1b9206804b39e9f7002bf9a03622b84a0"
+    },
+    "byte_stable": true
+  },
+  "interpretation": "This is a case-local interaction: attention-mode differences alter the FFN input and one integrated routing ID, while fixed-input routing equality does not remove expert-output differences. It neither identifies a kernel bug nor establishes global parity.",
+  "issue": 80,
+  "provenance": {
+    "continuation_token": 1124,
+    "executable_sha256": "c65c11d12c17a7ea7fb572e89e443d1b2d17fd0b1d6f6c32dd95980886a487dd",
+    "model_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+    "moe_ffn_inputs": [
+      {
+        "consumer": "moe-fixed-f32-input-f32",
+        "path": "<out>/integrated-f32/step-1-layer-3-ffn-inp.f32",
+        "sha256_after": "f2b22056c8ac83f4a7b9818a87f1c51baf26259a5544f81c308b2c1765f017c3",
+        "sha256_before": "f2b22056c8ac83f4a7b9818a87f1c51baf26259a5544f81c308b2c1765f017c3"
+      },
+      {
+        "consumer": "moe-control-f32",
+        "path": "<out>/integrated-f32/step-1-layer-3-ffn-inp.f32",
+        "sha256_after": "f2b22056c8ac83f4a7b9818a87f1c51baf26259a5544f81c308b2c1765f017c3",
+        "sha256_before": "f2b22056c8ac83f4a7b9818a87f1c51baf26259a5544f81c308b2c1765f017c3"
+      },
+      {
+        "consumer": "moe-fixed-f32-input-q8_k_compat",
+        "path": "<out>/integrated-f32/step-1-layer-3-ffn-inp.f32",
+        "sha256_after": "f2b22056c8ac83f4a7b9818a87f1c51baf26259a5544f81c308b2c1765f017c3",
+        "sha256_before": "f2b22056c8ac83f4a7b9818a87f1c51baf26259a5544f81c308b2c1765f017c3"
+      },
+      {
+        "consumer": "moe-control-q8_k_compat",
+        "path": "<out>/integrated-q8_k_compat/step-1-layer-3-ffn-inp.f32",
+        "sha256_after": "362776016c083c23f57ac2e2e85e1530cff44755197efde3f26c4f8866202457",
+        "sha256_before": "362776016c083c23f57ac2e2e85e1530cff44755197efde3f26c4f8866202457"
+      }
+    ],
+    "residual_sha256": "bae4f7ece48b8df77d564943b1e737bbc65824c9fc12adce53bd8f201f2e4662",
+    "snapshot_sha256": "a419c290310725f744a96c4d9da0d7b1b9206804b39e9f7002bf9a03622b84a0"
+  },
+  "raw_parent_report": {
+    "absolute_paths_and_commands_omitted_from_public_evidence": true,
+    "parent_verified_exit_code": 0,
+    "schema": "qx-issue80-layer3-seams-v1",
+    "sha256": "8c663dfcd7160be4e81443310ba1cc9fd2d2e267755e0eb21f9d5a922512a3b5"
+  },
+  "reproduction": {
+    "command": [
+      "python",
+      "scripts/run_issue80_layer3_seams.py",
+      "--qxqxf",
+      "build/qxqxf.exe",
+      "--model",
+      "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+      "--snapshot",
+      "artifacts/issue-80-inputs/prefix-f32/snapshot.bin",
+      "--residual",
+      "artifacts/issue-80-inputs/continuation-f32/step-1-layer-2-output.f32",
+      "--snapshot-sha256",
+      "a419c290310725f744a96c4d9da0d7b1b9206804b39e9f7002bf9a03622b84a0",
+      "--residual-sha256",
+      "bae4f7ece48b8df77d564943b1e737bbc65824c9fc12adce53bd8f201f2e4662",
+      "--out",
+      "artifacts/issue-80-layer3-seams-fresh",
+      "--hidden",
+      "2048",
+      "--vcur-count",
+      "512",
+      "--kqv-count",
+      "4096",
+      "--continuation-token",
+      "1124",
+      "--layers",
+      "48",
+      "--ctx",
+      "4",
+      "--seed",
+      "7"
+    ],
+    "dimensions": {
+      "continuation_token": 1124,
+      "ctx": 4,
+      "hidden": 2048,
+      "kqv_count": 4096,
+      "kv": "int8",
+      "layers": 48,
+      "seed": 7,
+      "start_layer": 3,
+      "vcur_count": 512
+    },
+    "input_regeneration_precondition": "Before running, regenerate the fixed F32-produced INT8 KV snapshot and exact F32 layer-2 continuation residual with the published fixed-snapshot/residual workflow; place them at the relative paths below and verify their SHA-256 values. Local model and generated artifacts remain outside Git.",
+    "native_default_router_precision": "legacy_f32 (unchanged)",
+    "output_precondition": "artifacts/issue-80-layer3-seams-fresh must not exist; choose a new nonexistent --out path for every run.",
+    "standalone_router_precision": "integrated_double (explicit opt-in)",
+    "working_directory": "repository_root"
+  },
+  "results": {
+    "attention": {
+      "ffn_input": {
+        "byte_exact": false,
+        "cosine": 0.9998867614304634,
+        "count": 2048,
+        "max_abs": 0.009586811065673828,
+        "rmse": 0.0013010040612525956
+      },
+      "input": {
+        "byte_exact": true,
+        "cosine": 1.0,
+        "count": 2048,
+        "max_abs": 0.0,
+        "rmse": 0.0
+      },
+      "kqv_output": {
+        "byte_exact": false,
+        "cosine": 0.9988322684748928,
+        "count": 4096,
+        "max_abs": 0.006683060899376869,
+        "rmse": 0.0006178425632856169
+      },
+      "post_attention_contribution_derived": {
+        "byte_exact": false,
+        "cosine": 0.9993209338224377,
+        "count": 2048,
+        "max_abs": 0.009586811065673828,
+        "rmse": 0.0013010040616608133
+      },
+      "vcur": {
+        "byte_exact": false,
+        "cosine": 0.9992651021150865,
+        "count": 512,
+        "max_abs": 0.004657944664359093,
+        "rmse": 0.0014464856894851493
+      }
+    },
+    "bridge_controls": {
+      "f32": {
+        "layer_output_byte_exact": true,
+        "moe_output_byte_exact": true
+      },
+      "q8_k_compat": {
+        "layer_output_byte_exact": true,
+        "moe_output_byte_exact": true
+      },
+      "summation_semantics": "ordered_rank_f32_accumulation"
+    },
+    "integrated_outputs": {
+      "layer_output": {
+        "byte_exact": false,
+        "cosine": 0.9955288433319402,
+        "count": 2048,
+        "max_abs": 0.032694220542907715,
+        "rmse": 0.009727404688998702
+      },
+      "moe_output": {
+        "byte_exact": false,
+        "cosine": 0.9638883815643122,
+        "count": 2048,
+        "max_abs": 0.03300001751631498,
+        "rmse": 0.009643778238861532
+      }
+    },
+    "moe_same_f32_input": {
+      "layer_output": {
+        "byte_exact": false,
+        "cosine": 0.9999794549078429,
+        "count": 2048,
+        "max_abs": 0.002106647938489914,
+        "rmse": 0.0006595506039825919
+      },
+      "moe_output": {
+        "byte_exact": false,
+        "cosine": 0.9998358712531557,
+        "count": 2048,
+        "max_abs": 0.002106647938489914,
+        "rmse": 0.0006595505956560792
+      },
+      "stages": {
+        "ffn_moe_down": {
+          "byte_exact": false,
+          "cosine": 0.9997485299935974,
+          "count": 16384,
+          "max_abs": 0.010900087654590607,
+          "rmse": 0.001923134774439827
+        },
+        "ffn_moe_gate": {
+          "byte_exact": false,
+          "cosine": 0.9999550450787389,
+          "count": 6144,
+          "max_abs": 0.04854249954223633,
+          "rmse": 0.004402521888829787
+        },
+        "ffn_moe_logits": {
+          "byte_exact": true,
+          "cosine": 1.0,
+          "count": 128,
+          "max_abs": 0.0,
+          "rmse": 0.0
+        },
+        "ffn_moe_probs": {
+          "byte_exact": true,
+          "cosine": 1.0,
+          "count": 128,
+          "max_abs": 0.0,
+          "rmse": 0.0
+        },
+        "ffn_moe_swiglu": {
+          "byte_exact": false,
+          "cosine": 0.9999322471323361,
+          "count": 6144,
+          "max_abs": 0.03466457314789295,
+          "rmse": 0.0014432230971553495
+        },
+        "ffn_moe_topk": {
+          "byte_exact": true,
+          "cosine": 1.0,
+          "count": 8,
+          "max_abs": 0.0,
+          "rmse": 0.0
+        },
+        "ffn_moe_up": {
+          "byte_exact": false,
+          "cosine": 0.9999508972122547,
+          "count": 6144,
+          "max_abs": 0.018940269947052002,
+          "rmse": 0.00416346240301613
+        },
+        "ffn_moe_weighted": {
+          "byte_exact": false,
+          "cosine": 0.9997567970992063,
+          "count": 16384,
+          "max_abs": 0.0012086071074008942,
+          "rmse": 0.00023501755733034422
+        },
+        "ffn_moe_weights": {
+          "byte_exact": true,
+          "cosine": 1.0,
+          "count": 8,
+          "max_abs": 0.0,
+          "rmse": 0.0
+        },
+        "ffn_moe_weights_norm": {
+          "byte_exact": true,
+          "cosine": 1.0,
+          "count": 8,
+          "max_abs": 0.0,
+          "rmse": 0.0
+        },
+        "ffn_moe_weights_sum": {
+          "byte_exact": true,
+          "cosine": 1.0,
+          "count": 1,
+          "max_abs": 0.0,
+          "rmse": 0.0
+        },
+        "ffn_norm": {
+          "byte_exact": true,
+          "cosine": 1.0,
+          "count": 2048,
+          "max_abs": 0.0,
+          "rmse": 0.0
+        }
+      }
+    },
+    "routing": {
+      "integrated": {
+        "f32": [
+          88,
+          2,
+          103,
+          31,
+          34,
+          27,
+          36,
+          89
+        ],
+        "q8_k_compat": [
+          88,
+          2,
+          103,
+          31,
+          34,
+          27,
+          36,
+          22
+        ]
+      },
+      "same_f32_input": {
+        "f32": [
+          88,
+          2,
+          103,
+          31,
+          34,
+          27,
+          36,
+          89
+        ],
+        "q8_k_compat": [
+          88,
+          2,
+          103,
+          31,
+          34,
+          27,
+          36,
+          89
+        ]
+      }
+    }
+  },
+  "schema": "qx-issue80-layer3-seams-public-evidence-v1",
+  "scope": "case-local token-1000 continuation 1124, fixed F32-produced INT8 KV snapshot and exact F32 layer-2 residual, layer-3 attention/MoE seams",
+  "source_binary_freeze": {
+    "files": {
+      "build/qxqxf.exe": {
+        "line_endings": "binary",
+        "raw_sha256": "c65c11d12c17a7ea7fb572e89e443d1b2d17fd0b1d6f6c32dd95980886a487dd"
+      },
+      "include/qx_format.h": {
+        "git_blob_sha1_after_clean_filter": "be38478832b2c9d6eda1fcf10679ff77ec83e2e4",
+        "lf_normalized_sha256": "7dd90b56b1da305ff1b16eccc6c8cc9d748fcb9c329f24f99c671765409946ea",
+        "line_endings": "CRLF",
+        "raw_sha256": "79dc4b8fd555c1daf3cdb29238bdb1254c57f7d43b3952b3fcadae863b39f583"
+      },
+      "scripts/run_issue80_layer3_seams.py": {
+        "git_blob_sha1_after_clean_filter": "cf65db008ad97c54cca50ddbb26bab0ef88abcb6",
+        "lf_normalized_sha256": "b5748f89c0599d5b400865795d1ae3e7de3a9b842c8db02363d2b929e2cb7165",
+        "line_endings": "LF",
+        "raw_sha256": "b5748f89c0599d5b400865795d1ae3e7de3a9b842c8db02363d2b929e2cb7165"
+      },
+      "src/qx_format.c": {
+        "git_blob_sha1_after_clean_filter": "6cd37eb75e1dd2f547bd31b855852f4d66ac953e",
+        "lf_normalized_sha256": "ccc745c4247824f50f62b2d1b76b8ccb50841b369ae7564f6d26b5a65c1d293e",
+        "line_endings": "CRLF",
+        "raw_sha256": "b4fcd51f1ffd9a263e2b409830a5d3db20c27c33de4e50c99680fadd80f67e62"
+      },
+      "src/qx_qxf_main.c": {
+        "git_blob_sha1_after_clean_filter": "b4b9916e80fbb9d8ea91081452c1b307084c3ba5",
+        "lf_normalized_sha256": "dcaefba4b0cbba34ae1e89b712770f0fcd63a916056f86064d0db3c480a9b496",
+        "line_endings": "CRLF",
+        "raw_sha256": "bef206f47506bbcedc999d8a7db4c87e30b9784986df46f0cad98f20e617c154"
+      },
+      "tests/test_issue80_layer3_seams.py": {
+        "git_blob_sha1_after_clean_filter": "b1da7c9938003def3f6d394a5601693649ca718c",
+        "lf_normalized_sha256": "2ff3c6bf7c326979fdbce5b1e1d7b4f7ce6ff7cdafb473107a2bfcac7bb05436",
+        "line_endings": "LF",
+        "raw_sha256": "2ff3c6bf7c326979fdbce5b1e1d7b4f7ce6ff7cdafb473107a2bfcac7bb05436"
+      },
+      "tests/test_issue80_preflight.py": {
+        "git_blob_sha1_after_clean_filter": "756bb9023a573d6eb33b6fbcb6c5e4e6603b4ae3",
+        "lf_normalized_sha256": "3468af159aece0d9f75329c9fb93c3c9e602c070c44bbce88ec40ac0ecd733a1",
+        "line_endings": "LF",
+        "raw_sha256": "3468af159aece0d9f75329c9fb93c3c9e602c070c44bbce88ec40ac0ecd733a1"
+      },
+      "tests/test_moe_stage_oracle.py": {
+        "git_blob_sha1_after_clean_filter": "a553a698c229c5da36c538d14794a41300408266",
+        "lf_normalized_sha256": "b65747096ea3242f76e5d6c4ef0a511fa472989c229583aa6af79c70bb2131b6",
+        "line_endings": "CRLF",
+        "raw_sha256": "0eacc0c966d64a73dfa2e824938c8dc339dcd838629036ed8aa155d3d42b82ce"
+      }
+    },
+    "verification": "final parent-verified run: listed source, test, and executable bytes were stable before and after execution",
+    "byte_stable_pre_post": true
+  },
+  "status": "experiment verified; release pending; not an all-gates-passed or release-ready status",
+  "verification": {
+    "experiment_status": "verified",
+    "release_status": "pending",
+    "final_run": {
+      "exit_code": 0,
+      "source_test_binary_hashes_stable_pre_post": true,
+      "numerical_sections_deep_equal_previous_run": [
+        "attention",
+        "bridge_controls",
+        "integrated_outputs",
+        "moe_same_f32_input",
+        "routing"
+      ]
+    },
+    "parent_checks": {
+      "msvc_build": "PASS",
+      "portable_real_tests": {
+        "passed": 5,
+        "skipped": 0
+      },
+      "targeted_tests": {
+        "passed": 214
+      },
+      "smoke_check": "PASS",
+      "wiki_lint": "PASS",
+      "git_diff_check": "PASS"
+    },
+    "release_gate_note": "These parent checks verify the experiment; release remains pending, so this is not an all-gates-passed or release-ready claim."
+  }
+}

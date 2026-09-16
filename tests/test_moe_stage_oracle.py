@@ -1,3 +1,4 @@
+import hashlib
 import json
 import math
 import os
@@ -19,6 +20,12 @@ GGML_EXE = ROOT / "build" / "ggml_reference_decode.exe"
 GGML_BUILD = ROOT / "tests" / "build_ggml_reference.bat"
 COMPARE_LAYER = ROOT / "scripts" / "compare_layer_sensitivity.py"
 SAME_INPUT_0_40 = ROOT / "tests" / "fixtures" / "same_input_layers_0_40.tsv"
+MOE_STAGE_SIDECARS = (
+    "ffn_norm", "ffn_moe_logits", "ffn_moe_probs", "ffn_moe_topk",
+    "ffn_moe_weights", "ffn_moe_weights_sum", "ffn_moe_weights_norm",
+    "ffn_moe_gate", "ffn_moe_up", "ffn_moe_swiglu", "ffn_moe_down",
+    "ffn_moe_weighted",
+)
 
 
 def load_same_input_0_40_cases():
@@ -132,6 +139,203 @@ def read_f32(path: Path):
 def max_abs(left, right):
     assert len(left) == len(right)
     return max(abs(a - b) for a, b in zip(left, right))
+
+
+def f32(value):
+    return struct.unpack("<f", struct.pack("<f", value))[0]
+
+
+def ordered_weighted_sum(raw, hidden=2048, ranks=8):
+    weighted = struct.unpack(f"<{len(raw) // 4}f", raw)
+    assert len(weighted) == hidden * ranks
+    output = []
+    for column in range(hidden):
+        value = f32(0.0)
+        for rank in range(ranks):
+            value = f32(value + weighted[rank * hidden + column])
+        output.append(value)
+    return struct.pack(f"<{hidden}f", *output)
+
+
+def file_sha256(path: Path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_issue80_provenance(metadata, *, executable, model, ffn_input, layer, activation_mode):
+    expected = {
+        "schema": "qx-issue80-native-module-v1",
+        "executable_sha256": file_sha256(executable),
+        "model_sha256": file_sha256(model),
+        "ffn_input_sha256": file_sha256(ffn_input),
+        "layer": layer,
+        "activation_mode": activation_mode,
+        "native_probe": "state_loop",
+    }
+    labels = {
+        "executable_sha256": "executable SHA-256",
+        "model_sha256": "model SHA-256",
+        "ffn_input_sha256": "FFN input SHA-256",
+    }
+    for field, value in expected.items():
+        if metadata.get(field) != value:
+            raise ValueError(f"{labels.get(field, field)} mismatch")
+
+
+def test_issue80_provenance_rejects_stale_hash_without_native_model(tmp_path):
+    executable = tmp_path / "qxqxf.exe"
+    model = tmp_path / "model.qxf"
+    ffn_input = tmp_path / "ffn-input.f32"
+    executable.write_bytes(b"native executable")
+    model.write_bytes(b"model")
+    ffn_input.write_bytes(struct.pack("<2f", 1.0, 2.0))
+    metadata = {
+        "schema": "qx-issue80-native-module-v1",
+        "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "model_sha256": hashlib.sha256(model.read_bytes()).hexdigest(),
+        "ffn_input_sha256": "0" * 64,
+        "layer": 3,
+        "activation_mode": "f32",
+        "native_probe": "state_loop",
+    }
+
+    with pytest.raises(ValueError, match="FFN input SHA-256 mismatch"):
+        validate_issue80_provenance(
+            metadata, executable=executable, model=model, ffn_input=ffn_input,
+            layer=3, activation_mode="f32",
+        )
+
+
+@pytest.fixture(scope="module")
+def issue80_generated_artifacts(tmp_path_factory):
+    missing = [path for path in (QX_EXE, QXF) if not path.is_file()]
+    if missing:
+        message = "Issue 80 requires local assets: " + ", ".join(str(path) for path in missing)
+        if os.environ.get("QX_REQUIRE_ISSUE80") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
+
+    bound_hashes = {"executable": file_sha256(QX_EXE), "model": file_sha256(QXF)}
+    root = tmp_path_factory.mktemp("issue80-generated")
+    artifacts = {}
+    for activation_mode in ("f32", "q8_k_compat"):
+        output = root / f"integrated-{activation_mode}"
+        output.mkdir()
+        completed = subprocess.run(
+            [
+                str(QX_EXE), "state-loop-probe", "--in", str(QXF),
+                "--prompt-token", "1000", "--steps", "2", "--layers", "4",
+                "--ctx", "4", "--kv", "int8", "--full-moe",
+                "--activation", activation_mode, "--dump-residuals", str(output),
+            ],
+            cwd=ROOT, text=True, capture_output=True,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        payload = json.loads(completed.stdout)
+        assert payload["probe"] == "state_loop"
+        assert payload["prompt_token"] == 1000
+        assert payload["steps"] == 2
+        assert payload["layers"] == 4
+        assert payload["kv_format"] == "int8"
+        assert payload["activation_format"] == activation_mode
+        tokens = payload["tokens"]
+        assert len(tokens) == 2
+        token = tokens[-1]
+        assert token["step"] == 1
+        assert token["position"] == 1
+        layer = next(row for row in token["layers"] if row["layer"] == 3)
+        assert layer["full_moe"] is True
+        prefix = f"step-{token['step']}-layer-{layer['layer']}"
+        ffn_input = output / f"{prefix}-ffn-inp.f32"
+        moe_output = output / f"{prefix}-ffn-moe-out.f32"
+        layer_input = output / f"{prefix}-input.f32"
+        layer_output = output / f"{prefix}-output.f32"
+        for path in (ffn_input, moe_output, layer_input, layer_output):
+            assert path.stat().st_size == 2048 * 4
+        provenance = {
+            "schema": "qx-issue80-native-module-v1",
+            "executable_sha256": bound_hashes["executable"],
+            "model_sha256": bound_hashes["model"],
+            "ffn_input_sha256": file_sha256(ffn_input),
+            "layer": 3,
+            "activation_mode": activation_mode,
+            "native_probe": "state_loop",
+        }
+        artifacts[activation_mode] = {
+            "directory": output,
+            "ffn_input": ffn_input,
+            "moe_output": moe_output,
+            "layer_input": layer_input,
+            "layer_output": layer_output,
+            "provenance": provenance,
+        }
+
+    assert file_sha256(QX_EXE) == bound_hashes["executable"]
+    assert file_sha256(QXF) == bound_hashes["model"]
+    yield artifacts
+    assert file_sha256(QX_EXE) == bound_hashes["executable"]
+    assert file_sha256(QXF) == bound_hashes["model"]
+
+
+def run_issue80_moe_consumer(artifact, output, activation_mode, router_precision=None):
+    validate_issue80_provenance(
+        artifact["provenance"], executable=QX_EXE, model=QXF,
+        ffn_input=artifact["ffn_input"], layer=3, activation_mode=activation_mode,
+    )
+    output.mkdir()
+    command = [
+        str(QX_EXE), "moe-stage-probe", "--in", str(QXF), "--layer", "3",
+        "--ffn-inp", str(artifact["ffn_input"]), "--out-dir", str(output),
+        "--activation", activation_mode,
+    ]
+    if router_precision is not None:
+        command.extend(["--router-precision", router_precision])
+    completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    validate_issue80_provenance(
+        artifact["provenance"], executable=QX_EXE, model=QXF,
+        ffn_input=artifact["ffn_input"], layer=3, activation_mode=activation_mode,
+    )
+    return json.loads(completed.stdout)
+
+
+@pytest.mark.parametrize("activation_mode", ["f32", "q8_k_compat"])
+def test_moe_stage_default_router_precision_matches_explicit_legacy_same_build(
+    tmp_path, issue80_generated_artifacts, activation_mode
+):
+    artifact = issue80_generated_artifacts[activation_mode]
+    default = tmp_path / "default"
+    explicit = tmp_path / "explicit-legacy"
+    default_payload = run_issue80_moe_consumer(artifact, default, activation_mode)
+    explicit_payload = run_issue80_moe_consumer(
+        artifact, explicit, activation_mode, router_precision="legacy_f32"
+    )
+    for payload in (default_payload, explicit_payload):
+        assert payload["router_precision"] == "legacy_f32"
+        assert payload["routing_sidecar_element_type"] == "f32"
+        assert payload["weighted_contribution_element_type"] == "f32"
+    for stem in MOE_STAGE_SIDECARS:
+        assert (default / f"{stem}-3.f32").read_bytes() == (explicit / f"{stem}-3.f32").read_bytes()
+
+
+@pytest.mark.parametrize("activation_mode", ["f32", "q8_k_compat"])
+def test_moe_stage_integrated_double_router_emits_exact_weighted_control(
+    tmp_path, issue80_generated_artifacts, activation_mode
+):
+    artifact = issue80_generated_artifacts[activation_mode]
+    output = tmp_path / activation_mode
+    payload = run_issue80_moe_consumer(
+        artifact, output, activation_mode, router_precision="integrated_double"
+    )
+    assert payload["router_precision"] == "integrated_double"
+    assert payload["routing_sidecar_element_type"] == "f32"
+    assert payload["weighted_contribution_element_type"] == "f32"
+    assert payload["weighted_contribution_formula"] == "f32(integrated_double_weight*expert_f32)"
+    reconstructed = ordered_weighted_sum((output / "ffn_moe_weighted-3.f32").read_bytes())
+    assert reconstructed == artifact["moe_output"].read_bytes()
 
 
 def test_moe_stage_probe_accepts_oracle_ffn_input_and_exports_stages(tmp_path):

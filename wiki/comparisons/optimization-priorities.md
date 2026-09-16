@@ -66,6 +66,7 @@ confidence: medium
 | 52 | accumulated-KV cross-activation bisect | Issue #77 cruza activación del prefijo y de la continuación sobre snapshots reales | 6/6 diagonales exactas; 0/24 thresholds, 22/24 argmax; interacción token-dependiente |
 | 53 | fixed-KV continuation residual replay | Issue #78 fija snapshot F32 de token 1000 y reanuda en layer 2 con residual F32/Q8_K exacto | 2/2 controles exactos; Q8_K conserva `1318` con residual F32; siguiente frontera layer-2 output/layer-3 input |
 | 54 | layer-3 fixed-KV residual replay | Issue #79 inyecta output F32 exacto de layer 2 al iniciar layer 3 | controles exactos; retiene `1318`; IDs ordenados difieren de ambos baselines desde layer 3; 0/2 thresholds |
+| 55 | layer-3 fixed-input attention/MoE seams | Issue #80 compara F32/Q8_K con residual y KV fijos, y repite MoE con el mismo `ffn_input` | experimento verificado, release pendiente; attention cambia `ffn_input` y routing `89/22`; fixed-input routing exacto, outputs de expertos distintos; sin promoción |
 
 ## Estado tras el hardening report-level
 
@@ -84,6 +85,8 @@ Issue #77 reutiliza el snapshot/replay publicado y cruza activación productora 
 Issue #78 fija ese snapshot F32 y reanuda token 1000 en layer 2. Los controles F32/F32 y Q8_K/Q8_K son exactos. Con el residual F32 exacto de salida de layer 1, el sufijo Q8_K aún selecciona `1318`; el routing de layer 2 coincide con F32 y la primera salida de routing distinta reaparece en layer 3. Ninguna comparación full-logit del diagnóstico pasa. El siguiente gate debe inyectar la salida exacta de layer 2 al iniciar layer 3; no se atribuye root cause a un kernel ni se promueve `q8_k_compat`.
 
 Issue #79 completa esa inyección al iniciar layer 3 bajo el mismo snapshot INT8 KV producido por F32. Los controles same-mode son exactos, pero el diagnóstico conserva `1318`; sus IDs de expertos ordenados difieren de ambos baselines desde layer 3 y ninguna comparación full-logit pasa los thresholds sin cambios. Los seams existentes del probe exponen output de attention, residual post-attention, entrada FFN normalizada e IDs ordenados, pero el slice same-input de attention/MoE de layer 3 con KV fijo aún no está implementado. Ese es el siguiente gate causal propuesto para separar routing generado dentro de layer 3 de una diferencia ya presente en el residual entrante; no autoriza caminar automáticamente a layer 4, afirmar root cause/paridad global, promover Q8_K ni iniciar CUDA. F32 permanece default.
+
+Issue #80 deja ese slice verificado por el parent con input de layer 3 y snapshot KV fijos; el release sigue pendiente. Attention cambia la entrada FFN entre modalidades (`max_abs 0.00958681`, RMSE `0.00130100`) y el routing integrado termina en `89` para F32 y `22` para Q8_K. Con el `ffn_input` F32 idéntico, ambos modos recuperan los mismos ocho IDs terminando en `89`, mientras MoE/output de layer aún difieren (`max_abs 0.00210665`, RMSE `0.000659551`). Los bridges independientes `integrated_double` son byte-exactos y opt-in; `legacy_f32` sigue default. Es interacción case-local, no bug de kernel, paridad global, release, gates completos ni autorización para promover defaults; no se selecciona aquí el siguiente slice.
 
 ## No priorizar todavía
 

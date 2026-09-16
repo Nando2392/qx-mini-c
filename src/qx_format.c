@@ -5585,11 +5585,14 @@ qx_attention_stage_cleanup:
     return ok;
 }
 
-int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char *ffn_input_path,
-        const char *output_dir, const char *activation_mode, FILE *out, char *err, uint64_t err_len) {
+int qx_dump_moe_stage_probe_summary_mode(const char *path, uint32_t layer, const char *ffn_input_path,
+        const char *output_dir, const char *activation_mode, const char *router_precision, FILE *out, char *err, uint64_t err_len) {
     int use_q8_k = activation_mode && strcmp(activation_mode, "q8_k_compat") == 0;
-    if (!path || !ffn_input_path || !output_dir || !out || (!use_q8_k && (!activation_mode || strcmp(activation_mode, "f32") != 0))) {
-        qx_set_err(err, err_len, "invalid MoE stage probe argument or activation mode"); return 0;
+    int integrated_double = router_precision && strcmp(router_precision, "integrated_double") == 0;
+    if (!path || !ffn_input_path || !output_dir || !out ||
+            (!use_q8_k && (!activation_mode || strcmp(activation_mode, "f32") != 0)) ||
+            (!integrated_double && (!router_precision || strcmp(router_precision, "legacy_f32") != 0))) {
+        qx_set_err(err, err_len, "invalid MoE stage probe argument, activation mode, or router precision"); return 0;
     }
     qx_file file;
     if (!qx_open_file(path, &file, err, err_len)) return 0;
@@ -5640,6 +5643,7 @@ int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char
     if (!qx_apply_f32_rmsnorm(&file, norm, ffn_input, ffn_norm, hidden, &rms, err, err_len)) goto fail;
     unsigned char *router_raw = NULL;
     if (!qx_read_raw_span(&file, router->offset, router->byte_size, &router_raw, err, err_len)) goto fail;
+    double router_logits[128], router_probs[128];
     double max_logit = -1.0e300;
     for (uint32_t expert = 0; expert < experts; ++expert) {
         double dot = 0.0;
@@ -5647,26 +5651,40 @@ int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char
         for (uint32_t i = 0; i < hidden; ++i) dot += (double)qx_rd_le_f32(row + (uint64_t)i * 4ull) * (double)ffn_norm[i];
         if (!isfinite(dot)) { free(router_raw); qx_set_err(err, err_len, "non-finite MoE router logit"); goto fail; }
         logits[expert] = (float)dot;
+        router_logits[expert] = integrated_double ? dot : (double)logits[expert];
         if (dot > max_logit) max_logit = dot;
     }
     free(router_raw);
     double denominator = 0.0;
-    for (uint32_t expert = 0; expert < experts; ++expert) { probs[expert] = (float)exp((double)logits[expert] - max_logit); denominator += probs[expert]; }
+    for (uint32_t expert = 0; expert < experts; ++expert) {
+        double probability = exp(router_logits[expert] - max_logit);
+        probs[expert] = (float)probability;
+        router_probs[expert] = integrated_double ? probability : (double)probs[expert];
+        denominator += router_probs[expert];
+    }
     if (!isfinite(denominator) || denominator <= 0.0) { qx_set_err(err, err_len, "invalid MoE router softmax"); goto fail; }
-    for (uint32_t expert = 0; expert < experts; ++expert) probs[expert] = (float)((double)probs[expert] / denominator);
+    for (uint32_t expert = 0; expert < experts; ++expert) {
+        router_probs[expert] /= denominator;
+        probs[expert] = (float)router_probs[expert];
+        if (!integrated_double) router_probs[expert] = (double)probs[expert];
+    }
     unsigned char picked[128] = {0};
     uint32_t selected[8];
-    float topk[8], weights[8], weight_sum_sidecar[1];
+    float topk[8], weights[8], weight_sum_sidecar[1], weights_norm[8];
+    double weights_norm_double[8];
     double weight_sum = 0.0;
     for (uint32_t rank = 0; rank < 8u; ++rank) {
-        uint32_t best = 0u; float best_prob = -1.0f;
-        for (uint32_t expert = 0; expert < experts; ++expert) if (!picked[expert] && probs[expert] > best_prob) { best = expert; best_prob = probs[expert]; }
-        picked[best] = 1u; selected[rank] = best; topk[rank] = (float)best; weights[rank] = best_prob; weight_sum += best_prob;
+        uint32_t best = 0u; double best_prob = -1.0;
+        for (uint32_t expert = 0; expert < experts; ++expert) if (!picked[expert] && router_probs[expert] > best_prob) { best = expert; best_prob = router_probs[expert]; }
+        picked[best] = 1u; selected[rank] = best; topk[rank] = (float)best; weights[rank] = (float)best_prob; weights_norm_double[rank] = best_prob; weight_sum += best_prob;
     }
     if (!isfinite(weight_sum) || weight_sum <= 0.0) { qx_set_err(err, err_len, "invalid selected MoE weights"); goto fail; }
     weight_sum_sidecar[0] = (float)weight_sum;
-    float weights_norm[8];
-    for (uint32_t rank = 0; rank < 8u; ++rank) weights_norm[rank] = (float)((double)weights[rank] / weight_sum);
+    for (uint32_t rank = 0; rank < 8u; ++rank) {
+        weights_norm_double[rank] /= weight_sum;
+        weights_norm[rank] = (float)weights_norm_double[rank];
+        if (!integrated_double) weights_norm_double[rank] = (double)weights_norm[rank];
+    }
     int gate_up_q8_k = use_q8_k && ((gate->flags == 17u && up->flags == 17u) ||
         (gate->flags == 22u && up->flags == 22u));
     int down_q8_k = use_q8_k && (down->flags == 18u || down->flags == 21u || down->flags == 23u);
@@ -5693,7 +5711,7 @@ int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char
         qx_projection_workspace down_workspace = {0};
         if (down_q8_k && !qx_quantize_q8_k(swiglu_rank, intermediate, &down_workspace, err, err_len)) goto fail;
         if (!qx_packed_expert_matvec_mode(&file, down, selected[rank], swiglu_rank, intermediate, down_rank, hidden, down_q8_k ? &down_workspace : NULL, err, err_len)) goto fail;
-        for (uint32_t i = 0; i < hidden; ++i) weighted_rank[i] = (float)((double)down_rank[i] * (double)weights_norm[rank]);
+        for (uint32_t i = 0; i < hidden; ++i) weighted_rank[i] = (float)(weights_norm_double[rank] * (double)down_rank[i]);
     }
 
     uint32_t written = 0u;
@@ -5714,8 +5732,8 @@ int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char
     const char *gate_up_projection_kernel = gate_up_q8_k ? (gate->flags == 17u ? "iq2_xs_q8_k" : "iq2_s_q8_k") : "dequant_f32";
     const char *down_projection_kernel = down_q8_k ?
         (down->flags == 18u ? "iq3_xxs_q8_k" : down->flags == 21u ? "iq3_s_q8_k" : "iq4_xs_q8_k") : "dequant_f32";
-    fprintf(out, "{\"probe\":\"moe_stage\",\"layer\":%u,\"input_count\":%u,\"experts\":%u,\"experts_used\":8,\"intermediate\":%u,\"activation_mode\":\"%s\",\"projection_kernel\":\"%s\",\"gate_up_projection_kernel\":\"%s\",\"down_projection_kernel\":\"%s\",\"gate_ggml_type\":%u,\"up_ggml_type\":%u,\"down_ggml_type\":%u,\"selected_experts\":[",
-            layer, hidden, experts, intermediate, activation_mode, projection_kernel,
+    fprintf(out, "{\"probe\":\"moe_stage\",\"layer\":%u,\"input_count\":%u,\"experts\":%u,\"experts_used\":8,\"intermediate\":%u,\"activation_mode\":\"%s\",\"router_precision\":\"%s\",\"routing_sidecar_element_type\":\"f32\",\"weighted_contribution_element_type\":\"f32\",\"weighted_contribution_formula\":\"f32(%s_weight*expert_f32)\",\"projection_kernel\":\"%s\",\"gate_up_projection_kernel\":\"%s\",\"down_projection_kernel\":\"%s\",\"gate_ggml_type\":%u,\"up_ggml_type\":%u,\"down_ggml_type\":%u,\"selected_experts\":[",
+            layer, hidden, experts, intermediate, activation_mode, router_precision, router_precision, projection_kernel,
             gate_up_projection_kernel, down_projection_kernel, gate->flags, up->flags, down->flags);
     for (uint32_t rank = 0; rank < 8u; ++rank) fprintf(out, "%s%u", rank ? "," : "", selected[rank]);
     fprintf(out, "],\"routing_weights\":[");
@@ -5725,6 +5743,12 @@ int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char
 
 fail:
     free(ffn_input); free(ffn_norm); free(logits); free(probs); free(gate_values); free(up_values); free(swiglu); free(down_values); free(weighted); qx_close_file(&file); return 0;
+}
+
+int qx_dump_moe_stage_probe_summary(const char *path, uint32_t layer, const char *ffn_input_path,
+        const char *output_dir, const char *activation_mode, FILE *out, char *err, uint64_t err_len) {
+    return qx_dump_moe_stage_probe_summary_mode(path, layer, ffn_input_path, output_dir,
+        activation_mode, "legacy_f32", out, err, err_len);
 }
 
 static int qx_write_residual_dump(const char *dir, uint32_t step, uint32_t layer, const char *phase,
