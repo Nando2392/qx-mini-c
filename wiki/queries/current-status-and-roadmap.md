@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-08-23
+updated: 2026-09-19
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -67,8 +67,9 @@ bisect de activación #76: amplificación material localizada en MoE layer 1; Q8
 bisect KV acumulado × activación #77: 6/6 diagonales exactas; 0/24 thresholds y 22/24 argmax; interacción token-dependiente localizada
 replay residual con KV fijo #78: 2/2 controles exactos; Q8_K conserva `1318` con residual F32 en layer 2 y diverge de routing F32 desde layer 3
 replay layer 3 con KV fijo #79: controles same-mode exactos; retiene `1318`, los IDs ordenados difieren de ambos baselines desde layer 3 y 0/2 comparaciones full-logit pasan thresholds
-seams layer 3 #80, experimento verificado y release pendiente: input común exacto; attention cambia `ffn_input`; routing integrado termina `89` vs `22`; con el mismo `ffn_input` los IDs son exactos y terminan `89`, aunque persisten diferencias de expertos
-→ no hay siguiente experimento seleccionado, promoción de defaults ni estado de todos los gates aprobados
+seams layer 3 #80: CLOSED en `b0c4019b493a2817b4c9d2219b917783266c77f9`; CI `35152297016` PASS; input común exacto, attention cambia `ffn_input`, routing integrado `89` vs `22`, fixed-input routing exacto
+generación CPU nativa #81: implementación y gates locales verificados; release pendiente, sin commit/CI; CLI texto→QXT→JSON y API C comparten loop F32/INT8-KV de 48 layers
+→ #81 no implica paridad global, CUDA, cobertura/soak 4K, throughput ni release readiness
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -181,14 +182,18 @@ Issue #71 aplica el contrato report-level existente a cada profile first/later d
 
 Issue #72 exige presencia explícita de `long_context_profile` en cada run first/later antes de shape/contract/equality. Distingue missing de null/non-object y no cambia defaults.
 
-Issue #80 deja ese seam verificado por el parent con el mismo residual F32 de layer 2 y snapshot INT8 KV producido por F32; el release sigue pendiente. El input de layer 3 es byte-exact; la modalidad de attention cambia `ffn_input` (`max_abs 0.00958681`, RMSE `0.00130100`) y el routing integrado sólo difiere en el último ID ordenado (`89` vs `22`). Al fijar el `ffn_input` F32, ambos modos seleccionan exactamente los mismos IDs terminando en `89`, pero persisten diferencias en outputs de expertos y MoE (`max_abs 0.00210665`, RMSE `0.000659551`). Los controles MoE/layer reconstruidos independientemente con `integrated_double` opt-in son byte-exactos en ambos modos; el default nativo sigue `legacy_f32`. La evidencia no demuestra bug de kernel, paridad global, release readiness, gates completos ni promoción de default.
+Issue #80 cerró y se publicó en `b0c4019b493a2817b4c9d2219b917783266c77f9`; GitHub Actions `35152297016` pasó. Con el mismo residual F32 de layer 2 y snapshot INT8 KV producido por F32, el input de layer 3 es byte-exact; la modalidad de attention cambia `ffn_input` (`max_abs 0.00958681`, RMSE `0.00130100`) y el routing integrado sólo difiere en el último ID ordenado (`89` vs `22`). Al fijar el `ffn_input` F32, ambos modos seleccionan exactamente los mismos IDs terminando en `89`, pero persisten diferencias en outputs de expertos y MoE (`max_abs 0.00210665`, RMSE `0.000659551`). Los controles `integrated_double` opt-in son byte-exactos; `legacy_f32` sigue default. El cierre no demuestra bug de kernel ni paridad global.
+
+Issue #81 añade la ruta canónica de generación CPU nativa: `qxqxf generate` recibe QXF, QXT y prompt de texto, tokeniza, ejecuta el loop compartido de 48 layers con activación F32 y KV INT8, y devuelve JSON. La API C `qx_run_native_generation(...)` usa ese mismo loop. El gate real fija `Hello!` → prompt IDs `[9707,0]` → outputs reproducibles `[358,1184]`; controles de API paran en el primer token con EOS `358`, en el segundo con EOS `1184`, y no paran por EOS con `-1`. El binding rechaza vocabulario, fingerprint de payload, BOS, EOS o flags no canónicos antes de leer el modelo.
+
+El presupuesto soportado exige `prompt_count + max_tokens - 1 <= 64` y `<= ctx`, con `ctx` entre 1 y 4096. Ese límite de argumento no es una corrida 4K ni cierra calidad KV/soak. El fixture de UTF-8 partido prueba sólo el decoder del tokenizer, no generación E2E. No hay counters para demostrar forwarding del número de pasos y no se hace ese claim. Los gates locales de #81 están verificados, pero release, commit y CI siguen pendientes. Evidencia y comandos: `wiki/evidence/issue-81-native-generation-report.json`.
 
 ## Después
 
-1. Preservar la evidencia final de Issue #80, verificada por el parent, mientras el release permanece pendiente.
-2. No extrapolar este caso fijo a paridad global ni caminar automáticamente a otra layer; todavía no se selecciona el siguiente experimento.
+1. Publicar Issue #81 con commit y CI después de preservar su provenance actual; implementación y gates locales ya están verificados, release sigue pendiente.
+2. Mantener Issue #80 como CLOSED y no extrapolar su caso fijo ni la secuencia corta de #81 a paridad global.
 3. Convertir contratos 4K/RSS/calidad KV/soak en mediciones reales sólo con gates reproducibles y fuera del CI pesado por defecto.
-4. Diseñar CUDA híbrido únicamente después de cerrar el milestone CPU/paridad y medir transferencias/residency; no asumir que el temporal Q8_K CPU es un contrato CUDA.
+4. Diseñar CUDA híbrido únicamente después de cerrar el milestone CPU/paridad y medir transferencias/residency; #81 es CPU-only.
 
 ## Riesgos
 

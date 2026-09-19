@@ -40,6 +40,7 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-inspect --tokenizer model.qxt\n"
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
+        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64\n"
         "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
         "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --scratch-policy ephemeral|persistent --kernel-policy baseline|fused --thread-policy serial --threads 1 --temperature 0 --seed 7 --full-moe --final-head [--bench] [--dequant-profile] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
@@ -400,6 +401,151 @@ chat_fail:
         printf("{\n  \"token_count\": %u,\n  \"utf8_bytes\": %u,\n  \"text\": ", count, output_length);
         qx_cli_json_string(output, output_length);
         printf("\n}\n");
+        free(output);
+        qx_tokenizer_free(&tokenizer);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "generate") == 0) {
+        const char *in_path = NULL;
+        const char *tokenizer_path = NULL;
+        const char *text_path = NULL;
+        uint32_t max_tokens = 0u;
+        uint32_t ctx = 0u;
+        int max_tokens_seen = 0;
+        int ctx_seen = 0;
+        char err[256];
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
+            else if (strcmp(argv[i], "--tokenizer") == 0 && i + 1 < argc) tokenizer_path = argv[++i];
+            else if (strcmp(argv[i], "--text-file") == 0 && i + 1 < argc) text_path = argv[++i];
+            else if (strcmp(argv[i], "--max-tokens") == 0 && i + 1 < argc) {
+                if (!qx_cli_parse_u32_arg("--max-tokens", argv[++i], &max_tokens, err, sizeof(err)) ||
+                        max_tokens < 1u || max_tokens > 64u) {
+                    fprintf(stderr, "generate failed: invalid --max-tokens\n"); return 2;
+                }
+                max_tokens_seen = 1;
+            }
+            else if (strcmp(argv[i], "--ctx") == 0 && i + 1 < argc) {
+                if (!qx_cli_parse_u32_arg("--ctx", argv[++i], &ctx, err, sizeof(err)) ||
+                        ctx < 1u || ctx > QX_TOKENIZER_MAX_INPUT) {
+                    fprintf(stderr, "generate failed: invalid --ctx\n"); return 2;
+                }
+                ctx_seen = 1;
+            }
+            else { usage(argv[0]); return 2; }
+        }
+        if (!in_path || !tokenizer_path || !text_path || !max_tokens_seen || !ctx_seen) {
+            fprintf(stderr, "generate requires --in, --tokenizer, --text-file, --max-tokens, and --ctx\n");
+            return 2;
+        }
+
+        qx_tokenizer tokenizer;
+        if (!qx_tokenizer_load(tokenizer_path, &tokenizer, err, sizeof(err))) {
+            fprintf(stderr, "generate failed: %s\n", err); return 1;
+        }
+        if (tokenizer.vocab_count != 151936u) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: tokenizer vocabulary does not match Qwen3-30B-A3B\n");
+            return 1;
+        }
+        if (tokenizer.payload_checksum != 6140965799433681264ull) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: tokenizer fingerprint does not match Qwen3-30B-A3B\n");
+            return 1;
+        }
+        if (tokenizer.bos_token_id != -1) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: tokenizer BOS metadata does not match Qwen3-30B-A3B\n");
+            return 1;
+        }
+        if (tokenizer.eos_token_id != 151645) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: tokenizer EOS metadata does not match Qwen3-30B-A3B\n");
+            return 1;
+        }
+        if (tokenizer.flags != 0u) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: tokenizer flags do not match Qwen3-30B-A3B\n");
+            return 1;
+        }
+        unsigned char *input = NULL;
+        uint32_t input_length = 0u;
+        if (!qx_cli_read_prompt(text_path, &input, &input_length, err, sizeof(err))) {
+            qx_tokenizer_free(&tokenizer); fprintf(stderr, "generate failed: %s\n", err); return 1;
+        }
+        uint32_t prompt_ids[QX_TOKENIZER_MAX_INPUT + 2u];
+        uint32_t prompt_count = 0u;
+        if (!qx_tokenizer_encode(&tokenizer, input, input_length, 0, prompt_ids,
+                QX_TOKENIZER_MAX_INPUT + 2u, &prompt_count, err, sizeof(err)) || prompt_count == 0u) {
+            qx_tokenizer_free(&tokenizer); free(input);
+            fprintf(stderr, "generate failed: %s\n", prompt_count == 0u ? "prompt produced no tokens" : err);
+            return 1;
+        }
+        free(input);
+
+        if (prompt_count > ctx || max_tokens - 1u > ctx - prompt_count) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: prompt and generation exceed --ctx\n");
+            return 2;
+        }
+        if (prompt_count > 64u || max_tokens - 1u > 64u - prompt_count) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: prompt and generation require more than 64 forward positions\n");
+            return 2;
+        }
+
+        qx_native_generation_result result;
+        memset(&result, 0, sizeof(result));
+        if (!qx_run_native_generation(in_path, prompt_ids, prompt_count, max_tokens, ctx,
+                tokenizer.eos_token_id, &result, err, sizeof(err))) {
+            qx_tokenizer_free(&tokenizer); fprintf(stderr, "generate failed: %s\n", err); return 1;
+        }
+        if (result.token_count > max_tokens || result.token_count > 64u ||
+                (result.stopped_on_eos && result.token_count == 0u)) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: native generation returned an invalid result\n");
+            return 1;
+        }
+
+        uint32_t decode_count = result.token_count - (result.stopped_on_eos ? 1u : 0u);
+        uint64_t output_capacity64 = 0u;
+        for (uint32_t i = 0u; i < decode_count; ++i) {
+            if (result.token_ids[i] >= tokenizer.vocab_count) {
+                qx_tokenizer_free(&tokenizer);
+                fprintf(stderr, "generate failed: generated token id out of range\n");
+                return 1;
+            }
+            output_capacity64 += tokenizer.tokens[result.token_ids[i]].length;
+        }
+        if (output_capacity64 > UINT32_MAX) {
+            qx_tokenizer_free(&tokenizer);
+            fprintf(stderr, "generate failed: generated output is too large\n");
+            return 1;
+        }
+        uint32_t output_capacity = (uint32_t)output_capacity64;
+        unsigned char *output = (unsigned char *)malloc(output_capacity ? output_capacity : 1u);
+        uint32_t output_length = 0u;
+        if (!output) {
+            qx_tokenizer_free(&tokenizer); fprintf(stderr, "generate failed: out of memory\n"); return 1;
+        }
+        if (!qx_tokenizer_decode(&tokenizer, result.token_ids, decode_count, 0, output,
+                output_capacity, &output_length, err, sizeof(err))) {
+            free(output); qx_tokenizer_free(&tokenizer);
+            if (strcmp(err, "decoded output is not valid UTF-8") == 0) {
+                fprintf(stderr, "generate failed: generated output is not valid UTF-8\n");
+            } else {
+                fprintf(stderr, "generate failed: %s\n", err);
+            }
+            return 1;
+        }
+
+        printf("{\"prompt_token_count\":%u,\"generated_token_ids\":[", prompt_count);
+        for (uint32_t i = 0u; i < result.token_count; ++i) printf("%s%u", i ? "," : "", result.token_ids[i]);
+        printf("],\"generated_text\":");
+        qx_cli_json_string(output, output_length);
+        printf(",\"stop_reason\":\"%s\",\"timing\":{\"prefill_seconds\":%.9f,\"decode_seconds\":%.9f}}\n",
+            result.stopped_on_eos ? "eos" : "max_tokens", result.prefill_seconds, result.decode_seconds);
         free(output);
         qx_tokenizer_free(&tokenizer);
         return 0;

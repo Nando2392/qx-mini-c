@@ -156,6 +156,21 @@ int qx_dump_projection_matvec_probe_summary(const char *path, uint32_t layer, ui
 int qx_dump_q8_k_activation_probe_summary(uint32_t values, const char *inject, FILE *out, char *err, uint64_t err_len);
 int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len);
 int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len);
+#define QX_NATIVE_GENERATION_MAX_TOKENS 64u
+
+typedef struct qx_native_generation_result {
+    uint32_t token_ids[QX_NATIVE_GENERATION_MAX_TOKENS];
+    uint32_t token_count;
+    int stopped_on_eos;
+    double prefill_seconds;
+    double decode_seconds;
+} qx_native_generation_result;
+
+/* Greedy native generation with the fixed 48-layer F32/INT8-KV runtime.
+ * prompt_count and max_tokens must be non-zero; prompt_count + max_tokens - 1
+ * must fit both ctx_tokens and QX_NATIVE_GENERATION_MAX_TOKENS. eos_token_id < 0
+ * disables EOS stopping. result is required and is cleared before validation/run. */
+int qx_run_native_generation(const char *path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id, qx_native_generation_result *result, char *err, uint64_t err_len);
 int qx_dump_rope_gqa_golden_probe_summary(uint32_t tokens, uint32_t q_heads_run, uint32_t seed, FILE *out, char *err, uint64_t err_len);
 int qx_dump_real_qkv_golden_probe_summary(const char *path, uint32_t layer, uint32_t token_a, uint32_t token_b, uint32_t q_heads_run, uint32_t seed, int full_moe, FILE *out, char *err, uint64_t err_len);
 int qx_dump_attention_stage_probe_summary(const char *path, uint32_t layer, const char *layer_input_path, const char *output_dir, const char *activation_mode, const char *kv_format, FILE *out, char *err, uint64_t err_len);

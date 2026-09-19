@@ -5991,8 +5991,9 @@ static int qx_read_accumulated_kv_snapshot(
     return 1;
 }
 
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
+static int qx_run_prompt_state_loop(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, qx_native_generation_result *capture, int32_t eos_token_id, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
+    if (!capture && !out) { qx_set_err(err, err_len, "output stream is required when generation capture is disabled"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
         qx_set_err(err, err_len, "unsupported activation format"); return 0;
     }
@@ -6222,64 +6223,66 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     char generated[32768];
     generated[0] = 0;
     size_t generated_len = 0;
-    fprintf(out, "{\n");
-    fprintf(out, "  \"probe\": \"state_loop\",\n");
-    fprintf(out, "  \"prompt_token\": %u,\n", prompt_tokens[0]);
-    fprintf(out, "  \"prompt_token_count\": %u,\n", prompt_count);
-    fprintf(out, "  \"prompt_token_ids\": [");
-    for (uint32_t i = 0; i < prompt_count; ++i) fprintf(out, "%s%u", i ? ", " : "", prompt_tokens[i]);
-    fprintf(out, "],\n");
-    fprintf(out, "  \"generation_steps\": %u,\n", generation_steps);
-    fprintf(out, "  \"steps\": %u,\n", steps);
-    fprintf(out, "  \"layers\": %u,\n", layers);
-    fprintf(out, "  \"start_layer\": %u,\n", start_layer);
-    fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
-    fprintf(out, "  \"position_base\": %u,\n", position_base);
-    fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
-    fprintf(out, "  \"activation_format\": \"%s\",\n", activation_format);
-    fprintf(out, "  \"io_backend\": \"%s\",\n", qx_io_backend_name(file.io_backend));
-    fprintf(out, "  \"scratch_policy\": \"%s\",\n", scratch_policy);
-    fprintf(out, "  \"kernel_policy\": \"%s\",\n", kernel_policy);
-    fprintf(out, "  \"thread_policy\": \"%s\",\n", thread_policy);
-    fprintf(out, "  \"threads\": %u,\n", threads);
-    fprintf(out, "  \"simd_policy\": \"%s\",\n", simd_policy);
-    fprintf(out, "  \"expert_cache_policy\": \"%s\",\n", expert_cache_policy);
-    fprintf(out, "  \"cuda_policy\": \"%s\",\n", cuda_policy);
-    fprintf(out, "  \"prefill_gemm_policy\": \"%s\",\n", prefill_gemm_policy);
-    fprintf(out, "  \"speculative_policy\": \"%s\",\n", speculative_policy);
-    fprintf(out, "  \"kv2_policy\": \"%s\",\n", kv2_policy);
-    fprintf(out, "  \"sampling_policy\": \"%s\",\n", sampling_policy);
-    fprintf(out, "  \"long_context_policy\": \"%s\",\n", long_context_policy);
-    fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
-    fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
-    fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);
-    fprintf(out, "  \"moe_gate_up_projection_kernel\": \"%s\",\n", moe_gate_up_projection_kernel);
-    fprintf(out, "  \"moe_down_projection_kernel\": \"%s\",\n", moe_down_projection_kernel);
-    fprintf(out, "  \"moe_activation_workspace_bytes\": %u,\n", moe_activation_workspace_bytes);
-    fprintf(out, "  \"kv_source\": \"%s\",\n", projection_matvec ? "projection_matvec" : (real_kv ? "projection_decode" : "deterministic_skeleton"));
-    fprintf(out, "  \"residual_source\": \"%s\",\n", residual_replay ? "injected_f32_replay" : (full_moe ? "real_attention_moe_carry" : (residual_carry ? "embedding_rmsnorm_carry" : (residual_vector ? "embedding_rmsnorm" : "probe_scalar"))));
-    fprintf(out, "  \"residual_dims\": %u,\n", residual_vector ? residual_dims : 0u);
-    fprintf(out, "  \"residual_replay\": {\"enabled\": %s, \"source\": %s, \"values\": %u},\n",
+    if (!capture) fprintf(out, "{\n");
+    if (!capture) fprintf(out, "  \"probe\": \"state_loop\",\n");
+    if (!capture) fprintf(out, "  \"prompt_token\": %u,\n", prompt_tokens[0]);
+    if (!capture) fprintf(out, "  \"prompt_token_count\": %u,\n", prompt_count);
+    if (!capture) fprintf(out, "  \"prompt_token_ids\": [");
+    for (uint32_t i = 0; i < prompt_count; ++i) if (!capture) fprintf(out, "%s%u", i ? ", " : "", prompt_tokens[i]);
+    if (!capture) fprintf(out, "],\n");
+    if (!capture) fprintf(out, "  \"generation_steps\": %u,\n", generation_steps);
+    if (!capture) fprintf(out, "  \"steps\": %u,\n", steps);
+    if (!capture) fprintf(out, "  \"layers\": %u,\n", layers);
+    if (!capture) fprintf(out, "  \"start_layer\": %u,\n", start_layer);
+    if (!capture) fprintf(out, "  \"ctx_tokens\": %u,\n", ctx_tokens);
+    if (!capture) fprintf(out, "  \"position_base\": %u,\n", position_base);
+    if (!capture) fprintf(out, "  \"kv_format\": \"%s\",\n", kv_format);
+    if (!capture) fprintf(out, "  \"activation_format\": \"%s\",\n", activation_format);
+    if (!capture) fprintf(out, "  \"io_backend\": \"%s\",\n", qx_io_backend_name(file.io_backend));
+    if (!capture) fprintf(out, "  \"scratch_policy\": \"%s\",\n", scratch_policy);
+    if (!capture) fprintf(out, "  \"kernel_policy\": \"%s\",\n", kernel_policy);
+    if (!capture) fprintf(out, "  \"thread_policy\": \"%s\",\n", thread_policy);
+    if (!capture) fprintf(out, "  \"threads\": %u,\n", threads);
+    if (!capture) fprintf(out, "  \"simd_policy\": \"%s\",\n", simd_policy);
+    if (!capture) fprintf(out, "  \"expert_cache_policy\": \"%s\",\n", expert_cache_policy);
+    if (!capture) fprintf(out, "  \"cuda_policy\": \"%s\",\n", cuda_policy);
+    if (!capture) fprintf(out, "  \"prefill_gemm_policy\": \"%s\",\n", prefill_gemm_policy);
+    if (!capture) fprintf(out, "  \"speculative_policy\": \"%s\",\n", speculative_policy);
+    if (!capture) fprintf(out, "  \"kv2_policy\": \"%s\",\n", kv2_policy);
+    if (!capture) fprintf(out, "  \"sampling_policy\": \"%s\",\n", sampling_policy);
+    if (!capture) fprintf(out, "  \"long_context_policy\": \"%s\",\n", long_context_policy);
+    if (!capture) fprintf(out, "  \"projection_kernel\": \"%s\",\n", projection_kernel);
+    if (!capture) fprintf(out, "  \"activation_workspace_bytes\": %u,\n", q8_k_kernel_used ? (unsigned)sizeof(projection_workspace.blocks) : 0u);
+    if (!capture) fprintf(out, "  \"moe_projection_kernel\": \"%s\",\n", moe_projection_kernel);
+    if (!capture) fprintf(out, "  \"moe_gate_up_projection_kernel\": \"%s\",\n", moe_gate_up_projection_kernel);
+    if (!capture) fprintf(out, "  \"moe_down_projection_kernel\": \"%s\",\n", moe_down_projection_kernel);
+    if (!capture) fprintf(out, "  \"moe_activation_workspace_bytes\": %u,\n", moe_activation_workspace_bytes);
+    if (!capture) fprintf(out, "  \"kv_source\": \"%s\",\n", projection_matvec ? "projection_matvec" : (real_kv ? "projection_decode" : "deterministic_skeleton"));
+    if (!capture) fprintf(out, "  \"residual_source\": \"%s\",\n", residual_replay ? "injected_f32_replay" : (full_moe ? "real_attention_moe_carry" : (residual_carry ? "embedding_rmsnorm_carry" : (residual_vector ? "embedding_rmsnorm" : "probe_scalar"))));
+    if (!capture) fprintf(out, "  \"residual_dims\": %u,\n", residual_vector ? residual_dims : 0u);
+    if (!capture) fprintf(out, "  \"residual_replay\": {\"enabled\": %s, \"source\": %s, \"values\": %u},\n",
         residual_replay ? "true" : "false", residual_replay ? "\"f32_sidecar\"" : "null", residual_replay ? residual_dims : 0u);
-    fprintf(out, "  \"residual_dump\": %s,\n", residual_dump_dir && *residual_dump_dir ? "true" : "false");
-    fprintf(out, "  \"residual_dump_count\": %llu,\n", (unsigned long long)(residual_dump_dir && *residual_dump_dir ? (uint64_t)steps * (layers - start_layer) * 6u : 0u));
-    fprintf(out, "  \"logits_dump_count\": %u,\n", residual_dump_dir && *residual_dump_dir && final_head ? steps : 0u);
-    fprintf(out, "  \"delta_source\": \"%s\",\n", full_moe ? "real_attention_moe" : (rope_gqa_attention ? "rope_gqa_attention" : (causal_attention ? "causal_attention" : (attention_output_vector ? "attention_output_vector" : (delta_vectors ? "numeric_vectors" : (numeric_deltas ? "numeric_probe" : (residual_carry ? "checksum_skeleton" : "none")))))));
-    fprintf(out, "  \"bytes_per_k_or_v\": %llu,\n", (unsigned long long)bytes_per_k_or_v);
-    fprintf(out, "  \"bytes_per_token_per_layer\": %llu,\n", (unsigned long long)bytes_per_token_layer);
-    fprintf(out, "  \"layer_stride\": %llu,\n", (unsigned long long)layer_stride);
-    fprintf(out, "  \"tokens\": [");
+    if (!capture) fprintf(out, "  \"residual_dump\": %s,\n", residual_dump_dir && *residual_dump_dir ? "true" : "false");
+    if (!capture) fprintf(out, "  \"residual_dump_count\": %llu,\n", (unsigned long long)(residual_dump_dir && *residual_dump_dir ? (uint64_t)steps * (layers - start_layer) * 6u : 0u));
+    if (!capture) fprintf(out, "  \"logits_dump_count\": %u,\n", residual_dump_dir && *residual_dump_dir && final_head ? steps : 0u);
+    if (!capture) fprintf(out, "  \"delta_source\": \"%s\",\n", full_moe ? "real_attention_moe" : (rope_gqa_attention ? "rope_gqa_attention" : (causal_attention ? "causal_attention" : (attention_output_vector ? "attention_output_vector" : (delta_vectors ? "numeric_vectors" : (numeric_deltas ? "numeric_probe" : (residual_carry ? "checksum_skeleton" : "none")))))));
+    if (!capture) fprintf(out, "  \"bytes_per_k_or_v\": %llu,\n", (unsigned long long)bytes_per_k_or_v);
+    if (!capture) fprintf(out, "  \"bytes_per_token_per_layer\": %llu,\n", (unsigned long long)bytes_per_token_layer);
+    if (!capture) fprintf(out, "  \"layer_stride\": %llu,\n", (unsigned long long)layer_stride);
+    if (!capture) fprintf(out, "  \"tokens\": [");
     clock_t bench_start = clock();
     double prefill_elapsed = 0.0;
     double decode_elapsed = 0.0;
     uint32_t prefill_tokens = 0u;
     uint32_t decode_tokens = 0u;
+    uint32_t executed_steps = 0u;
+    if (capture) memset(capture, 0, sizeof(*capture));
     for (uint32_t local_step = 0; local_step < steps; ++local_step) {
         uint32_t step = position_base + local_step;
         if (local_step < prompt_count) current = prompt_tokens[local_step];
         int sampling_step = local_step + 1u >= prompt_count;
         clock_t phase_start = clock();
-        fprintf(out, "%s{\"step\": %u, \"position\": %u, \"phase\": \"%s\", \"input_token\": %u, \"layers\": [", local_step ? ", " : "", step, step, sampling_step ? "generate" : "prefill", current);
+        if (!capture) fprintf(out, "%s{\"step\": %u, \"position\": %u, \"phase\": \"%s\", \"input_token\": %u, \"layers\": [", local_step ? ", " : "", step, step, sampling_step ? "generate" : "prefill", current);
         double residual_probe = 0.125 + ((double)(current % 997u) / 9970.0) + (double)step * 0.001;
         uint32_t residual_values = 0;
         double residual_rms = 0.0;
@@ -6517,64 +6520,64 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
                 }
             }
             residual_probe += ((double)((kchk ^ vchk) & 0xffffu) / 65535.0) * 0.0001;
-            fprintf(out, "%s{\"layer\": %u, \"kv_token\": %u, \"k_offset\": %llu, \"v_offset\": %llu, \"k_checksum\": %llu, \"v_checksum\": %llu", layer != start_layer ? ", " : "", layer, step, (unsigned long long)k_offset, (unsigned long long)v_offset, (unsigned long long)kchk, (unsigned long long)vchk);
+            if (!capture) fprintf(out, "%s{\"layer\": %u, \"kv_token\": %u, \"k_offset\": %llu, \"v_offset\": %llu, \"k_checksum\": %llu, \"v_checksum\": %llu", layer != start_layer ? ", " : "", layer, step, (unsigned long long)k_offset, (unsigned long long)v_offset, (unsigned long long)kchk, (unsigned long long)vchk);
             if (full_moe) {
-                fprintf(out, ", \"full_moe\": true, \"qk_head_norm\": true, \"experts_run\": 8, \"selected_experts\": [");
-                for (uint32_t rank = 0; rank < 8u; ++rank) fprintf(out, "%s%u", rank ? "," : "", selected_experts[rank]);
-                fprintf(out, "], \"routing_weights\": [");
-                for (uint32_t rank = 0; rank < 8u; ++rank) fprintf(out, "%s%.17g", rank ? "," : "", routing_weights[rank]);
-                fprintf(out, "], \"gate_ggml_type\": %u, \"up_ggml_type\": %u, \"down_ggml_type\": %u, \"moe_output_l2\": %.17g, \"residual_input_checksum\": %llu, \"residual_output_checksum\": %llu",
+                if (!capture) fprintf(out, ", \"full_moe\": true, \"qk_head_norm\": true, \"experts_run\": 8, \"selected_experts\": [");
+                for (uint32_t rank = 0; rank < 8u; ++rank) if (!capture) fprintf(out, "%s%u", rank ? "," : "", selected_experts[rank]);
+                if (!capture) fprintf(out, "], \"routing_weights\": [");
+                for (uint32_t rank = 0; rank < 8u; ++rank) if (!capture) fprintf(out, "%s%.17g", rank ? "," : "", routing_weights[rank]);
+                if (!capture) fprintf(out, "], \"gate_ggml_type\": %u, \"up_ggml_type\": %u, \"down_ggml_type\": %u, \"moe_output_l2\": %.17g, \"residual_input_checksum\": %llu, \"residual_output_checksum\": %llu",
                     gate_ggml_type, up_ggml_type, down_ggml_type, real_moe_output_l2,
                     (unsigned long long)residual_input_checksum, (unsigned long long)residual_output_checksum);
             }
             if (real_kv) {
-                fprintf(out, ", \"k_tensor\": \"%s\", \"v_tensor\": \"%s\", \"k_real_values\": %llu, \"v_real_values\": %llu", kt ? kt->name : kn, vt ? vt->name : vn, (unsigned long long)k_real_values, (unsigned long long)v_real_values);
-                if (projection_matvec) fprintf(out, ", \"k_matvec_values\": %llu, \"v_matvec_values\": %llu", (unsigned long long)k_matvec_values, (unsigned long long)v_matvec_values);
+                if (!capture) fprintf(out, ", \"k_tensor\": \"%s\", \"v_tensor\": \"%s\", \"k_real_values\": %llu, \"v_real_values\": %llu", kt ? kt->name : kn, vt ? vt->name : vn, (unsigned long long)k_real_values, (unsigned long long)v_real_values);
+                if (projection_matvec) if (!capture) fprintf(out, ", \"k_matvec_values\": %llu, \"v_matvec_values\": %llu", (unsigned long long)k_matvec_values, (unsigned long long)v_matvec_values);
                 if (residual_carry) {
                     if (!full_moe) {
-                        fprintf(out, ", \"attention_delta\": %.9g, \"moe_delta\": %.9g, \"attention_delta_source\": \"%s\", \"moe_delta_source\": \"%s\"", attention_delta, moe_delta, numeric_deltas ? "numeric_attention" : "checksum_attention", numeric_deltas ? "numeric_moe" : "checksum_moe");
-                        if (delta_vectors) fprintf(out, ", \"attention_delta_vector_values\": %u, \"moe_delta_vector_values\": %u, \"attention_delta_vector_l2\": %.9g, \"moe_delta_vector_l2\": %.9g, \"attention_delta_vector_checksum\": %llu, \"moe_delta_vector_checksum\": %llu", residual_values, residual_values, attention_vec_l2, moe_vec_l2, (unsigned long long)attention_vec_checksum, (unsigned long long)moe_vec_checksum);
+                        if (!capture) fprintf(out, ", \"attention_delta\": %.9g, \"moe_delta\": %.9g, \"attention_delta_source\": \"%s\", \"moe_delta_source\": \"%s\"", attention_delta, moe_delta, numeric_deltas ? "numeric_attention" : "checksum_attention", numeric_deltas ? "numeric_moe" : "checksum_moe");
+                        if (delta_vectors) if (!capture) fprintf(out, ", \"attention_delta_vector_values\": %u, \"moe_delta_vector_values\": %u, \"attention_delta_vector_l2\": %.9g, \"moe_delta_vector_l2\": %.9g, \"attention_delta_vector_checksum\": %llu, \"moe_delta_vector_checksum\": %llu", residual_values, residual_values, attention_vec_l2, moe_vec_l2, (unsigned long long)attention_vec_checksum, (unsigned long long)moe_vec_checksum);
                     }
-                    if (attention_output_vector) fprintf(out, ", \"attention_output_vector_values\": %u, \"attention_output_vector_l2\": %.9g, \"attention_output_vector_checksum\": %llu, \"attention_context_tokens\": %u, \"attention_output_source\": \"%s\"", residual_values, attention_output_l2, (unsigned long long)attention_output_checksum, attention_context_tokens, rope_gqa_attention ? "rope_gqa_softmax_output_projection_partial" : (causal_attention ? "qkv_softmax_output_projection_partial" : "kv_cache_partial"));
+                    if (attention_output_vector) if (!capture) fprintf(out, ", \"attention_output_vector_values\": %u, \"attention_output_vector_l2\": %.9g, \"attention_output_vector_checksum\": %llu, \"attention_context_tokens\": %u, \"attention_output_source\": \"%s\"", residual_values, attention_output_l2, (unsigned long long)attention_output_checksum, attention_context_tokens, rope_gqa_attention ? "rope_gqa_softmax_output_projection_partial" : (causal_attention ? "qkv_softmax_output_projection_partial" : "kv_cache_partial"));
                     if (causal_attention) {
                         uint64_t scale_index = (uint64_t)layer * ctx_tokens + step;
                         const qx_tensor_dir_entry *q_entry = causal_q_name ? qx_find_tensor(&file, causal_q_name) : NULL;
                         const qx_tensor_dir_entry *o_entry = causal_o_name ? qx_find_tensor(&file, causal_o_name) : NULL;
-                        fprintf(out, ", \"persistent_kv\": true, \"kv_scale_source\": \"%s\", \"k_scale\": %.9g, \"v_scale\": %.9g, \"q_values\": %llu, \"q_tensor\": \"%s\", \"q_ggml_type\": %u, \"k_ggml_type\": %u, \"v_ggml_type\": %u, \"output_tensor\": \"%s\", \"output_ggml_type\": %u, \"softmax_sum\": %.9g", kv_f32 ? "lossless_f32" : kv_f16 ? "fp16_roundtrip" : "dynamic_per_vector", kscales[scale_index], vscales[scale_index], (unsigned long long)causal_q_values, causal_q_name ? causal_q_name : "", q_entry ? q_entry->flags : UINT32_MAX, kt ? kt->flags : UINT32_MAX, vt ? vt->flags : UINT32_MAX, causal_o_name ? causal_o_name : "", o_entry ? o_entry->flags : UINT32_MAX, causal_softmax_sum);
+                        if (!capture) fprintf(out, ", \"persistent_kv\": true, \"kv_scale_source\": \"%s\", \"k_scale\": %.9g, \"v_scale\": %.9g, \"q_values\": %llu, \"q_tensor\": \"%s\", \"q_ggml_type\": %u, \"k_ggml_type\": %u, \"v_ggml_type\": %u, \"output_tensor\": \"%s\", \"output_ggml_type\": %u, \"softmax_sum\": %.9g", kv_f32 ? "lossless_f32" : kv_f16 ? "fp16_roundtrip" : "dynamic_per_vector", kscales[scale_index], vscales[scale_index], (unsigned long long)causal_q_values, causal_q_name ? causal_q_name : "", q_entry ? q_entry->flags : UINT32_MAX, kt ? kt->flags : UINT32_MAX, vt ? vt->flags : UINT32_MAX, causal_o_name ? causal_o_name : "", o_entry ? o_entry->flags : UINT32_MAX, causal_softmax_sum);
                         if (rope_gqa_attention) {
                             uint32_t group_size = kv_heads ? q_heads / kv_heads : 1u;
                             uint32_t kv_heads_touched = group_size ? (causal_q_heads_run + group_size - 1u) / group_size : 1u;
                             uint32_t output_dims = residual_values;
                             const qx_tensor_dir_entry *output_entry = causal_o_name ? qx_find_tensor(&file, causal_o_name) : NULL;
                             if (output_entry && output_entry->dims[1] && output_dims > output_entry->dims[1]) output_dims = (uint32_t)output_entry->dims[1];
-                            fprintf(out, ", \"attention_mode\": \"rope_gqa_full_heads\", \"rope_applied\": true, \"rope_theta\": 1000000, \"q_heads_total\": %u, \"kv_heads_total\": %u, \"q_heads_run\": %u, \"kv_heads_touched\": %u, \"gqa_group_size\": %u, \"head_dim\": %u, \"output_projection_input_dims\": %u, \"output_projection_output_dims\": %u, \"softmax_sum_min\": %.9g, \"softmax_sum_max\": %.9g", q_heads, kv_heads, causal_q_heads_run, kv_heads_touched, group_size, head_dim, causal_q_heads_run * head_dim, output_dims, causal_softmax_min, causal_softmax_max);
+                            if (!capture) fprintf(out, ", \"attention_mode\": \"rope_gqa_full_heads\", \"rope_applied\": true, \"rope_theta\": 1000000, \"q_heads_total\": %u, \"kv_heads_total\": %u, \"q_heads_run\": %u, \"kv_heads_touched\": %u, \"gqa_group_size\": %u, \"head_dim\": %u, \"output_projection_input_dims\": %u, \"output_projection_output_dims\": %u, \"softmax_sum_min\": %.9g, \"softmax_sum_max\": %.9g", q_heads, kv_heads, causal_q_heads_run, kv_heads_touched, group_size, head_dim, causal_q_heads_run * head_dim, output_dims, causal_softmax_min, causal_softmax_max);
                         }
                     }
                 }
             }
-            fprintf(out, "}");
+            if (!capture) fprintf(out, "}");
             free(causal_vec);
             ++kv_appends;
             ++layers_run;
         }
         if (!sampling_step) {
-            fprintf(out, "], \"residual_probe\": %.9g", residual_probe);
-            if (residual_vector) fprintf(out, ", \"residual_values\": %u, \"residual_rms\": %.9g, \"residual_checksum\": %llu", residual_values, residual_rms, (unsigned long long)residual_checksum);
+            if (!capture) fprintf(out, "], \"residual_probe\": %.9g", residual_probe);
+            if (residual_vector) if (!capture) fprintf(out, ", \"residual_values\": %u, \"residual_rms\": %.9g, \"residual_checksum\": %llu", residual_values, residual_rms, (unsigned long long)residual_checksum);
             if (residual_carry && residual_vec && residual_values) {
                 uint64_t after = qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float));
-                fprintf(out, ", \"residual_checksum_after\": %llu", (unsigned long long)after);
+                if (!capture) fprintf(out, ", \"residual_checksum_after\": %llu", (unsigned long long)after);
             }
-            fprintf(out, ", \"selected_token\": null, \"source\": \"fixed_prompt\"}");
+            if (!capture) fprintf(out, ", \"selected_token\": null, \"source\": \"fixed_prompt\"}");
             double phase_elapsed = (double)(clock() - phase_start) / (double)CLOCKS_PER_SEC;
             if (phase_elapsed <= 0.0) phase_elapsed = 0.000001;
             prefill_elapsed += phase_elapsed;
             ++prefill_tokens;
             current = prompt_tokens[step + 1u];
+            ++executed_steps;
             continue;
         }
         qx_top_token top[32];
         qx_real_head_result head_result;
-        int head_ready = 0;
         const char *lm_name = NULL;
         int tied = 0;
         uint32_t scanned = 0;
@@ -6602,16 +6605,22 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             sample_top_n = head_result.top_n;
             lm_name = "output.weight";
             scanned = head_result.logits_computed;
-            head_ready = 1;
         } else if (!qx_collect_top_logits(&file, residual_probe, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) {
             free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
         }
-        if (!head_ready && sample_top_n > scanned) sample_top_n = scanned;
+        if (!final_head && sample_top_n > scanned) sample_top_n = scanned;
         qx_sample_result sr = qx_sample_from_top(top, sample_top_n, temperature, seed + step * 101u + current);
         char piece[8192];
         char fallback[64];
         const char *source = "fallback_token_id";
-        if (tokens_path && qx_lookup_token_piece_sidecar(tokens_path, sr.selected_token, piece, sizeof(piece))) source = "sidecar";
+        int selected_eos = capture && eos_token_id >= 0 && sr.selected_token == (uint32_t)eos_token_id;
+        if (capture) {
+            if (capture->token_count >= QX_NATIVE_GENERATION_MAX_TOKENS) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "generation result capacity exceeded"); return 0; }
+            capture->token_ids[capture->token_count++] = sr.selected_token;
+            if (selected_eos) capture->stopped_on_eos = 1;
+        }
+        if (selected_eos) { piece[0] = 0; source = "eos"; }
+        else if (tokens_path && qx_lookup_token_piece_sidecar(tokens_path, sr.selected_token, piece, sizeof(piece))) source = "sidecar";
         else { qx_token_piece_fallback(sr.selected_token, fallback, sizeof(fallback));
 #ifdef _MSC_VER
             strncpy_s(piece, sizeof(piece), fallback, _TRUNCATE);
@@ -6621,13 +6630,13 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         }
         size_t plen = strlen(piece);
         if (generated_len + plen < sizeof(generated)) { memcpy(generated + generated_len, piece, plen + 1); generated_len += plen; }
-        fprintf(out, "], \"residual_probe\": %.9g", residual_probe);
-        if (residual_vector) fprintf(out, ", \"residual_values\": %u, \"residual_rms\": %.9g, \"residual_checksum\": %llu", residual_values, residual_rms, (unsigned long long)residual_checksum);
+        if (!capture) fprintf(out, "], \"residual_probe\": %.9g", residual_probe);
+        if (residual_vector) if (!capture) fprintf(out, ", \"residual_values\": %u, \"residual_rms\": %.9g, \"residual_checksum\": %llu", residual_values, residual_rms, (unsigned long long)residual_checksum);
         if (residual_carry && residual_vec && residual_values) {
             uint64_t after = qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float));
-            fprintf(out, ", \"residual_checksum_after\": %llu", (unsigned long long)after);
+            if (!capture) fprintf(out, ", \"residual_checksum_after\": %llu", (unsigned long long)after);
         }
-        if (head_ready) {
+        if (!capture && final_head) {
             const float *normalized = residual_vec + residual_values;
             fprintf(out, ", \"final_head\": {\"enabled\": true, \"norm_tensor\": \"output_norm.weight\", \"norm_ggml_type\": 0, \"norm_values\": %u, \"norm_checksum_verified\": true, \"norm_raw_checksum\": %llu, \"input_rms\": %.17g, \"normalized_l2\": %.17g, \"final_residual_checksum\": %llu, \"final_norm_checksum\": %llu, \"lm_head_tensor\": \"output.weight\", \"lm_head_ggml_type\": %u, \"lm_head_decoder\": \"Q6_K\", \"lm_head_kernel\": \"%s\", \"activation_quantizations\": %u, \"lm_head_checksum_verified\": true, \"lm_head_raw_checksum\": %llu, \"input_dims\": %u, \"vocab_size\": %u, \"logits_computed\": %u, \"full_vocabulary\": true, \"logits_checksum\": %llu, \"logits_min\": %.17g, \"logits_max\": %.17g, \"logits_rms\": %.17g, \"argmax_token\": %u, \"argmax_logit\": %.17g, \"top_tokens\": [",
                 head_result.input_dims, (unsigned long long)head_result.norm_raw_checksum, head_result.input_rms, head_result.normalized_l2,
@@ -6644,49 +6653,55 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
             for (uint32_t i = 0; i < residual_values; ++i) fprintf(out, "%s%.9g", i ? "," : "", normalized[i]);
             fprintf(out, "]}");
         }
-        fprintf(out, ", \"selected_token\": %u, \"piece\": ", sr.selected_token);
-        qx_json_print_escaped(out, piece);
-        fprintf(out, ", \"source\": \"%s\"}", source);
+        if (!capture) fprintf(out, ", \"selected_token\": %u, \"piece\": ", sr.selected_token);
+        if (!capture) qx_json_print_escaped(out, piece);
+        if (!capture) fprintf(out, ", \"source\": \"%s\"}", source);
         double phase_elapsed = (double)(clock() - phase_start) / (double)CLOCKS_PER_SEC;
         if (phase_elapsed <= 0.0) phase_elapsed = 0.000001;
         decode_elapsed += phase_elapsed;
         ++decode_tokens;
         current = sr.selected_token;
+        ++executed_steps;
+        if (selected_eos) break;
+    }
+    if (capture) {
+        capture->prefill_seconds = prefill_elapsed;
+        capture->decode_seconds = decode_elapsed;
     }
     if (kv_snapshot_out_path && *kv_snapshot_out_path && !qx_write_accumulated_kv_snapshot(
-            kv_snapshot_out_path, layers, position_base + steps, ctx_tokens, kv_heads, head_dim, kv_format,
+            kv_snapshot_out_path, layers, position_base + executed_steps, ctx_tokens, kv_heads, head_dim, kv_format,
             bytes_per_k_or_v, current, seed, kcache, vcache, kscales, vscales, err, err_len)) {
         free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0;
     }
-    fprintf(out, "],\n");
-    fprintf(out, "  \"layers_run\": %llu,\n", (unsigned long long)layers_run);
-    fprintf(out, "  \"kv_appends\": %llu,\n", (unsigned long long)kv_appends);
-    fprintf(out, "  \"cache_readback_ok\": %s,\n", readback_ok ? "true" : "false");
-    fprintf(out, "  \"k_cache_checksum\": %llu,\n", (unsigned long long)k_mix);
-    fprintf(out, "  \"v_cache_checksum\": %llu,\n", (unsigned long long)v_mix);
-    fprintf(out, "  \"final_token\": %u,\n", current);
-    fprintf(out, "  \"generated_text\": "); qx_json_print_escaped(out, generated); fprintf(out, ",\n");
+    if (!capture) fprintf(out, "],\n");
+    if (!capture) fprintf(out, "  \"layers_run\": %llu,\n", (unsigned long long)layers_run);
+    if (!capture) fprintf(out, "  \"kv_appends\": %llu,\n", (unsigned long long)kv_appends);
+    if (!capture) fprintf(out, "  \"cache_readback_ok\": %s,\n", readback_ok ? "true" : "false");
+    if (!capture) fprintf(out, "  \"k_cache_checksum\": %llu,\n", (unsigned long long)k_mix);
+    if (!capture) fprintf(out, "  \"v_cache_checksum\": %llu,\n", (unsigned long long)v_mix);
+    if (!capture) fprintf(out, "  \"final_token\": %u,\n", current);
+    if (!capture) fprintf(out, "  \"generated_text\": "); if (!capture) qx_json_print_escaped(out, generated); if (!capture) fprintf(out, ",\n");
     if (bench) {
         double elapsed = (double)(clock() - bench_start) / (double)CLOCKS_PER_SEC;
         if (elapsed <= 0.0) elapsed = 0.000001;
-        double tps = (double)steps / elapsed;
+        double tps = (double)executed_steps / elapsed;
         double mspt = 1000.0 / tps;
         double lps = (double)layers_run / elapsed;
         double prefill_tps = prefill_tokens ? (double)prefill_tokens / prefill_elapsed : 0.0;
         double decode_tps = decode_tokens ? (double)decode_tokens / decode_elapsed : 0.0;
-        fprintf(out, "  \"bench\": {\"enabled\": true, \"timer\": \"process_clock\", \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g, \"ms_per_token\": %.9g, \"layer_steps\": %llu, \"layer_steps_per_second\": %.9g, \"phases\": {\"prefill\": {\"tokens\": %u, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g}, \"decode\": {\"tokens\": %u, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g}}},\n",
+        if (!capture) fprintf(out, "  \"bench\": {\"enabled\": true, \"timer\": \"process_clock\", \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g, \"ms_per_token\": %.9g, \"layer_steps\": %llu, \"layer_steps_per_second\": %.9g, \"phases\": {\"prefill\": {\"tokens\": %u, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g}, \"decode\": {\"tokens\": %u, \"elapsed_sec\": %.9g, \"tokens_per_second\": %.9g}}},\n",
             elapsed, tps, mspt, (unsigned long long)layers_run, lps,
             prefill_tokens, prefill_elapsed, prefill_tps, decode_tokens, decode_elapsed, decode_tps);
     }
     qx_alloc_snapshot alloc_delta = qx_alloc_profile_delta(alloc_start);
-    fprintf(out, "  \"allocation_profile\": {\"malloc_calls\": %llu, \"calloc_calls\": %llu, \"realloc_calls\": %llu, \"free_calls\": %llu, \"bytes_requested\": %llu},\n",
+    if (!capture) fprintf(out, "  \"allocation_profile\": {\"malloc_calls\": %llu, \"calloc_calls\": %llu, \"realloc_calls\": %llu, \"free_calls\": %llu, \"bytes_requested\": %llu},\n",
         (unsigned long long)alloc_delta.malloc_calls, (unsigned long long)alloc_delta.calloc_calls,
         (unsigned long long)alloc_delta.realloc_calls, (unsigned long long)alloc_delta.free_calls,
         (unsigned long long)alloc_delta.bytes_requested);
-    fprintf(out, "  \"scratch_profile\": {\"policy\": \"%s\", \"peak_capacity_bytes\": %llu, \"growth_events\": %llu},\n",
+    if (!capture) fprintf(out, "  \"scratch_profile\": {\"policy\": \"%s\", \"peak_capacity_bytes\": %llu, \"growth_events\": %llu},\n",
         scratch_policy, (unsigned long long)scratch_workspace.peak_capacity,
         (unsigned long long)scratch_workspace.growth_events);
-    fprintf(out, "  \"dequant_dot_profile\": {\"enabled\": %s, \"kernel_policy\": \"%s\", \"target\": \"final_head_q6_k\", \"temporary_blocks_decoded\": %llu, \"temporary_floats_materialized\": %llu, \"temporary_bytes_materialized\": %llu, \"fused_dot_calls\": %llu, \"fallback_dot_calls\": %llu, \"final_head_q6_k_blocks\": %llu},\n",
+    if (!capture) fprintf(out, "  \"dequant_dot_profile\": {\"enabled\": %s, \"kernel_policy\": \"%s\", \"target\": \"final_head_q6_k\", \"temporary_blocks_decoded\": %llu, \"temporary_floats_materialized\": %llu, \"temporary_bytes_materialized\": %llu, \"fused_dot_calls\": %llu, \"fallback_dot_calls\": %llu, \"final_head_q6_k_blocks\": %llu},\n",
         dequant_profile_enabled ? "true" : "false", kernel_policy,
         (unsigned long long)dequant_profile.temporary_blocks_decoded,
         (unsigned long long)dequant_profile.temporary_floats_materialized,
@@ -6694,25 +6709,25 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         (unsigned long long)dequant_profile.fused_dot_calls,
         (unsigned long long)dequant_profile.fallback_dot_calls,
         (unsigned long long)dequant_profile.final_head_q6_k_blocks);
-    if (!thread_pool_policy && thread_serial_jobs == 0u) thread_serial_jobs = (uint64_t)steps * (uint64_t)(layers - start_layer);
+    if (!thread_pool_policy && thread_serial_jobs == 0u) thread_serial_jobs = (uint64_t)executed_steps * (uint64_t)(layers - start_layer);
     if (!thread_pool_policy && thread_fallback_jobs == 0u) thread_fallback_jobs = thread_serial_jobs;
-    fprintf(out, "  \"thread_profile\": {\"enabled\": true, \"policy\": \"%s\", \"requested_threads\": %u, \"workers_used\": %u, \"parallel_jobs\": %llu, \"serial_jobs\": %llu, \"fallback_jobs\": %llu",
+    if (!capture) fprintf(out, "  \"thread_profile\": {\"enabled\": true, \"policy\": \"%s\", \"requested_threads\": %u, \"workers_used\": %u, \"parallel_jobs\": %llu, \"serial_jobs\": %llu, \"fallback_jobs\": %llu",
         thread_policy, threads, thread_workers_used, (unsigned long long)thread_parallel_jobs,
         (unsigned long long)thread_serial_jobs, (unsigned long long)thread_fallback_jobs);
-    if (!thread_pool_policy) fprintf(out, ", \"disabled_reason\": \"serial_policy\"");
-    fprintf(out, "},\n");
-    fprintf(out, "  \"simd_profile\": {\"enabled\": true, \"policy\": \"%s\", \"kernel\": \"%s\", \"fma_dot_calls\": %llu, \"fallback_dot_calls\": %llu",
+    if (!thread_pool_policy) if (!capture) fprintf(out, ", \"disabled_reason\": \"serial_policy\"");
+    if (!capture) fprintf(out, "},\n");
+    if (!capture) fprintf(out, "  \"simd_profile\": {\"enabled\": true, \"policy\": \"%s\", \"kernel\": \"%s\", \"fma_dot_calls\": %llu, \"fallback_dot_calls\": %llu",
         simd_policy, avx2_fma_policy ? "avx2_fma_q6_k_f32" : "scalar",
         (unsigned long long)simd_fma_dot_calls, (unsigned long long)simd_fallback_dot_calls);
-    if (!avx2_fma_policy) fprintf(out, ", \"disabled_reason\": \"scalar_policy\"");
-    fprintf(out, "},\n");
-    fprintf(out, "  \"expert_cache_profile\": {\"enabled\": true, \"policy\": \"%s\", \"cache_hits\": 0, \"cache_misses\": 0, \"bytes_cached\": 0, \"expert_weight_reads\": 0, \"disabled_reason\": \"none_policy\"},\n", expert_cache_policy);
-    fprintf(out, "  \"cuda_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"device_bytes\": 0, \"host_to_device_bytes\": 0, \"device_to_host_bytes\": 0, \"kernel_launches\": 0, \"disabled_reason\": \"none_policy\"},\n", cuda_policy);
-    fprintf(out, "  \"prefill_gemm_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"gemm_calls\": 0, \"batched_tokens\": 0, \"fused_rows\": 0, \"temporary_bytes\": 0, \"disabled_reason\": \"none_policy\"},\n", prefill_gemm_policy);
-    fprintf(out, "  \"speculative_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"draft_tokens\": 0, \"accepted_tokens\": 0, \"rejected_tokens\": 0, \"target_verifications\": 0, \"disabled_reason\": \"none_policy\"},\n", speculative_policy);
-    fprintf(out, "  \"kv2_profile\": {\"enabled\": true, \"policy\": \"%s\", \"format\": \"none\", \"packed_bytes\": 0, \"read_ops\": 0, \"write_ops\": 0, \"fallback_reads\": 0, \"disabled_reason\": \"none_policy\"},\n", kv2_policy);
-    fprintf(out, "  \"sampling_profile\": {\"enabled\": true, \"policy\": \"%s\", \"mode\": \"greedy\", \"stochastic_samples\": 0, \"top_p_evaluations\": 0, \"beam_width\": 1, \"disabled_reason\": \"none_policy\"},\n", sampling_policy);
-    fprintf(out, "  \"long_context_profile\": {\"enabled\": true, \"policy\": \"%s\", \"target_ctx_tokens\": %u, \"rss_limit_bytes\": %llu, \"kv_quality_checks\": 0, \"soak_seconds\": 0, \"disabled_reason\": %s},\n", long_context_policy, ctx4k_smoke_policy ? 4096u : 0u, (unsigned long long)long_context_rss_limit_bytes, ctx4k_smoke_policy ? "null" : "\"none_policy\"");
+    if (!avx2_fma_policy) if (!capture) fprintf(out, ", \"disabled_reason\": \"scalar_policy\"");
+    if (!capture) fprintf(out, "},\n");
+    if (!capture) fprintf(out, "  \"expert_cache_profile\": {\"enabled\": true, \"policy\": \"%s\", \"cache_hits\": 0, \"cache_misses\": 0, \"bytes_cached\": 0, \"expert_weight_reads\": 0, \"disabled_reason\": \"none_policy\"},\n", expert_cache_policy);
+    if (!capture) fprintf(out, "  \"cuda_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"device_bytes\": 0, \"host_to_device_bytes\": 0, \"device_to_host_bytes\": 0, \"kernel_launches\": 0, \"disabled_reason\": \"none_policy\"},\n", cuda_policy);
+    if (!capture) fprintf(out, "  \"prefill_gemm_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"gemm_calls\": 0, \"batched_tokens\": 0, \"fused_rows\": 0, \"temporary_bytes\": 0, \"disabled_reason\": \"none_policy\"},\n", prefill_gemm_policy);
+    if (!capture) fprintf(out, "  \"speculative_profile\": {\"enabled\": true, \"policy\": \"%s\", \"backend\": \"none\", \"draft_tokens\": 0, \"accepted_tokens\": 0, \"rejected_tokens\": 0, \"target_verifications\": 0, \"disabled_reason\": \"none_policy\"},\n", speculative_policy);
+    if (!capture) fprintf(out, "  \"kv2_profile\": {\"enabled\": true, \"policy\": \"%s\", \"format\": \"none\", \"packed_bytes\": 0, \"read_ops\": 0, \"write_ops\": 0, \"fallback_reads\": 0, \"disabled_reason\": \"none_policy\"},\n", kv2_policy);
+    if (!capture) fprintf(out, "  \"sampling_profile\": {\"enabled\": true, \"policy\": \"%s\", \"mode\": \"greedy\", \"stochastic_samples\": 0, \"top_p_evaluations\": 0, \"beam_width\": 1, \"disabled_reason\": \"none_policy\"},\n", sampling_policy);
+    if (!capture) fprintf(out, "  \"long_context_profile\": {\"enabled\": true, \"policy\": \"%s\", \"target_ctx_tokens\": %u, \"rss_limit_bytes\": %llu, \"kv_quality_checks\": 0, \"soak_seconds\": 0, \"disabled_reason\": %s},\n", long_context_policy, ctx4k_smoke_policy ? 4096u : 0u, (unsigned long long)long_context_rss_limit_bytes, ctx4k_smoke_policy ? "null" : "\"none_policy\"");
     const char *note = residual_replay
         ? "hybrid one-token replay from an injected F32 residual through the requested layer suffix"
         : kv_f16
@@ -6730,7 +6745,7 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         : (full_moe
             ? "one-token Qwen3 transformer forward with real attention, dynamic INT8 KV, and top-8 MoE; final head disabled"
             : (rope_gqa_attention ? "partial Qwen3 attention: split-half RoPE on Q/K, GQA head mapping, per-head causal softmax, dynamically scaled INT8 KV, and output projection; dimensions and heads remain probe-limited" : (causal_attention ? "partial causal attention: Q/K/V projection, dynamically scaled INT8 KV persistence, stable causal softmax, context aggregation, and output projection; dimensions remain probe-limited" : "state loop skeleton: per-token per-layer KV append/checksum/readback plus sampled-token carry; residual math remains probe-level")));
-    fprintf(out, "  \"note\": \"%s\"\n}\n", note);
+    if (!capture) fprintf(out, "  \"note\": \"%s\"\n}\n", note);
     free(kbuf);
     free(vbuf);
     free(kcache);
@@ -6743,6 +6758,39 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
     qx_scratch_free(&scratch_workspace);
     qx_close_file(&file);
     return 1;
+}
+
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {
+    return qx_run_prompt_state_loop(path, tokens_path, prompt_tokens, prompt_count, generation_steps, layers, ctx_tokens,
+        kv_format, activation_format, scratch_policy, kernel_policy, thread_policy, threads, simd_policy,
+        expert_cache_policy, cuda_policy, prefill_gemm_policy, speculative_policy, kv2_policy, sampling_policy,
+        long_context_policy, long_context_rss_limit_bytes, long_context_kv_quality_checks, long_context_soak_seconds,
+        dequant_profile_enabled, real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas,
+        delta_vectors, attention_output_vector, causal_attention, rope_gqa_attention, full_moe, final_head, bench,
+        residual_dims, norm_name, top_k, scan, logits_top_n, temperature, seed, residual_dump_dir, start_layer,
+        residual_input_path, kv_snapshot_out_path, kv_snapshot_in_path, NULL, -1, out, err, err_len);
+}
+
+int qx_run_native_generation(const char *path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id, qx_native_generation_result *result, char *err, uint64_t err_len) {
+    if (result) memset(result, 0, sizeof(*result));
+    if (!path || !prompt_tokens || !result || prompt_count == 0u || max_tokens == 0u) {
+        qx_set_err(err, err_len, "invalid native generation argument");
+        return 0;
+    }
+    if (prompt_count > QX_NATIVE_GENERATION_MAX_TOKENS || max_tokens > QX_NATIVE_GENERATION_MAX_TOKENS || prompt_count > UINT32_MAX - max_tokens + 1u) {
+        qx_set_err(err, err_len, "native generation requires prompt and max_tokens in 1..64");
+        return 0;
+    }
+    uint32_t steps = prompt_count + max_tokens - 1u;
+    if (ctx_tokens == 0u || ctx_tokens > 4096u || steps > QX_NATIVE_GENERATION_MAX_TOKENS || steps > ctx_tokens) {
+        qx_set_err(err, err_len, "native generation prompt plus output must fit the 64-step and context limits");
+        return 0;
+    }
+    return qx_run_prompt_state_loop(path, NULL, prompt_tokens, prompt_count, max_tokens, 48u, ctx_tokens,
+        "int8", "f32", "ephemeral", "baseline", "serial", 1u, "scalar",
+        "none", "none", "none", "none", "none", "none", "none", 0u, 0u, 0u, 0,
+        1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 2048u, NULL, 8u, 0u, 8u, 0.0, 7u,
+        NULL, 0u, NULL, NULL, NULL, result, eos_token_id, NULL, err, err_len);
 }
 
 int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {

@@ -1,0 +1,238 @@
+{
+  "schema": "qx-issue81-native-generation-public-evidence-v1",
+  "issue": 81,
+  "status": {
+    "implementation": "verified",
+    "local_gates": "verified",
+    "release": "pending",
+    "commit": null,
+    "ci_run": null,
+    "note": "Issue #81 has no release commit or CI run yet; this report does not claim release readiness or a frozen final run."
+  },
+  "scope": "Canonical CPU-only native generation from prompt text through a bound QXT tokenizer to JSON, plus a public C API over the shared fixed 48-layer F32/INT8-KV greedy loop.",
+  "implementation_contract": {
+    "cli": {
+      "command": "qxqxf generate",
+      "required_arguments": [
+        "--in MODEL.qxf",
+        "--tokenizer MODEL.qxt",
+        "--text-file PROMPT.txt",
+        "--max-tokens N",
+        "--ctx N"
+      ],
+      "output": "one JSON line with prompt_token_count, generated_token_ids, generated_text, stop_reason, and prefill/decode timing",
+      "tokenizer_binding_before_model_io": {
+        "vocab_count": 151936,
+        "payload_checksum": 6140965799433681264,
+        "bos_token_id": -1,
+        "eos_token_id": 151645,
+        "flags": 0
+      }
+    },
+    "api": {
+      "symbol": "qx_run_native_generation",
+      "header": "include/qx_format.h",
+      "eos_contract": "eos_token_id < 0 disables EOS stopping",
+      "result_fields": [
+        "token_ids",
+        "token_count",
+        "stopped_on_eos",
+        "prefill_seconds",
+        "decode_seconds"
+      ]
+    },
+    "runtime": {
+      "device": "CPU",
+      "layers": 48,
+      "activation": "f32",
+      "kv": "int8",
+      "sampling": "greedy temperature 0",
+      "shared_loop": "qx_run_prompt_state_loop"
+    },
+    "supported_limits": {
+      "prompt_count": "1..64",
+      "max_tokens": "1..64",
+      "ctx": "1..4096",
+      "forward_position_budget": "prompt_count + max_tokens - 1 <= 64 and <= ctx"
+    }
+  },
+  "acceptance_results": {
+    "real_prompt": {
+      "text": "Hello!",
+      "prompt_token_ids": [
+        9707,
+        0
+      ],
+      "generated_token_ids": [
+        358,
+        1184
+      ],
+      "repeat_reproducible": true,
+      "decoded_with_bound_qxt": true,
+      "stop_reason": "max_tokens"
+    },
+    "controlled_api_eos": [
+      {
+        "eos_token_id": 358,
+        "token_ids": [
+          358
+        ],
+        "stopped_on_eos": true
+      },
+      {
+        "eos_token_id": 1184,
+        "token_ids": [
+          358,
+          1184
+        ],
+        "stopped_on_eos": true
+      },
+      {
+        "eos_token_id": -1,
+        "token_ids": [
+          358,
+          1184
+        ],
+        "stopped_on_eos": false
+      }
+    ],
+    "smoke_record": {
+      "status": "PASS",
+      "real_layers": 48,
+      "layer_steps": 96,
+      "first_argmax": 1124,
+      "sequence": [
+        1124,
+        50853
+      ]
+    }
+  },
+  "reproduction": {
+    "working_directory": "repository_root",
+    "prepare_prompt": "python -c \"open('issue-81-prompt.txt','wb').write(b'Hello!')\"",
+    "cli_real_model": "build/qxqxf.exe generate --in models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt --text-file issue-81-prompt.txt --max-tokens 2 --ctx 3",
+    "decode_expected_ids": "build/qxqxf.exe tokenizer-decode --tokenizer models/Qwen3-30B-A3B.qxt --ids 358,1184",
+    "api_controlled_eos": [
+      "build/native_generation_api_contract.exe models/Qwen3-30B-A3B-UD-IQ2_M.qxf 358 2 3",
+      "build/native_generation_api_contract.exe models/Qwen3-30B-A3B-UD-IQ2_M.qxf 1184 2 3",
+      "build/native_generation_api_contract.exe models/Qwen3-30B-A3B-UD-IQ2_M.qxf -1 2 3"
+    ],
+    "acceptance_suite": "QX_REQUIRE_NATIVE_GENERATE=1 python -m pytest tests/test_native_generate.py tests/test_native_generation_api.py tests/test_native_generate_binding.py -q --tb=short",
+    "regression_suite": "python -m pytest tests/test_q8k_perf_experiment.py tests/test_issue80_layer3_seams.py tests/test_issue80_preflight.py",
+    "smoke": "python smoke_check.py",
+    "wiki_lint": "python scripts/lint_wiki.py",
+    "diff_check": "git diff --check"
+  },
+  "parent_verified_gates": {
+    "native_generation_acceptance": {
+      "status": "PASS",
+      "passed": 34,
+      "skipped": 0,
+      "seconds": 184.78
+    },
+    "issue80_and_q8k_regression": {
+      "status": "PASS",
+      "passed": 184,
+      "seconds": 6.78
+    },
+    "smoke_check": "PASS: real 48-layer / 96-layer-step path; argmax 1124; sequence 1124,50853",
+    "wiki_lint": "PASS: 30 pages and 34 notes",
+    "git_diff_check": "PASS",
+    "msvc_build": "PASS: last build warning-free",
+    "provenance_note": "These are the parent-provided verified gate results. This documentation pass did not rerun the heavy build, real-model acceptance, regression, or smoke commands."
+  },
+  "point_in_time_sha256": {
+    "semantics": "SHA-256 values captured from the current working-tree bytes during documentation preparation. They are actual point-in-time hashes, not a claim that a final release run was frozen or that bytes were stable before and after the parent runs.",
+    "files": {
+      "build/native_generation_api_contract.exe": {
+        "bytes": 341504,
+        "line_endings": "binary",
+        "raw_sha256": "a8f0923b1f75b878aec6b809e570f062b607d223f6df5183124716b042f7fcec"
+      },
+      "build/qxqxf.exe": {
+        "bytes": 638464,
+        "line_endings": "binary",
+        "raw_sha256": "c9673dc5ea26d71741ad065cce9c8bd1edf3c6237577037d374aebe21d13de2b"
+      },
+      "build_msvc.bat": {
+        "bytes": 1599,
+        "line_endings": "CRLF",
+        "raw_sha256": "e752ffd49788a0c7d2fde930679a999f89c95bb4d80265885e9d8990c6ce9075",
+        "lf_normalized_sha256": "48b56feca85a1e8945a69f9a7ccef67a7c219db9456c890eb2aea6faec62adbd"
+      },
+      "include/qx_format.h": {
+        "bytes": 14943,
+        "line_endings": "CRLF",
+        "raw_sha256": "bf33b2007fd953c7788f6dbccadc13071c426f458efb7985efec9cd87380866c",
+        "lf_normalized_sha256": "04c2aea7c540350fa4ede5fa1ca6453f77f54f238a80c29b5969c25776aabbaa"
+      },
+      "src/qx_format.c": {
+        "bytes": 479526,
+        "line_endings": "CRLF",
+        "raw_sha256": "fcc2f7079196074253f0c7fff0cb1dedc587edc556aaff873dde0bf7d7957e56",
+        "lf_normalized_sha256": "7e3720894384ebd6b3cf118a8f6c5cdd6e1224d508b221fd3ebba5f3c41eb381"
+      },
+      "src/qx_qxf_main.c": {
+        "bytes": 113224,
+        "line_endings": "CRLF",
+        "raw_sha256": "fb3231b0162424e2921baac32eb6f3ab8016caae881ec80efa9016df5676e695",
+        "lf_normalized_sha256": "6f31b8a12112f66074c3a365468efa97186ea252af028b4e6c18fe351b471d7a"
+      },
+      "tests/native_generate_helpers.py": {
+        "bytes": 4189,
+        "line_endings": "LF",
+        "raw_sha256": "724bfc1ee65508a519d22431509d49c7bfa1b648f8054c25aba9fd4ac5dabbdd",
+        "lf_normalized_sha256": "724bfc1ee65508a519d22431509d49c7bfa1b648f8054c25aba9fd4ac5dabbdd"
+      },
+      "tests/native_generation_api_contract.c": {
+        "bytes": 2150,
+        "line_endings": "LF",
+        "raw_sha256": "c05f969c9285e951037588e157f3a24acd4713c981e012f780d3f8a8bc9a5321",
+        "lf_normalized_sha256": "c05f969c9285e951037588e157f3a24acd4713c981e012f780d3f8a8bc9a5321"
+      },
+      "tests/test_native_generate.py": {
+        "bytes": 10571,
+        "line_endings": "LF",
+        "raw_sha256": "de265c724a08617fa94bcc03fe26bbaac015681a3cbc1f221e5edd07b6ed998d",
+        "lf_normalized_sha256": "de265c724a08617fa94bcc03fe26bbaac015681a3cbc1f221e5edd07b6ed998d"
+      },
+      "tests/test_native_generate_binding.py": {
+        "bytes": 3854,
+        "line_endings": "LF",
+        "raw_sha256": "41f5a8c499b9f006fc03136dc8c9cd3aab807bbccd9885e575c84e011fb73d9d",
+        "lf_normalized_sha256": "41f5a8c499b9f006fc03136dc8c9cd3aab807bbccd9885e575c84e011fb73d9d"
+      },
+      "tests/test_native_generation_api.py": {
+        "bytes": 3949,
+        "line_endings": "LF",
+        "raw_sha256": "f4b821e2d81c1f5bf207c0f08a575b76aa1a77b6b248c8c250d781f21d861691",
+        "lf_normalized_sha256": "f4b821e2d81c1f5bf207c0f08a575b76aa1a77b6b248c8c250d781f21d861691"
+      }
+    }
+  },
+  "scope_boundaries": {
+    "supported": [
+      "Canonical QXT-bound prompt-text CLI generation on CPU",
+      "One-line JSON output contract",
+      "Public C API over the same fixed native loop",
+      "Real Hello! tokenization and deterministic two-token output for the recorded assets",
+      "Controlled first-token, second-token, and disabled-EOS API behavior",
+      "Fail-closed numeric, context-budget, tokenizer-vocabulary, payload, BOS, EOS, and flags checks"
+    ],
+    "not_supported": [
+      "Global numeric, logit, semantic, prompt, or modality parity",
+      "CUDA or another accelerator backend",
+      "Actual 4K-context execution coverage, KV-quality closure, or soak closure",
+      "Conversational throughput or sustained tokens-per-second claims",
+      "Release readiness, an Issue #81 release commit, or an Issue #81 CI run",
+      "Forwarded step-count proof from counters because no such counters are exposed",
+      "Generate end-to-end split-UTF-8 coverage; the split-UTF-8 case is decoder-only"
+    ]
+  },
+  "issue80_reconciliation": {
+    "status": "CLOSED",
+    "commit": "b0c4019b493a2817b4c9d2219b917783266c77f9",
+    "ci_run": "35152297016",
+    "ci_status": "PASS"
+  }
+}

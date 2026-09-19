@@ -52,9 +52,24 @@ The accumulated-KV cross-activation bisect reuses the published snapshot seam in
 
 The fixed-snapshot residual replay now holds token 1000's F32-produced INT8 KV snapshot constant and resumes at the first cross-activation routing change, layer 2. Both F32 and Q8_K same-mode controls reproduce suffix routing, final residual, logits and selected token exactly. Injecting the exact F32 layer-1 residual into a Q8_K suffix still selects `1318`, not the F32 continuation's `67075`; layer-2 expert selection remains F32-exact and routing first departs from F32 at layer 3. The diagnostic logits pass neither unchanged full-logit comparison (`vs F32: max_abs 0.655345, RMSE 0.136190, cosine 0.997983`; `vs Q8_K: max_abs 0.949061, RMSE 0.290906, cosine 0.992844`). This localizes the next boundary to layer-2 output / layer-3 input for this case only; it is not global parity, semantic equivalence, a kernel root cause or permission to promote Q8_K. Evidence: `wiki/evidence/issue-78-fixed-kv-residual-bisect-report.json` and `wiki/evidence/issue-78-continuation-localization.json`.
 
-The layer-3 seam experiment now holds the exact F32 layer-2 output and F32-produced INT8 KV snapshot fixed while comparing F32 and `q8_k_compat`. The common input is byte-exact, but attention changes the FFN input (`max_abs 0.00958681`, RMSE `0.00130100`), after which integrated ordered routing ends in expert `89` for F32 and `22` for Q8_K. Replaying the same F32 FFN input through both MoE modes restores identical ordered IDs ending in `89`; expert outputs still differ (`max_abs 0.00210665`, RMSE `0.000659551`). Independently reconstructed opt-in `integrated_double` MoE and layer outputs are byte-exact controls in both modes, while the native default remains `legacy_f32`. This parent-verified, case-local experiment remains pending release and does not identify a kernel bug, establish global parity, promote a default, claim release readiness or select the next experiment. Evidence: `wiki/evidence/issue-80-layer3-seams-report.json`.
+The layer-3 seam experiment holds the exact F32 layer-2 output and F32-produced INT8 KV snapshot fixed while comparing F32 and `q8_k_compat`. The common input is byte-exact, but attention changes the FFN input (`max_abs 0.00958681`, RMSE `0.00130100`), after which integrated ordered routing ends in expert `89` for F32 and `22` for Q8_K. Replaying the same F32 FFN input through both MoE modes restores identical ordered IDs ending in `89`; expert outputs still differ (`max_abs 0.00210665`, RMSE `0.000659551`). Independently reconstructed opt-in `integrated_double` MoE and layer outputs are byte-exact controls in both modes, while the native default remains `legacy_f32`. Issue #80 is CLOSED in commit `b0c4019b493a2817b4c9d2219b917783266c77f9`; GitHub Actions run `35152297016` passed. This case-local result does not identify a kernel bug, establish global parity, promote a default or select the next experiment. Evidence: `wiki/evidence/issue-80-layer3-seams-report.json`.
 
 Here, routing equality means exact equality of the ordered `selected_experts` IDs, not just set membership. It does not establish equal expert weights or equal numeric layer outputs. Layer 3 is the first observed ordered-ID difference after injection, not proof that the numeric error originates there.
+
+## Native CPU generation (Issue #81)
+
+The canonical native entry point is now a prompt-text CLI that loads the bound QXT2 tokenizer, runs the existing 48-layer F32/INT8-KV loop, and emits one JSON line:
+
+```bash
+python -c "open('issue-81-prompt.txt','wb').write(b'Hello!')"
+build/qxqxf.exe generate --in models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt --text-file issue-81-prompt.txt --max-tokens 2 --ctx 3
+```
+
+The parent-verified real-model acceptance result is prompt IDs `[9707, 0]` and deterministic generated IDs `[358, 1184]`, decoded through the same QXT sidecar. The public C API `qx_run_native_generation(...)` exposes the shared loop without routing generation through Python. Controlled API runs stop on token `358` when it is configured as EOS, stop on the second token for EOS `1184`, and return both tokens with `eos_token_id=-1`.
+
+Supported limits are explicit: `max_tokens` and prompt count are non-zero, `ctx` is `1..4096`, and the forward-position budget is `prompt_count + max_tokens - 1 <= 64` and `<= ctx`. The CLI binds vocabulary size, payload fingerprint, BOS, EOS and flags to the canonical Qwen3-30B-A3B QXT before model I/O. The `ctx <= 4096` argument boundary is not evidence of an actual 4K run, quality sweep or soak closure. The split-UTF-8 case is a tokenizer decoder fixture only, not generate end-to-end coverage. No forwarded-step counter is exposed, so step-count forwarding is not claimed from counters.
+
+Issue #81 implementation and local gates are verified, but release is pending: there is no Issue #81 commit or CI run yet. This slice does not establish global model/logit parity, CUDA support, 4K runtime coverage, throughput or release readiness. Reproduction commands, exact gates and point-in-time source/test/executable hashes are in `wiki/evidence/issue-81-native-generation-report.json`.
 
 ## Honest performance state
 
@@ -220,9 +235,9 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. Preserve the final parent-verified Issue #80 token-1000 layer-3 seam evidence while release remains pending. The result is an interaction, not an identified kernel error origin.
-2. Do not extrapolate this single fixed case to global parity or automatically continue to another layer; no next experimental slice is selected yet.
-3. Convert the existing 4K/RSS/KV-quality/soak contracts into real measurements outside heavy default CI.
+1. Release the verified Issue #81 native CPU generation slice with its source/test/executable provenance; commit and CI are still pending.
+2. Preserve closed Issue #80's token-1000 layer-3 seam evidence without extrapolating that fixed case to global parity or an identified kernel origin.
+3. Convert the existing 4K/RSS/KV-quality/soak contracts into real measurements outside heavy default CI; the Issue #81 `ctx` limit is not that coverage.
 4. Design a hybrid CUDA backend only after the CPU/parity milestone closes and transfer/residency costs are measured.
 
 ## License
