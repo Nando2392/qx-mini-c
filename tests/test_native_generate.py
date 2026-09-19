@@ -86,7 +86,14 @@ def real_generate_command(
 
 
 def run_generate(command: list[str]) -> dict:
-    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=True)
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        errors="strict",
+        check=True,
+    )
     assert completed.stdout.endswith("\n")
     assert completed.stdout.count("\n") == 1
     return json.loads(completed.stdout)
@@ -116,7 +123,9 @@ def test_generate_rejects_invalid_numeric_arguments_before_file_io(
     command[0] = str(native_executable)
     command[command.index(flag) + 1] = value
 
-    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+    completed = subprocess.run(
+        command, cwd=ROOT, capture_output=True, encoding="utf-8", errors="strict"
+    )
 
     assert completed.returncode == 2
     assert f"invalid {flag}" in completed.stderr
@@ -129,7 +138,8 @@ def test_generate_requires_all_arguments_before_file_io(native_executable: Path)
         [str(native_executable), "generate", "--max-tokens", "2", "--ctx", "16"],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
     )
 
     assert completed.returncode == 2
@@ -144,7 +154,8 @@ def test_tokenizer_decode_joins_utf8_bytes_split_across_tokens(native_executable
         [str(native_executable), "tokenizer-decode", "--tokenizer", str(tokenizer), "--ids", "0,1"],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
         check=True,
     )
 
@@ -168,7 +179,8 @@ def test_tokenizer_decode_rejects_invalid_utf8(
         [str(native_executable), "tokenizer-decode", "--tokenizer", str(tokenizer), "--ids", token_ids],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
     )
 
     assert completed.returncode != 0
@@ -186,7 +198,9 @@ def test_generate_context_rejection_precedes_model_io(
         executable, tmp_path / "missing-model.qxf", tokenizer, prompt, max_tokens=2, ctx=2
     )
 
-    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+    completed = subprocess.run(
+        command, cwd=ROOT, capture_output=True, encoding="utf-8", errors="strict"
+    )
 
     assert completed.returncode == 2
     assert "prompt and generation exceed --ctx" in completed.stderr
@@ -205,13 +219,15 @@ def test_generate_enforces_64_forward_position_boundary_before_model_io(
         real_generate_command(executable, missing_model, tokenizer, prompt, max_tokens=63, ctx=64),
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
     )
     overflow = subprocess.run(
         real_generate_command(executable, missing_model, tokenizer, prompt, max_tokens=64, ctx=65),
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
     )
 
     assert exact.returncode == 1
@@ -248,7 +264,8 @@ def test_generate_real_hello_is_deterministic_qxt_decoded_and_exact_context_fit(
         [str(executable), "tokenizer-decode", "--tokenizer", str(tokenizer), "--ids", "358,1184"],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
         check=True,
     )
     assert payload["generated_text"] == json.loads(decoded.stdout)["text"]
@@ -275,7 +292,8 @@ def test_generate_rejects_noncanonical_eos_before_model_io(
         ),
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
     )
 
     assert completed.returncode != 0
@@ -306,7 +324,8 @@ def test_controlled_real_qxt_preserves_prompt_encoding_and_joins_split_utf8_toke
             [str(executable), "tokenizer-encode", "--tokenizer", str(split_utf8), "--text-file", str(prompt)],
             cwd=ROOT,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="strict",
             check=True,
         ).stdout
     )
@@ -315,7 +334,8 @@ def test_controlled_real_qxt_preserves_prompt_encoding_and_joins_split_utf8_toke
             [str(executable), "tokenizer-decode", "--tokenizer", str(split_utf8), "--ids", "358,1184"],
             cwd=ROOT,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="strict",
             check=True,
         ).stdout
     )

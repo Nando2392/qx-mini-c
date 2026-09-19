@@ -43,7 +43,8 @@ def generate_with_missing_model(tokenizer: Path, prompt: Path) -> subprocess.Com
         ],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
     )
 
 

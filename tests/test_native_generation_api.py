@@ -40,7 +40,8 @@ def run_driver(driver: Path, model: Path, eos_token_id: int, max_tokens: int = 2
         [str(driver), str(model), str(eos_token_id), str(max_tokens), str(ctx_tokens)],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
         check=True,
     )
     assert completed.stdout.endswith("\n")
@@ -109,7 +110,8 @@ def test_native_generation_api_rejects_invalid_limits_before_model_io(
         [str(native_generation_driver), str(missing_model), "-1", str(max_tokens), str(ctx_tokens)],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="strict",
     )
 
     assert completed.returncode == 1
