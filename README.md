@@ -69,11 +69,28 @@ The parent-verified real-model acceptance result is prompt IDs `[9707, 0]` and d
 
 Supported limits are explicit: `max_tokens` and prompt count are non-zero, `ctx` is `1..4096`, and the forward-position budget is `prompt_count + max_tokens - 1 <= 64` and `<= ctx`. The CLI binds vocabulary size, payload fingerprint, BOS, EOS and flags to the canonical Qwen3-30B-A3B QXT before model I/O. The `ctx <= 4096` argument boundary is not evidence of an actual 4K run, quality sweep or soak closure. The split-UTF-8 case is a tokenizer decoder fixture only, not generate end-to-end coverage. No forwarded-step counter is exposed, so step-count forwarding is not claimed from counters.
 
-Issue #81 implementation and local gates are verified, but release is pending: there is no Issue #81 commit or CI run yet. This slice does not establish global model/logit parity, CUDA support, 4K runtime coverage, throughput or release readiness. Reproduction commands, exact gates and point-in-time source/test/executable hashes are in `wiki/evidence/issue-81-native-generation-report.json`.
+Issue #81 is closed in commit `0305290b3aba00d9db62f32caacfbc2e14cdbeb`; GitHub Actions run `35412907586` passed. This slice does not establish global model/logit parity, CUDA support, 4K runtime coverage or sustained throughput. Reproduction commands, exact gates and point-in-time source/test/executable hashes are in `wiki/evidence/issue-81-native-generation-report.json`.
+
+## Native CPU policy measurement (Issue #82)
+
+Issue #82 adds opt-in native-generation policies and an opt-in `--execution-profile` payload while preserving the default JSON contract and the compatibility C API. The policy surface is `--io-backend buffered|mmap`, `--scratch-policy ephemeral|persistent`, `--kernel-policy baseline|fused`, `--thread-policy serial|pool`, and `--threads N`; existing defaults remain buffered, ephemeral, baseline, serial, and one thread. Fusion and threading in this slice apply only to the final `output.weight` head, not attention or MoE.
+
+The parent-verified real-model report has SHA-256 `ed801a0debc96d71dc7ea634cca434b37be0ed10024f84bb3bcfa2e53bda4125`. It ran 24 native CLI processes (four warmups plus five measured runs in each of four cells). Every run returned token IDs `[358,1184]`, text `" I need"`, and full-logit checksums `13347842135191822952` and `6249376751730758761`. Medians and median absolute deviations below are calculated over the five measured runs per cell:
+
+| Cell | MSVC decode phase-local elapsed wall, s | End-to-end wall, s | Sampled peak RSS, MiB |
+|---|---:|---:|---:|
+| `baseline` | 21.280 ± 0.134 | 30.360 ± 0.173 | 19.422 ± 0.000 |
+| `persistent_fused_serial1` | 22.565 ± 0.131 | 31.781 ± 0.084 | 19.422 ± 0.000 |
+| `persistent_fused_pool2` | 21.251 ± 0.713 | 30.228 ± 1.030 | 261.867 ± 0.008 |
+| `mmap_persistent_fused_pool2` | 17.326 ± 0.204 | 25.561 ± 0.056 | 2413.770 ± 0.008 |
+
+The predeclared recommendation required both at least 10% median decode gain beyond combined MAD and median RSS no greater than 110% of baseline. `recommended_cells` is therefore empty. The mmap combination lowers the median native decode phase by about 18.58%, but sampled RSS is about 124.28× baseline, so it is explicitly **not** recommended and no default is promoted. Sampled process RSS includes file-backed mmap pages; it is not a heap-only measurement and not total system RAM. On MSVC, `clock()` measures phase-local elapsed wall time, not process CPU time or summed worker CPU time. Prefill excludes the final prompt token; decode starts by processing that token to produce the first output and then processes subsequent generated-token inputs. The immutable raw report remains at `wiki/evidence/issue-82-native-cpu-policy-report.json`; [`wiki/evidence/issue-82-timing-semantics.json`](wiki/evidence/issue-82-timing-semantics.json) is the authoritative semantic correction and links Microsoft's primary documentation.
+
+Issue #82 is implemented and measured locally but remains release-pending. The finite next capacity milestone is 128 and then 256 supported forward positions, followed by a separately gated real 4K run; CUDA comes later. A negative cell does not trigger an automatic policy bisect or another optimization issue.
 
 ## Honest performance state
 
-Measured on the current scalar CPU path:
+Earlier probe measurements on the scalar CPU path:
 
 ```text
 real layer-0 probe median: ~0.2085 s/layer
@@ -81,7 +98,7 @@ real one-token 48-layer state probe: ~8.50 s
 real one-token 48-layer + complete output head probe: ~8.35 s warm run
 ```
 
-The complete-head measurement includes final RMSNorm and all 151936 logits for one position. Multi-token execution is now correctness-gated but not benchmarked as sustained decode. It must not be reported as conversational tok/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
+The complete-head measurement includes final RMSNorm and all 151936 logits for one position. Issue #82 supersedes the statement that multi-token native execution was unmeasured, but its fixed two-token, one-prompt matrix is still not sustained conversational throughput and must not be reported as tok/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
 
 CUDA is planned but **not implemented**.
 

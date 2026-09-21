@@ -5991,7 +5991,7 @@ static int qx_read_accumulated_kv_snapshot(
     return 1;
 }
 
-static int qx_run_prompt_state_loop(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, qx_native_generation_result *capture, int32_t eos_token_id, FILE *out, char *err, uint64_t err_len) {
+static int qx_run_prompt_state_loop(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile_enabled, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, qx_native_generation_result *capture, qx_native_generation_profile *native_profile, int32_t eos_token_id, FILE *out, char *err, uint64_t err_len) {
     if (!path || !kv_format || !activation_format || !prompt_tokens || prompt_count == 0u) { qx_set_err(err, err_len, "invalid argument"); return 0; }
     if (!capture && !out) { qx_set_err(err, err_len, "output stream is required when generation capture is disabled"); return 0; }
     if (strcmp(activation_format, "f32") != 0 && strcmp(activation_format, "q8_k_compat") != 0) {
@@ -6599,6 +6599,9 @@ static int qx_run_prompt_state_loop(const char *path, const char *tokens_path, c
             thread_fallback_jobs += head_result.fallback_jobs;
             simd_fma_dot_calls += head_result.simd_fma_dot_calls;
             simd_fallback_dot_calls += head_result.simd_fallback_dot_calls;
+            if (native_profile && native_profile->sampled_steps < QX_NATIVE_GENERATION_MAX_TOKENS) {
+                native_profile->full_logits_checksums[native_profile->sampled_steps++] = head_result.logits_checksum;
+            }
             if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); qx_scratch_free(&scratch_workspace); qx_close_file(&file); return 0; }
             free(logits_dump);
             memcpy(top, head_result.top, (size_t)head_result.top_n * sizeof(qx_top_token));
@@ -6667,6 +6670,20 @@ static int qx_run_prompt_state_loop(const char *path, const char *tokens_path, c
     if (capture) {
         capture->prefill_seconds = prefill_elapsed;
         capture->decode_seconds = decode_elapsed;
+    }
+    if (native_profile) {
+        native_profile->workers_used = thread_workers_used;
+        native_profile->scratch_peak_capacity_bytes = (uint64_t)scratch_workspace.peak_capacity;
+        native_profile->scratch_growth_events = scratch_workspace.growth_events;
+        native_profile->temporary_blocks_decoded = dequant_profile.temporary_blocks_decoded;
+        native_profile->temporary_floats_materialized = dequant_profile.temporary_floats_materialized;
+        native_profile->temporary_bytes_materialized = dequant_profile.temporary_bytes_materialized;
+        native_profile->fused_final_head_dot_calls = dequant_profile.fused_dot_calls;
+        native_profile->baseline_final_head_dot_calls = dequant_profile.fallback_dot_calls;
+        native_profile->final_head_q6_k_blocks = dequant_profile.final_head_q6_k_blocks;
+        native_profile->final_head_parallel_jobs = thread_parallel_jobs;
+        native_profile->final_head_serial_jobs = thread_serial_jobs;
+        native_profile->final_head_fallback_jobs = thread_fallback_jobs;
     }
     if (kv_snapshot_out_path && *kv_snapshot_out_path && !qx_write_accumulated_kv_snapshot(
             kv_snapshot_out_path, layers, position_base + executed_steps, ctx_tokens, kv_heads, head_dim, kv_format,
@@ -6768,15 +6785,37 @@ int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens
         dequant_profile_enabled, real_kv, projection_matvec, residual_vector, residual_carry, numeric_deltas,
         delta_vectors, attention_output_vector, causal_attention, rope_gqa_attention, full_moe, final_head, bench,
         residual_dims, norm_name, top_k, scan, logits_top_n, temperature, seed, residual_dump_dir, start_layer,
-        residual_input_path, kv_snapshot_out_path, kv_snapshot_in_path, NULL, -1, out, err, err_len);
+        residual_input_path, kv_snapshot_out_path, kv_snapshot_in_path, NULL, NULL, -1, out, err, err_len);
 }
 
-int qx_run_native_generation(const char *path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id, qx_native_generation_result *result, char *err, uint64_t err_len) {
+void qx_native_generation_options_init(qx_native_generation_options *options) {
+    if (!options) return;
+    memset(options, 0, sizeof(*options));
+    options->struct_size = (uint32_t)sizeof(*options);
+    options->version = QX_NATIVE_GENERATION_OPTIONS_VERSION;
+    options->io_backend = QX_NATIVE_IO_BUFFERED;
+    options->scratch_policy = QX_NATIVE_SCRATCH_EPHEMERAL;
+    options->kernel_policy = QX_NATIVE_KERNEL_BASELINE;
+    options->thread_policy = QX_NATIVE_THREAD_SERIAL;
+    options->thread_count = 1u;
+}
+
+int qx_run_native_generation_with_options(const char *path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id, const qx_native_generation_options *options, qx_native_generation_result *result, qx_native_generation_profile *profile, char *err, uint64_t err_len) {
     if (result) memset(result, 0, sizeof(*result));
-    if (!path || !prompt_tokens || !result || prompt_count == 0u || max_tokens == 0u) {
+    if (profile) memset(profile, 0, sizeof(*profile));
+    if (!path || !prompt_tokens || !options || !result || prompt_count == 0u || max_tokens == 0u) {
         qx_set_err(err, err_len, "invalid native generation argument");
         return 0;
     }
+    if (options->struct_size != (uint32_t)sizeof(*options)) { qx_set_err(err, err_len, "unsupported native generation options size"); return 0; }
+    if (options->version != QX_NATIVE_GENERATION_OPTIONS_VERSION) { qx_set_err(err, err_len, "unsupported native generation options version"); return 0; }
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(options->reserved) / sizeof(options->reserved[0])); ++i) if (options->reserved[i] != 0u) { qx_set_err(err, err_len, "reserved native generation option fields must be zero"); return 0; }
+    if (options->io_backend != QX_NATIVE_IO_BUFFERED && options->io_backend != QX_NATIVE_IO_MMAP) { qx_set_err(err, err_len, "unsupported native generation I/O policy"); return 0; }
+    if (options->scratch_policy != QX_NATIVE_SCRATCH_EPHEMERAL && options->scratch_policy != QX_NATIVE_SCRATCH_PERSISTENT) { qx_set_err(err, err_len, "unsupported native generation scratch policy"); return 0; }
+    if (options->kernel_policy != QX_NATIVE_KERNEL_BASELINE && options->kernel_policy != QX_NATIVE_KERNEL_FUSED_FINAL_HEAD) { qx_set_err(err, err_len, "unsupported native generation kernel policy"); return 0; }
+    if (options->thread_policy != QX_NATIVE_THREAD_SERIAL && options->thread_policy != QX_NATIVE_THREAD_POOL) { qx_set_err(err, err_len, "unsupported native generation thread policy"); return 0; }
+    if (options->thread_policy == QX_NATIVE_THREAD_SERIAL && options->thread_count != 1u) { qx_set_err(err, err_len, "serial native generation policy requires one thread"); return 0; }
+    if (options->thread_policy == QX_NATIVE_THREAD_POOL && (options->thread_count < 2u || options->thread_count > 64u)) { qx_set_err(err, err_len, "pool native generation policy requires 2..64 threads"); return 0; }
     if (prompt_count > QX_NATIVE_GENERATION_MAX_TOKENS || max_tokens > QX_NATIVE_GENERATION_MAX_TOKENS || prompt_count > UINT32_MAX - max_tokens + 1u) {
         qx_set_err(err, err_len, "native generation requires prompt and max_tokens in 1..64");
         return 0;
@@ -6786,11 +6825,33 @@ int qx_run_native_generation(const char *path, const uint32_t *prompt_tokens, ui
         qx_set_err(err, err_len, "native generation prompt plus output must fit the 64-step and context limits");
         return 0;
     }
-    return qx_run_prompt_state_loop(path, NULL, prompt_tokens, prompt_count, max_tokens, 48u, ctx_tokens,
-        "int8", "f32", "ephemeral", "baseline", "serial", 1u, "scalar",
+    const char *scratch = options->scratch_policy == QX_NATIVE_SCRATCH_PERSISTENT ? "persistent" : "ephemeral";
+    const char *kernel = options->kernel_policy == QX_NATIVE_KERNEL_FUSED_FINAL_HEAD ? "fused" : "baseline";
+    const char *thread = options->thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial";
+    if (profile) {
+        profile->struct_size = (uint32_t)sizeof(*profile); profile->version = QX_NATIVE_GENERATION_PROFILE_VERSION;
+        profile->requested_io_backend = profile->effective_io_backend = options->io_backend;
+        profile->requested_scratch_policy = profile->effective_scratch_policy = options->scratch_policy;
+        profile->requested_kernel_policy = profile->effective_kernel_policy = options->kernel_policy;
+        profile->requested_thread_policy = profile->effective_thread_policy = options->thread_policy;
+        profile->requested_thread_count = profile->effective_thread_count = options->thread_count;
+    }
+    qx_io_backend saved_io_backend = qx_requested_io_backend;
+    qx_requested_io_backend = options->io_backend == QX_NATIVE_IO_MMAP ? QX_IO_MMAP : QX_IO_BUFFERED;
+    int ok = qx_run_prompt_state_loop(path, NULL, prompt_tokens, prompt_count, max_tokens, 48u, ctx_tokens,
+        "int8", "f32", scratch, kernel, thread, options->thread_count, "scalar",
         "none", "none", "none", "none", "none", "none", "none", 0u, 0u, 0u, 0,
         1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 2048u, NULL, 8u, 0u, 8u, 0.0, 7u,
-        NULL, 0u, NULL, NULL, NULL, result, eos_token_id, NULL, err, err_len);
+        NULL, 0u, NULL, NULL, NULL, result, profile, eos_token_id, NULL, err, err_len);
+    qx_requested_io_backend = saved_io_backend;
+    return ok;
+}
+
+int qx_run_native_generation(const char *path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id, qx_native_generation_result *result, char *err, uint64_t err_len) {
+    qx_native_generation_options options;
+    qx_native_generation_options_init(&options);
+    return qx_run_native_generation_with_options(path, prompt_tokens, prompt_count, max_tokens, ctx_tokens,
+        eos_token_id, &options, result, NULL, err, err_len);
 }
 
 int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len) {

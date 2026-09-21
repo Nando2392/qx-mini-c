@@ -40,7 +40,7 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-inspect --tokenizer model.qxt\n"
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
-        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64\n"
+        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64 [--io-backend buffered|mmap] [--scratch-policy ephemeral|persistent] [--kernel-policy baseline|fused] [--thread-policy serial|pool] [--threads N] [--execution-profile]\n"
         "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
         "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --scratch-policy ephemeral|persistent --kernel-policy baseline|fused --thread-policy serial --threads 1 --temperature 0 --seed 7 --full-moe --final-head [--bench] [--dequant-profile] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
@@ -414,7 +414,10 @@ chat_fail:
         uint32_t ctx = 0u;
         int max_tokens_seen = 0;
         int ctx_seen = 0;
+        int execution_profile = 0;
         char err[256];
+        qx_native_generation_options options;
+        qx_native_generation_options_init(&options);
         for (int i = 2; i < argc; ++i) {
             if (strcmp(argv[i], "--in") == 0 && i + 1 < argc) in_path = argv[++i];
             else if (strcmp(argv[i], "--tokenizer") == 0 && i + 1 < argc) tokenizer_path = argv[++i];
@@ -433,10 +436,49 @@ chat_fail:
                 }
                 ctx_seen = 1;
             }
+            else if (strcmp(argv[i], "--io-backend") == 0 && i + 1 < argc) {
+                const char *value = argv[++i];
+                if (strcmp(value, "buffered") == 0) options.io_backend = QX_NATIVE_IO_BUFFERED;
+                else if (strcmp(value, "mmap") == 0) options.io_backend = QX_NATIVE_IO_MMAP;
+                else { fprintf(stderr, "generate failed: unsupported native generation I/O policy\n"); return 2; }
+            }
+            else if (strcmp(argv[i], "--scratch-policy") == 0 && i + 1 < argc) {
+                const char *value = argv[++i];
+                if (strcmp(value, "ephemeral") == 0) options.scratch_policy = QX_NATIVE_SCRATCH_EPHEMERAL;
+                else if (strcmp(value, "persistent") == 0) options.scratch_policy = QX_NATIVE_SCRATCH_PERSISTENT;
+                else { fprintf(stderr, "generate failed: unsupported native generation scratch policy\n"); return 2; }
+            }
+            else if (strcmp(argv[i], "--kernel-policy") == 0 && i + 1 < argc) {
+                const char *value = argv[++i];
+                if (strcmp(value, "baseline") == 0) options.kernel_policy = QX_NATIVE_KERNEL_BASELINE;
+                else if (strcmp(value, "fused") == 0) options.kernel_policy = QX_NATIVE_KERNEL_FUSED_FINAL_HEAD;
+                else { fprintf(stderr, "generate failed: unsupported native generation kernel policy\n"); return 2; }
+            }
+            else if (strcmp(argv[i], "--thread-policy") == 0 && i + 1 < argc) {
+                const char *value = argv[++i];
+                if (strcmp(value, "serial") == 0) options.thread_policy = QX_NATIVE_THREAD_SERIAL;
+                else if (strcmp(value, "pool") == 0) options.thread_policy = QX_NATIVE_THREAD_POOL;
+                else { fprintf(stderr, "generate failed: unsupported native generation thread policy\n"); return 2; }
+            }
+            else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
+                if (!qx_cli_parse_u32_arg("--threads", argv[++i], &options.thread_count, err, sizeof(err))) {
+                    fprintf(stderr, "generate failed: invalid --threads\n"); return 2;
+                }
+            }
+            else if (strcmp(argv[i], "--execution-profile") == 0) execution_profile = 1;
             else { usage(argv[0]); return 2; }
         }
         if (!in_path || !tokenizer_path || !text_path || !max_tokens_seen || !ctx_seen) {
             fprintf(stderr, "generate requires --in, --tokenizer, --text-file, --max-tokens, and --ctx\n");
+            return 2;
+        }
+        if (options.thread_policy == QX_NATIVE_THREAD_SERIAL && options.thread_count != 1u) {
+            fprintf(stderr, "generate failed: serial native generation policy requires one thread\n");
+            return 2;
+        }
+        if (options.thread_policy == QX_NATIVE_THREAD_POOL &&
+                (options.thread_count < 2u || options.thread_count > 64u)) {
+            fprintf(stderr, "generate failed: pool native generation policy requires 2..64 threads\n");
             return 2;
         }
 
@@ -496,9 +538,12 @@ chat_fail:
         }
 
         qx_native_generation_result result;
+        qx_native_generation_profile profile;
         memset(&result, 0, sizeof(result));
-        if (!qx_run_native_generation(in_path, prompt_ids, prompt_count, max_tokens, ctx,
-                tokenizer.eos_token_id, &result, err, sizeof(err))) {
+        memset(&profile, 0, sizeof(profile));
+        if (!qx_run_native_generation_with_options(in_path, prompt_ids, prompt_count, max_tokens, ctx,
+                tokenizer.eos_token_id, &options, &result, execution_profile ? &profile : NULL,
+                err, sizeof(err))) {
             qx_tokenizer_free(&tokenizer); fprintf(stderr, "generate failed: %s\n", err); return 1;
         }
         if (result.token_count > max_tokens || result.token_count > 64u ||
@@ -544,8 +589,50 @@ chat_fail:
         for (uint32_t i = 0u; i < result.token_count; ++i) printf("%s%u", i ? "," : "", result.token_ids[i]);
         printf("],\"generated_text\":");
         qx_cli_json_string(output, output_length);
-        printf(",\"stop_reason\":\"%s\",\"timing\":{\"prefill_seconds\":%.9f,\"decode_seconds\":%.9f}}\n",
+        printf(",\"stop_reason\":\"%s\",\"timing\":{\"prefill_seconds\":%.9f,\"decode_seconds\":%.9f}",
             result.stopped_on_eos ? "eos" : "max_tokens", result.prefill_seconds, result.decode_seconds);
+        if (execution_profile) {
+            printf(",\"execution_profile\":{"
+                "\"requested_io_backend\":\"%s\",\"effective_io_backend\":\"%s\","
+                "\"requested_scratch_policy\":\"%s\",\"effective_scratch_policy\":\"%s\","
+                "\"requested_kernel_policy\":\"%s\",\"effective_kernel_policy\":\"%s\","
+                "\"requested_thread_policy\":\"%s\",\"effective_thread_policy\":\"%s\","
+                "\"requested_thread_count\":%u,\"effective_thread_count\":%u,"
+                "\"sampled_steps\":%u,\"workers_used\":%u,"
+                "\"scratch_peak_capacity_bytes\":%llu,\"scratch_growth_events\":%llu,"
+                "\"temporary_blocks_decoded\":%llu,\"temporary_floats_materialized\":%llu,"
+                "\"temporary_bytes_materialized\":%llu,\"fused_final_head_dot_calls\":%llu,"
+                "\"baseline_final_head_dot_calls\":%llu,\"final_head_q6_k_blocks\":%llu,"
+                "\"final_head_parallel_jobs\":%llu,\"final_head_serial_jobs\":%llu,"
+                "\"final_head_fallback_jobs\":%llu,\"full_logits_checksums\":[",
+                profile.requested_io_backend == QX_NATIVE_IO_MMAP ? "mmap" : "buffered",
+                profile.effective_io_backend == QX_NATIVE_IO_MMAP ? "mmap" : "buffered",
+                profile.requested_scratch_policy == QX_NATIVE_SCRATCH_PERSISTENT ? "persistent" : "ephemeral",
+                profile.effective_scratch_policy == QX_NATIVE_SCRATCH_PERSISTENT ? "persistent" : "ephemeral",
+                profile.requested_kernel_policy == QX_NATIVE_KERNEL_FUSED_FINAL_HEAD ? "fused" : "baseline",
+                profile.effective_kernel_policy == QX_NATIVE_KERNEL_FUSED_FINAL_HEAD ? "fused" : "baseline",
+                profile.requested_thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial",
+                profile.effective_thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial",
+                profile.requested_thread_count, profile.effective_thread_count,
+                profile.sampled_steps, profile.workers_used,
+                (unsigned long long)profile.scratch_peak_capacity_bytes,
+                (unsigned long long)profile.scratch_growth_events,
+                (unsigned long long)profile.temporary_blocks_decoded,
+                (unsigned long long)profile.temporary_floats_materialized,
+                (unsigned long long)profile.temporary_bytes_materialized,
+                (unsigned long long)profile.fused_final_head_dot_calls,
+                (unsigned long long)profile.baseline_final_head_dot_calls,
+                (unsigned long long)profile.final_head_q6_k_blocks,
+                (unsigned long long)profile.final_head_parallel_jobs,
+                (unsigned long long)profile.final_head_serial_jobs,
+                (unsigned long long)profile.final_head_fallback_jobs);
+            for (uint32_t i = 0u; i < profile.sampled_steps; ++i) {
+                printf("%s\"%llu\"", i ? "," : "",
+                    (unsigned long long)profile.full_logits_checksums[i]);
+            }
+            printf("]}");
+        }
+        printf("}\n");
         free(output);
         qx_tokenizer_free(&tokenizer);
         return 0;

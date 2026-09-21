@@ -1,0 +1,1612 @@
+{
+  "cells": [
+    {
+      "command": [
+        "build\\qxqxf.exe",
+        "generate",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "<temporary-Hello-prompt>",
+        "--max-tokens",
+        "2",
+        "--ctx",
+        "3",
+        "--io-backend",
+        "buffered",
+        "--scratch-policy",
+        "ephemeral",
+        "--kernel-policy",
+        "baseline",
+        "--thread-policy",
+        "serial",
+        "--threads",
+        "1",
+        "--execution-profile"
+      ],
+      "io_backend": "buffered",
+      "kernel_policy": "baseline",
+      "measured": [
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 2430976,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "baseline",
+            "effective_scratch_policy": "ephemeral",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 0,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "baseline",
+            "requested_scratch_policy": "ephemeral",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 0,
+            "scratch_peak_capacity_bytes": 0,
+            "temporary_blocks_decoded": 2430976,
+            "temporary_bytes_materialized": 2489319424,
+            "temporary_floats_materialized": 622329856,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 30.326999999999998,
+          "native_decode_seconds": 21.176,
+          "native_prefill_seconds": 9.151,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 30.359713800000463
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 2430976,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "baseline",
+            "effective_scratch_policy": "ephemeral",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 0,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "baseline",
+            "requested_scratch_policy": "ephemeral",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 0,
+            "scratch_peak_capacity_bytes": 0,
+            "temporary_blocks_decoded": 2430976,
+            "temporary_bytes_materialized": 2489319424,
+            "temporary_floats_materialized": 622329856,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 30.308,
+          "native_decode_seconds": 21.28,
+          "native_prefill_seconds": 9.028,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 30.340911499999493
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 2430976,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "baseline",
+            "effective_scratch_policy": "ephemeral",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 0,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "baseline",
+            "requested_scratch_policy": "ephemeral",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 0,
+            "scratch_peak_capacity_bytes": 0,
+            "temporary_blocks_decoded": 2430976,
+            "temporary_bytes_materialized": 2489319424,
+            "temporary_floats_materialized": 622329856,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 30.155,
+          "native_decode_seconds": 20.85,
+          "native_prefill_seconds": 9.305,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 30.186369099999865
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 2430976,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "baseline",
+            "effective_scratch_policy": "ephemeral",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 0,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "baseline",
+            "requested_scratch_policy": "ephemeral",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 0,
+            "scratch_peak_capacity_bytes": 0,
+            "temporary_blocks_decoded": 2430976,
+            "temporary_bytes_materialized": 2489319424,
+            "temporary_floats_materialized": 622329856,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 31.022,
+          "native_decode_seconds": 21.764,
+          "native_prefill_seconds": 9.258,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 31.052920400001312
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 2430976,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "baseline",
+            "effective_scratch_policy": "ephemeral",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 0,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "baseline",
+            "requested_scratch_policy": "ephemeral",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 0,
+            "scratch_peak_capacity_bytes": 0,
+            "temporary_blocks_decoded": 2430976,
+            "temporary_bytes_materialized": 2489319424,
+            "temporary_floats_materialized": 622329856,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 30.581000000000003,
+          "native_decode_seconds": 21.414,
+          "native_prefill_seconds": 9.167,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 30.612667199999123
+        }
+      ],
+      "name": "baseline",
+      "scratch_policy": "ephemeral",
+      "summary": {
+        "native_cpu_seconds": {
+          "count": 5,
+          "mad": 0.17199999999999704,
+          "max": 31.022,
+          "median": 30.326999999999998,
+          "min": 30.155
+        },
+        "native_decode_seconds": {
+          "count": 5,
+          "mad": 0.13400000000000034,
+          "max": 21.764,
+          "median": 21.28,
+          "min": 20.85
+        },
+        "native_prefill_seconds": {
+          "count": 5,
+          "mad": 0.0909999999999993,
+          "max": 9.305,
+          "median": 9.167,
+          "min": 9.028
+        },
+        "sampled_peak_rss_bytes": {
+          "count": 5,
+          "mad": 0.0,
+          "max": 20365312.0,
+          "median": 20365312.0,
+          "min": 20365312.0
+        },
+        "wall_seconds": {
+          "count": 5,
+          "mad": 0.1733447000005981,
+          "max": 31.052920400001312,
+          "median": 30.359713800000463,
+          "min": 30.186369099999865
+        }
+      },
+      "thread_policy": "serial",
+      "threads": 1,
+      "warmups": [
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 2430976,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "baseline",
+            "effective_scratch_policy": "ephemeral",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 0,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "baseline",
+            "requested_scratch_policy": "ephemeral",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 0,
+            "scratch_peak_capacity_bytes": 0,
+            "temporary_blocks_decoded": 2430976,
+            "temporary_bytes_materialized": 2489319424,
+            "temporary_floats_materialized": 622329856,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 30.518,
+          "native_decode_seconds": 21.466,
+          "native_prefill_seconds": 9.052,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 18849792,
+          "wall_seconds": 30.555485199998657
+        }
+      ]
+    },
+    {
+      "command": [
+        "build\\qxqxf.exe",
+        "generate",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "<temporary-Hello-prompt>",
+        "--max-tokens",
+        "2",
+        "--ctx",
+        "3",
+        "--io-backend",
+        "buffered",
+        "--scratch-policy",
+        "persistent",
+        "--kernel-policy",
+        "fused",
+        "--thread-policy",
+        "serial",
+        "--threads",
+        "1",
+        "--execution-profile"
+      ],
+      "io_backend": "buffered",
+      "kernel_policy": "fused",
+      "measured": [
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 31.747,
+          "native_decode_seconds": 22.565,
+          "native_prefill_seconds": 9.182,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 31.780610300000262
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 31.473,
+          "native_decode_seconds": 22.28,
+          "native_prefill_seconds": 9.193,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 31.505169500000193
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 31.828000000000003,
+          "native_decode_seconds": 22.321,
+          "native_prefill_seconds": 9.507,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 31.864965500000835
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 31.731,
+          "native_decode_seconds": 22.696,
+          "native_prefill_seconds": 9.035,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 31.76265070000045
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 32.197,
+          "native_decode_seconds": 22.681,
+          "native_prefill_seconds": 9.516,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 32.23085750000064
+        }
+      ],
+      "name": "persistent_fused_serial1",
+      "scratch_policy": "persistent",
+      "summary": {
+        "native_cpu_seconds": {
+          "count": 5,
+          "mad": 0.08100000000000307,
+          "max": 32.197,
+          "median": 31.747,
+          "min": 31.473
+        },
+        "native_decode_seconds": {
+          "count": 5,
+          "mad": 0.13100000000000023,
+          "max": 22.696,
+          "median": 22.565,
+          "min": 22.28
+        },
+        "native_prefill_seconds": {
+          "count": 5,
+          "mad": 0.15799999999999947,
+          "max": 9.516,
+          "median": 9.193,
+          "min": 9.035
+        },
+        "sampled_peak_rss_bytes": {
+          "count": 5,
+          "mad": 0.0,
+          "max": 20365312.0,
+          "median": 20365312.0,
+          "min": 20365312.0
+        },
+        "wall_seconds": {
+          "count": 5,
+          "mad": 0.08435520000057295,
+          "max": 32.23085750000064,
+          "median": 31.780610300000262,
+          "min": 31.505169500000193
+        }
+      },
+      "thread_policy": "serial",
+      "threads": 1,
+      "warmups": [
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 1,
+            "effective_thread_policy": "serial",
+            "final_head_fallback_jobs": 303872,
+            "final_head_parallel_jobs": 0,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 303872,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 1,
+            "requested_thread_policy": "serial",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 1
+          },
+          "native_cpu_seconds": 31.264,
+          "native_decode_seconds": 21.877,
+          "native_prefill_seconds": 9.387,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 20365312,
+          "wall_seconds": 31.30714640000042
+        }
+      ]
+    },
+    {
+      "command": [
+        "build\\qxqxf.exe",
+        "generate",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "<temporary-Hello-prompt>",
+        "--max-tokens",
+        "2",
+        "--ctx",
+        "3",
+        "--io-backend",
+        "buffered",
+        "--scratch-policy",
+        "persistent",
+        "--kernel-policy",
+        "fused",
+        "--thread-policy",
+        "pool",
+        "--threads",
+        "2",
+        "--execution-profile"
+      ],
+      "io_backend": "buffered",
+      "kernel_policy": "fused",
+      "measured": [
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 30.191000000000003,
+          "native_decode_seconds": 21.251,
+          "native_prefill_seconds": 8.94,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 274595840,
+          "wall_seconds": 30.228115599999
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 31.144,
+          "native_decode_seconds": 21.964,
+          "native_prefill_seconds": 9.18,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 274587648,
+          "wall_seconds": 31.17645790000097
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 31.227,
+          "native_decode_seconds": 21.713,
+          "native_prefill_seconds": 9.514,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 274595840,
+          "wall_seconds": 31.25819119999869
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 27.567,
+          "native_decode_seconds": 18.674,
+          "native_prefill_seconds": 8.893,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 274575360,
+          "wall_seconds": 27.598997200000667
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 28.271,
+          "native_decode_seconds": 19.063,
+          "native_prefill_seconds": 9.208,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 274587648,
+          "wall_seconds": 28.305569500000274
+        }
+      ],
+      "name": "persistent_fused_pool2",
+      "scratch_policy": "persistent",
+      "summary": {
+        "native_cpu_seconds": {
+          "count": 5,
+          "mad": 1.0359999999999978,
+          "max": 31.227,
+          "median": 30.191000000000003,
+          "min": 27.567
+        },
+        "native_decode_seconds": {
+          "count": 5,
+          "mad": 0.7129999999999974,
+          "max": 21.964,
+          "median": 21.251,
+          "min": 18.674
+        },
+        "native_prefill_seconds": {
+          "count": 5,
+          "mad": 0.2400000000000002,
+          "max": 9.514,
+          "median": 9.18,
+          "min": 8.893
+        },
+        "sampled_peak_rss_bytes": {
+          "count": 5,
+          "mad": 8192.0,
+          "max": 274595840.0,
+          "median": 274587648.0,
+          "min": 274575360.0
+        },
+        "wall_seconds": {
+          "count": 5,
+          "mad": 1.030075599999691,
+          "max": 31.25819119999869,
+          "median": 30.228115599999,
+          "min": 27.598997200000667
+        }
+      },
+      "thread_policy": "pool",
+      "threads": 2,
+      "warmups": [
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "buffered",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "buffered",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 31.255000000000003,
+          "native_decode_seconds": 21.701,
+          "native_prefill_seconds": 9.554,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 274591744,
+          "wall_seconds": 31.29427929999838
+        }
+      ]
+    },
+    {
+      "command": [
+        "build\\qxqxf.exe",
+        "generate",
+        "--in",
+        "models\\Qwen3-30B-A3B-UD-IQ2_M.qxf",
+        "--tokenizer",
+        "models\\Qwen3-30B-A3B.qxt",
+        "--text-file",
+        "<temporary-Hello-prompt>",
+        "--max-tokens",
+        "2",
+        "--ctx",
+        "3",
+        "--io-backend",
+        "mmap",
+        "--scratch-policy",
+        "persistent",
+        "--kernel-policy",
+        "fused",
+        "--thread-policy",
+        "pool",
+        "--threads",
+        "2",
+        "--execution-profile"
+      ],
+      "io_backend": "mmap",
+      "kernel_policy": "fused",
+      "measured": [
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "mmap",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "mmap",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 25.272,
+          "native_decode_seconds": 17.326,
+          "native_prefill_seconds": 7.946,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 2531028992,
+          "wall_seconds": 25.505565000001297
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "mmap",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "mmap",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 25.288,
+          "native_decode_seconds": 17.122,
+          "native_prefill_seconds": 8.166,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 2531020800,
+          "wall_seconds": 25.518652799999472
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "mmap",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "mmap",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 25.314,
+          "native_decode_seconds": 17.266,
+          "native_prefill_seconds": 8.048,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 2531020800,
+          "wall_seconds": 25.56135749999885
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "mmap",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "mmap",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 26.744,
+          "native_decode_seconds": 18.648,
+          "native_prefill_seconds": 8.096,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 2531008512,
+          "wall_seconds": 26.99738670000079
+        },
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "mmap",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "mmap",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 26.607999999999997,
+          "native_decode_seconds": 17.671,
+          "native_prefill_seconds": 8.937,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 2531012608,
+          "wall_seconds": 26.862117199998465
+        }
+      ],
+      "name": "mmap_persistent_fused_pool2",
+      "scratch_policy": "persistent",
+      "summary": {
+        "native_cpu_seconds": {
+          "count": 5,
+          "mad": 0.04200000000000159,
+          "max": 26.744,
+          "median": 25.314,
+          "min": 25.272
+        },
+        "native_decode_seconds": {
+          "count": 5,
+          "mad": 0.20400000000000063,
+          "max": 18.648,
+          "median": 17.326,
+          "min": 17.122
+        },
+        "native_prefill_seconds": {
+          "count": 5,
+          "mad": 0.07000000000000028,
+          "max": 8.937,
+          "median": 8.096,
+          "min": 7.946
+        },
+        "sampled_peak_rss_bytes": {
+          "count": 5,
+          "mad": 8192.0,
+          "max": 2531028992.0,
+          "median": 2531020800.0,
+          "min": 2531008512.0
+        },
+        "wall_seconds": {
+          "count": 5,
+          "mad": 0.055792499997551204,
+          "max": 26.99738670000079,
+          "median": 25.56135749999885,
+          "min": 25.505565000001297
+        }
+      },
+      "thread_policy": "pool",
+      "threads": 2,
+      "warmups": [
+        {
+          "execution_profile": {
+            "baseline_final_head_dot_calls": 0,
+            "effective_io_backend": "mmap",
+            "effective_kernel_policy": "fused",
+            "effective_scratch_policy": "persistent",
+            "effective_thread_count": 2,
+            "effective_thread_policy": "pool",
+            "final_head_fallback_jobs": 0,
+            "final_head_parallel_jobs": 4,
+            "final_head_q6_k_blocks": 2430976,
+            "final_head_serial_jobs": 0,
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "fused_final_head_dot_calls": 2430976,
+            "requested_io_backend": "mmap",
+            "requested_kernel_policy": "fused",
+            "requested_scratch_policy": "persistent",
+            "requested_thread_count": 2,
+            "requested_thread_policy": "pool",
+            "sampled_steps": 2,
+            "scratch_growth_events": 1,
+            "scratch_peak_capacity_bytes": 65536,
+            "temporary_blocks_decoded": 0,
+            "temporary_bytes_materialized": 0,
+            "temporary_floats_materialized": 0,
+            "workers_used": 2
+          },
+          "native_cpu_seconds": 25.776,
+          "native_decode_seconds": 17.488,
+          "native_prefill_seconds": 8.288,
+          "output": {
+            "full_logits_checksums": [
+              "13347842135191822952",
+              "6249376751730758761"
+            ],
+            "generated_text": " I need",
+            "generated_token_ids": [
+              358,
+              1184
+            ]
+          },
+          "sampled_peak_rss_bytes": 2531028992,
+          "wall_seconds": 26.012805999998818
+        }
+      ]
+    }
+  ],
+  "claim_scope": "One pinned native CLI executable, QXF, QXT, prompt and four fixed CPU policy cells; not a general throughput claim or automatic default promotion.",
+  "decision": {
+    "candidates": [
+      {
+        "cell": "persistent_fused_serial1",
+        "combined_decode_mad_seconds": 0.26500000000000057,
+        "decode_gain_at_least_10_percent_and_beyond_combined_mad": false,
+        "decode_gain_ratio": -0.06038533834586467,
+        "decode_median_delta_seconds": -1.2850000000000001,
+        "recommend": false,
+        "rss_ratio_to_baseline": 1.0,
+        "rss_within_10_percent_ceiling": true
+      },
+      {
+        "cell": "persistent_fused_pool2",
+        "combined_decode_mad_seconds": 0.8469999999999978,
+        "decode_gain_at_least_10_percent_and_beyond_combined_mad": false,
+        "decode_gain_ratio": 0.001362781954887214,
+        "decode_median_delta_seconds": 0.028999999999999915,
+        "recommend": false,
+        "rss_ratio_to_baseline": 13.483105390185036,
+        "rss_within_10_percent_ceiling": false
+      },
+      {
+        "cell": "mmap_persistent_fused_pool2",
+        "combined_decode_mad_seconds": 0.33800000000000097,
+        "decode_gain_at_least_10_percent_and_beyond_combined_mad": true,
+        "decode_gain_ratio": 0.18580827067669176,
+        "decode_median_delta_seconds": 3.9540000000000006,
+        "recommend": false,
+        "rss_ratio_to_baseline": 124.28097345132744,
+        "rss_within_10_percent_ceiling": false
+      }
+    ],
+    "conclusion": "Negative results are valid; this benchmark never promotes defaults automatically.",
+    "default_promotion": false,
+    "predeclared_rule": {
+      "maximum_median_rss_ratio_to_baseline": 1.1,
+      "minimum_median_decode_gain_ratio": 0.1,
+      "must_exceed_combined_decode_mad": true,
+      "recommend_only_when_decode_and_rss_pass": true
+    },
+    "recommended_cells": [],
+    "status": "pass"
+  },
+  "fixed_contract": {
+    "activation": "f32",
+    "ctx": 3,
+    "global_timeout_seconds": 1800.0,
+    "kv": "int8",
+    "max_tokens": 2,
+    "measured_runs_per_cell": 5,
+    "per_run_timeout_seconds": 180.0,
+    "prompt": "Hello!",
+    "rss_sample_interval_seconds": 0.005,
+    "total_runs_including_warmups": 24,
+    "warmups_per_cell": 1
+  },
+  "measurement": "issue-82-native-cli-cpu-policy",
+  "output_equivalence": {
+    "baseline_output": {
+      "full_logits_checksums": [
+        "13347842135191822952",
+        "6249376751730758761"
+      ],
+      "generated_text": " I need",
+      "generated_token_ids": [
+        358,
+        1184
+      ]
+    },
+    "comparison": "exact",
+    "runs_compared_including_warmups": 24,
+    "status": "pass"
+  },
+  "phase_definitions": {
+    "native_cpu_seconds": "Sum of native prefill_seconds and decode_seconds; kept separate from end-to-end wall time.",
+    "native_decode_seconds": "Native CPU clock timer reported by qxqxf for generation decode; not wall/startup time.",
+    "native_prefill_seconds": "Native CPU clock timer reported by qxqxf for prompt prefill; not wall/startup time.",
+    "sampled_peak_rss_bytes": "Maximum process RSS sampled by psutil every 5 ms.",
+    "wall_seconds": "End-to-end process wall time including startup, model/tokenizer I/O, native compute, JSON output, and teardown."
+  },
+  "provenance": {
+    "model_qxf": {
+      "path": "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+      "sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+      "size_bytes": 10860081152
+    },
+    "native_inputs_post": {
+      "git_revision": "03052900b3aba00d9db62f32caacfbc2e14cdbeb",
+      "native_executable": {
+        "path": "build/qxqxf.exe",
+        "sha256": "9a5706bd15b988dd5ed36b8a58c11c5a1e3de479b0e224ee209b8ba85b985dc6",
+        "size_bytes": 643584
+      },
+      "source_files": [
+        {
+          "path": "build_msvc.bat",
+          "sha256": "3a9a7aece76a1a316a122e9fb72fdeb2771527798b55ac4a3bf56ff4eda282b8",
+          "size_bytes": 1892
+        },
+        {
+          "path": "include/qx_format.h",
+          "sha256": "28231e197612749de66d6e66393fd3dbbfdcfb55a0d415acac964845d5d6fddf",
+          "size_bytes": 18007
+        },
+        {
+          "path": "src/qx_format.c",
+          "sha256": "6906db4304e08eeab5e7a97753f0c5ad2a0d5ecb0b86e0329fd772a0bcc81c4b",
+          "size_bytes": 485038
+        },
+        {
+          "path": "src/qx_qxf_main.c",
+          "sha256": "92501175476b04bfbba2c01016878ed0f8f342d7cbfb29b423d0b4cf431e48e5",
+          "size_bytes": 119626
+        }
+      ],
+      "source_manifest_sha256": "41a554b8848b1cdb19dc7644b4a150991530f90c9fe4b33cd2903bed80ba628a"
+    },
+    "native_inputs_pre": {
+      "git_revision": "03052900b3aba00d9db62f32caacfbc2e14cdbeb",
+      "native_executable": {
+        "path": "build/qxqxf.exe",
+        "sha256": "9a5706bd15b988dd5ed36b8a58c11c5a1e3de479b0e224ee209b8ba85b985dc6",
+        "size_bytes": 643584
+      },
+      "source_files": [
+        {
+          "path": "build_msvc.bat",
+          "sha256": "3a9a7aece76a1a316a122e9fb72fdeb2771527798b55ac4a3bf56ff4eda282b8",
+          "size_bytes": 1892
+        },
+        {
+          "path": "include/qx_format.h",
+          "sha256": "28231e197612749de66d6e66393fd3dbbfdcfb55a0d415acac964845d5d6fddf",
+          "size_bytes": 18007
+        },
+        {
+          "path": "src/qx_format.c",
+          "sha256": "6906db4304e08eeab5e7a97753f0c5ad2a0d5ecb0b86e0329fd772a0bcc81c4b",
+          "size_bytes": 485038
+        },
+        {
+          "path": "src/qx_qxf_main.c",
+          "sha256": "92501175476b04bfbba2c01016878ed0f8f342d7cbfb29b423d0b4cf431e48e5",
+          "size_bytes": 119626
+        }
+      ],
+      "source_manifest_sha256": "41a554b8848b1cdb19dc7644b4a150991530f90c9fe4b33cd2903bed80ba628a"
+    },
+    "platform": {
+      "machine": "AMD64",
+      "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+      "python": "3.11.15",
+      "release": "10",
+      "system": "Windows"
+    },
+    "prompt": {
+      "bytes": 6,
+      "text": "Hello!",
+      "utf8_sha256": "334d016f755cd6dc58c53a86e183882f8ec14f52fb05345887c8a5edd42c87b7"
+    },
+    "psutil_version": "7.2.2",
+    "tokenizer_qxt": {
+      "path": "models/Qwen3-30B-A3B.qxt",
+      "sha256": "8ec26e5ae058b271c0e17ee28aea3cf4d2b9ae9a4cd8f68f7aac81e9380761c6",
+      "size_bytes": 5168466
+    }
+  },
+  "reproducible_command": [
+    "python",
+    "scripts/native_cpu_policy_benchmark.py",
+    "--qx-exe",
+    "build/qxqxf.exe",
+    "--model",
+    "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+    "--tokenizer",
+    "models/Qwen3-30B-A3B.qxt",
+    "--output",
+    "wiki/evidence/issue-82-native-cpu-policy-report.json",
+    "--overwrite"
+  ],
+  "schema": 1,
+  "status": "pass"
+}

@@ -16,4 +16,6 @@ if errorlevel 1 exit /b %errorlevel%
 cl /nologo /std:c17 /O2 /W4 /D_CRT_SECURE_NO_WARNINGS /Iinclude src\qx_format.c src\qx_gguf.c src\qx_tokenizer.c tests\qxf_mmap_api_contract.c build\qx_avx2.obj /Fo:build\ /Fe:build\qxf_mmap_api_contract.exe /link /Brepro
 if errorlevel 1 exit /b %errorlevel%
 cl /nologo /std:c17 /O2 /W4 /D_CRT_SECURE_NO_WARNINGS /Iinclude src\qx_format.c src\qx_gguf.c src\qx_tokenizer.c tests\native_generation_api_contract.c build\qx_avx2.obj /Fo:build\ /Fe:build\native_generation_api_contract.exe /link /Brepro
+if errorlevel 1 exit /b %errorlevel%
+cl /nologo /std:c17 /O2 /W4 /D_CRT_SECURE_NO_WARNINGS /Iinclude src\qx_format.c src\qx_gguf.c src\qx_tokenizer.c tests\native_generation_policy_api_contract.c build\qx_avx2.obj /Fo:build\ /Fe:build\native_generation_policy_api_contract.exe /link /Brepro
 exit /b %errorlevel%

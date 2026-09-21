@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "artifact": "issue-82-timing-semantics-correction",
+  "status": "pass",
+  "derived_from": {
+    "path": "wiki/evidence/issue-82-native-cpu-policy-report.json",
+    "raw_sha256": "ed801a0debc96d71dc7ea634cca434b37be0ed10024f84bb3bcfa2e53bda4125",
+    "relationship": "authoritative semantic correction; the original report remains immutable"
+  },
+  "corrected_semantics": {
+    "timer": {
+      "implementation": "MSVC CRT clock() / CLOCKS_PER_SEC",
+      "meaning": "phase-local elapsed wall-clock duration",
+      "not_process_cpu_time": true,
+      "not_summed_worker_cpu_time": true,
+      "excludes_process_startup_outside_native_phase_boundaries": true,
+      "primary_source_url": "https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/clock?view=msvc-170"
+    },
+    "aliases": {
+      "native_cpu_seconds": "native_phase_elapsed_seconds",
+      "native_prefill_seconds": "native_prefill_elapsed_seconds",
+      "native_decode_seconds": "native_decode_elapsed_seconds"
+    },
+    "phases": {
+      "prefill": "Processes every prompt token except the final prompt token.",
+      "decode": "Processes the final prompt token to produce the first generated token, then processes each subsequent generated-token input to produce the next output."
+    }
+  },
+  "measurement_integrity": {
+    "measured_values_modified": false,
+    "summaries_modified": false,
+    "status_modified": false,
+    "decisions_modified": false,
+    "recommended_cells": [],
+    "default_promotion": false
+  },
+  "postrun_audit": {
+    "timing": "current post-run audit; these hashes were observed after measurement and are not represented as pre-measurement frozen inputs",
+    "benchmark_script": {
+      "path": "scripts/native_cpu_policy_benchmark.py",
+      "raw_sha256": "231ba5035675334180dc6b493303b12200a354a24a1ccc9033990a98e6fcf8b6"
+    },
+    "tests": [
+      {
+        "path": "tests/test_native_cpu_policy_benchmark.py",
+        "raw_sha256": "f4cb25319f1b184da6702444e45e560493578f288d04a48cf206b7f0a5ecc433"
+      },
+      {
+        "path": "tests/test_issue82_timing_semantics.py",
+        "raw_sha256": "131d77803ac5773bad1662c1684c489ea427b1a2d81e3b5cedc6b2932def21ee"
+      }
+    ],
+    "parent_native_mandatory_test_evidence": {
+      "command_argv": ["python", "-m", "pytest", "-q"],
+      "result": "267 passed",
+      "elapsed_seconds": 172.14,
+      "source": "parent-provided completed run evidence; not rerun by this documentary correction"
+    },
+    "native_source_representations": [
+      {"path": "build_msvc.bat", "worktree_representation": "CRLF", "raw_sha256": "3a9a7aece76a1a316a122e9fb72fdeb2771527798b55ac4a3bf56ff4eda282b8", "normalized_lf_sha256": "008708a019b6210c9598e611f090a5035d1638eb70b238395f41ae570cd5d7b8"},
+      {"path": "include/qx_format.h", "worktree_representation": "CRLF", "raw_sha256": "28231e197612749de66d6e66393fd3dbbfdcfb55a0d415acac964845d5d6fddf", "normalized_lf_sha256": "f19c3dac67ae610ffac9ab59a783bc0983644eca0e74962f7a2bdff0a1e88620"},
+      {"path": "src/qx_format.c", "worktree_representation": "CRLF", "raw_sha256": "6906db4304e08eeab5e7a97753f0c5ad2a0d5ecb0b86e0329fd772a0bcc81c4b", "normalized_lf_sha256": "9213d57c5635e248e0bc658987034329ab13a70b9ba369ae602d1116aa651d50"},
+      {"path": "src/qx_qxf_main.c", "worktree_representation": "CRLF", "raw_sha256": "92501175476b04bfbba2c01016878ed0f8f342d7cbfb29b423d0b4cf431e48e5", "normalized_lf_sha256": "1ae36d8a5caf5a6db80824484c996cb7d35403126586bf6c1f8e649836785e36"}
+    ],
+    "git_index": {
+      "staging_performed": false,
+      "index_hashes_recorded": false,
+      "reason": "No staging was performed for this correction; no Git-index hashes are claimed."
+    }
+  },
+  "verification_scope": {
+    "test_kind": "documentary semantics and integrity",
+    "native_timer_runtime_verified": false,
+    "runtime_verification_claim": "none"
+  }
+}

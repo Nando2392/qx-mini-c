@@ -1,7 +1,7 @@
 ---
 title: Optimization Priorities
 created: 2026-08-17
-updated: 2026-09-19
+updated: 2026-09-21
 type: comparison
 tags: [performance, cpu, cuda, memory, roadmap]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -67,7 +67,8 @@ confidence: medium
 | 53 | fixed-KV continuation residual replay | Issue #78 fija snapshot F32 de token 1000 y reanuda en layer 2 con residual F32/Q8_K exacto | 2/2 controles exactos; Q8_K conserva `1318` con residual F32; siguiente frontera layer-2 output/layer-3 input |
 | 54 | layer-3 fixed-KV residual replay | Issue #79 inyecta output F32 exacto de layer 2 al iniciar layer 3 | controles exactos; retiene `1318`; IDs ordenados difieren de ambos baselines desde layer 3; 0/2 thresholds |
 | 55 | layer-3 fixed-input attention/MoE seams | Issue #80 compara F32/Q8_K con residual y KV fijos, y repite MoE con el mismo `ffn_input` | CLOSED `b0c4019`; CI `35152297016` PASS; interaction case-local, sin promoción |
-| 56 | canonical native CPU generation | Issue #81 añade CLI prompt-text/QXT/JSON y API C sobre el loop compartido de 48 layers F32/INT8-KV | gates locales verificados, release/commit/CI pendientes; presupuesto forward <=64 y <=ctx; sin CUDA, 4K soak ni paridad global |
+| 56 | canonical native CPU generation | Issue #81 añade CLI prompt-text/QXT/JSON y API C sobre el loop compartido de 48 layers F32/INT8-KV | CLOSED `0305290`; CI `35412907586` PASS; presupuesto forward <=64 y <=ctx; sin CUDA, 4K soak ni paridad global |
+| 57 | measured native CPU policy matrix | Issue #82 mide policies opt-in de I/O/scratch/final-head kernel/threading sin cambiar defaults ni API compatible | 24/24 outputs exactos; `recommended_cells=[]`; release pendiente, sin promoción automática |
 
 ## Estado tras el hardening report-level
 
@@ -89,7 +90,20 @@ Issue #79 completa esa inyección al iniciar layer 3 bajo el mismo snapshot INT8
 
 Issue #80 cerró en `b0c4019b493a2817b4c9d2219b917783266c77f9`; CI `35152297016` pasó. Attention cambia la entrada FFN entre modalidades (`max_abs 0.00958681`, RMSE `0.00130100`) y el routing integrado termina en `89` para F32 y `22` para Q8_K. Con el `ffn_input` F32 idéntico, ambos modos recuperan los mismos ocho IDs terminando en `89`, mientras MoE/output de layer aún difieren (`max_abs 0.00210665`, RMSE `0.000659551`). Los bridges independientes `integrated_double` son byte-exactos y opt-in; `legacy_f32` sigue default. Es interacción case-local, no bug de kernel, paridad global ni autorización para promover defaults.
 
-Issue #81 convierte el loop ya validado en una superficie de generación CPU canónica sin añadir un backend nuevo: CLI desde texto con tokenizer QXT ligado y salida JSON, más API C compartida. El gate real reproduce `Hello!` → `[358,1184]`; el API controla EOS en primer/segundo token o lo deshabilita con `-1`. El presupuesto forward es `prompt_count + max_tokens - 1 <= 64` y `<= ctx`, con `ctx <= 4096`. Esto prioriza una interfaz reproducible de inferencia antes de optimizar: no prueba throughput, forwarding por counters, paridad global, CUDA ni una corrida/quality/soak 4K. Implementación y gates locales están verificados; release, commit y CI siguen pendientes. Evidencia: `wiki/evidence/issue-81-native-generation-report.json`.
+Issue #81 convierte el loop ya validado en una superficie de generación CPU canónica sin añadir un backend nuevo: CLI desde texto con tokenizer QXT ligado y salida JSON, más API C compartida. El gate real reproduce `Hello!` → `[358,1184]`; el API controla EOS en primer/segundo token o lo deshabilita con `-1`. El presupuesto forward es `prompt_count + max_tokens - 1 <= 64` y `<= ctx`, con `ctx <= 4096`. Esto prioriza una interfaz reproducible de inferencia antes de optimizar: no prueba throughput, forwarding por counters, paridad global, CUDA ni una corrida/quality/soak 4K. Issue #81 está CLOSED en `0305290b3aba00d9db62f32caacfbc2e14cdbeb`; CI `35412907586` pasó. Evidencia: `wiki/evidence/issue-81-native-generation-report.json`.
+
+Issue #82 mide la superficie CPU nativa real con defaults preservados (`buffered`/`ephemeral`/`baseline`/`serial`/1) y políticas opt-in, más `--execution-profile`; el JSON default y la API C permanecen compatibles. Fusion y pool sólo cubren el final head, no attention/MoE. El reporte verificado (`SHA-256 ed801a0debc96d71dc7ea634cca434b37be0ed10024f84bb3bcfa2e53bda4125`) contiene 24 corridas reales y exactitud de IDs, texto y ambos checksums full-logit en todas las celdas.
+
+| Celda | Decode wall elapsed de fase MSVC, mediana ± MAD (s) | Wall E2E mediana ± MAD (s) | RSS muestreado mediana ± MAD (MiB) |
+|---|---:|---:|---:|
+| `baseline` | 21.280 ± 0.134 | 30.360 ± 0.173 | 19.422 ± 0.000 |
+| `persistent_fused_serial1` | 22.565 ± 0.131 | 31.781 ± 0.084 | 19.422 ± 0.000 |
+| `persistent_fused_pool2` | 21.251 ± 0.713 | 30.228 ± 1.030 | 261.867 ± 0.008 |
+| `mmap_persistent_fused_pool2` | 17.326 ± 0.204 | 25.561 ± 0.056 | 2413.770 ± 0.008 |
+
+La decisión exigía simultáneamente >=10% de ganancia decode más allá del MAD combinado y RSS <=110% del baseline. Ninguna celda pasa ambos gates: `recommended_cells=[]`; no cambia ningún default. mmap+fused+pool muestra ~18.58% menos mediana decode, pero ~124.28× RSS y por ello no se recomienda. RSS incluye páginas file-backed mmap, no representa heap ni RAM total. En MSVC, `clock()` mide wall elapsed dentro de la fase, no CPU de proceso ni CPU acumulado de workers. Prefill excluye el último token del prompt; decode empieza procesándolo para producir el primer output y continúa con inputs generados. #82 está implementado/medido localmente y release-pending. El reporte raw permanece inmutable; [`issue-82-timing-semantics.json`](../evidence/issue-82-timing-semantics.json) es la corrección semántica autoritativa y enlaza la fuente primaria de Microsoft.
+
+El siguiente milestone de capacidad es deliberadamente finito: validar 128 y después 256 posiciones antes de un gate real 4K con RSS/calidad/soak. CUDA queda para una etapa posterior. Un resultado negativo no dispara un bisect automático ni autoriza otra optimización por inercia.
 
 ## No priorizar todavía
 
@@ -98,6 +112,8 @@ Issue #81 convierte el loop ya validado en una superficie de generación CPU can
 - KV 2-bit a contexto 4K: ahorro limitado frente al gap escalar actual.
 - Persistent kernels/PTX antes de Nsight.
 - Promover límites de admisión `ctx <= 4096` a claims de cobertura 4K sin corrida, quality sweep y soak reales.
+- Promover mmap+fused+pool: su decode mejora en #82, pero falla por ~124.28× RSS baseline.
+- Abrir automáticamente otro bisect de políticas porque `recommended_cells` quedó vacío.
 
 El kernel scalar `IQ4_XS × Q8_K` ya existe como modo `q8_k_compat` y no pasa a default. El baseline reproducible [[cpu-inference-baseline]] preserva el A/B F32/Q8_K y separa startup, prefill, decode, total y RSS: en el slice fijado observa `4.76489×` en prefill, `3.77551×` en decode y `3.98929×` total. F32 selecciona `[358,1184]` y Q8_K `[358,614]`; por tanto no existe equivalencia cross-mode ni paridad global. Antes de SIMD/threading, mantener este gate fail-closed y exigir causalidad separada para cualquier cambio de kernel. Véase [[f32-vs-q8k-activation]].
 
