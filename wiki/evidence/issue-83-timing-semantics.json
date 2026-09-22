@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "artifact": "issue-83-timing-semantics-correction",
+  "status": "pass",
+  "derived_from": {
+    "path": "wiki/evidence/issue-83-native-capacity-report.json",
+    "raw_sha256": "4fedd8cdf44496491e92a288304c5889b9f7a4634997d8892002158fe47ef91d",
+    "relationship": "authoritative semantic correction; the original report remains immutable"
+  },
+  "corrected_semantics": {
+    "timer": {
+      "implementation": "MSVC CRT clock() / CLOCKS_PER_SEC",
+      "meaning": "phase-local elapsed wall-clock duration",
+      "not_process_cpu_time": true,
+      "not_summed_worker_cpu_time": true,
+      "primary_source_url": "https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/clock?view=msvc-170"
+    },
+    "aliases": {
+      "native_cpu_seconds": "native_phase_elapsed_seconds",
+      "prefill_seconds": "native_prefill_elapsed_seconds",
+      "decode_seconds": "native_decode_elapsed_seconds"
+    },
+    "phases": {
+      "prefill": "Processes every prompt token except the final prompt token.",
+      "decode": "Processes the final prompt token to produce the first generated token, then processes each subsequent generated-token input to produce the next output."
+    },
+    "capacity_counters": {
+      "meaning": "Counts consumed forward positions partitioned into prompt and generated-token inputs.",
+      "semantic_last_prompt_token_influence_proven": false
+    }
+  },
+  "measured_cases": [
+    {
+      "actual_forward_positions": 128,
+      "prompt_forward_positions": 127,
+      "generated_input_forward_positions": 1,
+      "end_to_end_wall_seconds": 1089.5881068,
+      "end_to_end_wall_minutes": 18.159802,
+      "sampled_peak_rss_bytes": 25899008,
+      "sampled_peak_rss_mib": 24.699,
+      "generated_token_ids": [1124, 264],
+      "generated_text": " \\ a"
+    },
+    {
+      "actual_forward_positions": 256,
+      "prompt_forward_positions": 255,
+      "generated_input_forward_positions": 1,
+      "end_to_end_wall_seconds": 2432.6340347,
+      "end_to_end_wall_minutes": 40.543901,
+      "sampled_peak_rss_bytes": 30957568,
+      "sampled_peak_rss_mib": 29.523,
+      "generated_token_ids": [1124, 264],
+      "generated_text": " \\ a"
+    }
+  ],
+  "measurement_integrity": {
+    "measured_values_modified": false,
+    "raw_report_modified": false,
+    "native_inputs_pre_post_equal": true,
+    "runs_per_capacity": 1,
+    "throughput_generalization": false,
+    "meaningful_quality_claim": false,
+    "default_cli_json_changed": false,
+    "capacity_profile_opt_in": true
+  },
+  "verification_scope": {
+    "actually_tested_forward_positions": [128, 256],
+    "compatibility_api_position_limit": 64,
+    "caller_buffer_admission_limit": 4096,
+    "actual_4k_run_verified": false,
+    "quality_sweep_verified": false,
+    "soak_or_thermal_verified": false,
+    "cuda_verified": false
+  }
+}

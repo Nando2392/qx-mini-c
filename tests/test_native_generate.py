@@ -103,7 +103,7 @@ def run_generate(command: list[str]) -> dict:
     ("flag", "value"),
     [
         ("--max-tokens", "0"),
-        ("--max-tokens", "65"),
+        ("--max-tokens", "4097"),
         ("--max-tokens", "-1"),
         ("--max-tokens", "4294967296"),
         ("--max-tokens", "1junk"),
@@ -207,7 +207,7 @@ def test_generate_context_rejection_precedes_model_io(
     assert "failed to open" not in completed.stderr
 
 
-def test_generate_enforces_64_forward_position_boundary_before_model_io(
+def test_generate_accepts_65_tokens_before_model_io(
     real_native_assets: tuple[Path, Path, Path], tmp_path: Path
 ):
     executable, _, tokenizer = real_native_assets
@@ -215,27 +215,18 @@ def test_generate_enforces_64_forward_position_boundary_before_model_io(
     prompt.write_text("Hello!", encoding="utf-8", newline="")
     missing_model = tmp_path / "missing-model.qxf"
 
-    exact = subprocess.run(
-        real_generate_command(executable, missing_model, tokenizer, prompt, max_tokens=63, ctx=64),
-        cwd=ROOT,
-        capture_output=True,
-        encoding="utf-8",
-        errors="strict",
-    )
-    overflow = subprocess.run(
-        real_generate_command(executable, missing_model, tokenizer, prompt, max_tokens=64, ctx=65),
+    completed = subprocess.run(
+        real_generate_command(executable, missing_model, tokenizer, prompt, max_tokens=65, ctx=66),
         cwd=ROOT,
         capture_output=True,
         encoding="utf-8",
         errors="strict",
     )
 
-    assert exact.returncode == 1
-    assert "No such file or directory" in exact.stderr
-    assert "64 forward positions" not in exact.stderr
-    assert overflow.returncode == 2
-    assert "require more than 64 forward positions" in overflow.stderr
-    assert "No such file or directory" not in overflow.stderr
+    assert completed.returncode == 1
+    assert "invalid --max-tokens" not in completed.stderr
+    assert "64 forward positions" not in completed.stderr
+    assert "failed to open" in completed.stderr or "No such file or directory" in completed.stderr
 
 
 def test_generate_real_hello_is_deterministic_qxt_decoded_and_exact_context_fit(

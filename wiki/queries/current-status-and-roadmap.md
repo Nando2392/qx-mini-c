@@ -72,6 +72,8 @@ generación CPU nativa #81: CLOSED `0305290`; CI `35412907586` PASS; CLI texto�
 → #81 no implica paridad global, CUDA, cobertura/soak 4K, throughput ni release readiness
 políticas CPU nativas #82: implementación local y medición real completas; 24/24 outputs exactos; release pendiente
 → `recommended_cells=[]`: ninguna celda satisface simultáneamente >=10% decode y RSS <=110%; defaults sin cambios
+capacidad CPU nativa #83: medición local real de 128 y 256 posiciones; una corrida por capacidad; release pendiente
+→ API compatible conserva 64 posiciones; API caller-buffer admite <=4096, pero sólo 128/256 tienen ejecución real
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -188,7 +190,7 @@ Issue #80 cerró y se publicó en `b0c4019b493a2817b4c9d2219b917783266c77f9`; Gi
 
 Issue #81 añade la ruta canónica de generación CPU nativa: `qxqxf generate` recibe QXF, QXT y prompt de texto, tokeniza, ejecuta el loop compartido de 48 layers con activación F32 y KV INT8, y devuelve JSON. La API C `qx_run_native_generation(...)` usa ese mismo loop. El gate real fija `Hello!` → prompt IDs `[9707,0]` → outputs reproducibles `[358,1184]`; controles de API paran en el primer token con EOS `358`, en el segundo con EOS `1184`, y no paran por EOS con `-1`. El binding rechaza vocabulario, fingerprint de payload, BOS, EOS o flags no canónicos antes de leer el modelo.
 
-El presupuesto soportado exige `prompt_count + max_tokens - 1 <= 64` y `<= ctx`, con `ctx` entre 1 y 4096. Ese límite de argumento no es una corrida 4K ni cierra calidad KV/soak. El fixture de UTF-8 partido prueba sólo el decoder del tokenizer, no generación E2E. No hay counters para demostrar forwarding del número de pasos y no se hace ese claim. Issue #81 cerró en `0305290b3aba00d9db62f32caacfbc2e14cdbeb`; CI `35412907586` pasó. Evidencia y comandos: `wiki/evidence/issue-81-native-generation-report.json`.
+La API compatible `qx_run_native_generation(...)` conserva su contrato de resultado de 64 posiciones; la API caller-buffer `qx_run_native_generation_into_with_options(...)` admite presupuesto forward de hasta 4096 y `<= ctx`. Ese límite de admisión no es una corrida 4K ni cierra calidad KV/soak. El fixture de UTF-8 partido prueba sólo el decoder del tokenizer, no generación E2E. Issue #81 cerró en `0305290b3aba00d9db62f32caacfbc2e14cdbeb`; CI `35412907586` pasó. Evidencia y comandos: `wiki/evidence/issue-81-native-generation-report.json`.
 
 Issue #82 mantiene sin cambios el JSON default y la API C compatible, y añade políticas opt-in de I/O, scratch, kernel y threading junto con `--execution-profile`. Fusión y pool se limitan al final head; no paralelizan attention ni MoE. El reporte real verificado (`SHA-256 ed801a0debc96d71dc7ea634cca434b37be0ed10024f84bb3bcfa2e53bda4125`) ejecuta 24 procesos: cuatro warmups y cinco mediciones por cada una de cuatro celdas. Los 24 producen exactamente IDs `[358,1184]`, texto `" I need"` y checksums full-logit `[13347842135191822952,6249376751730758761]`.
 
@@ -199,14 +201,22 @@ Issue #82 mantiene sin cambios el JSON default y la API C compatible, y añade p
 | `persistent_fused_pool2` | 21.251 ± 0.713 | 30.228 ± 1.030 | 261.867 ± 0.008 |
 | `mmap_persistent_fused_pool2` | 17.326 ± 0.204 | 25.561 ± 0.056 | 2413.770 ± 0.008 |
 
-La regla predeclarada exige conjuntamente ganancia decode >=10% más allá del MAD combinado y RSS <=110% del baseline. Ningún candidato pasa: `recommended_cells=[]` y no se promueve default. mmap+fused+pool reduce la mediana decode aproximadamente 18.58%, pero alcanza ~124.28× el RSS baseline. El RSS del proceso incluye páginas file-backed del mmap: no es heap ni RAM total del sistema. En MSVC, `clock()` mide wall elapsed dentro de los límites de fase, no CPU de proceso ni CPU acumulado de workers. Prefill excluye el último token del prompt; decode empieza procesándolo para producir el primer output y continúa con inputs generados. #82 está implementado y medido localmente, pero release sigue pendiente. El reporte raw permanece inmutable; la corrección semántica autoritativa es [`issue-82-timing-semantics.json`](../evidence/issue-82-timing-semantics.json), con enlace a la fuente primaria de Microsoft.
+La regla predeclarada exige conjuntamente ganancia decode >=10% más allá del MAD combinado y RSS <=110% del baseline. Ningún candidato pasa: `recommended_cells=[]` y no se promueve default. mmap+fused+pool reduce la mediana decode aproximadamente 18.58%, pero alcanza ~124.28× el RSS baseline. El RSS del proceso incluye páginas file-backed del mmap: no es heap ni RAM total del sistema. En MSVC, `clock()` mide wall elapsed dentro de los límites de fase, no CPU de proceso ni CPU acumulado de workers. Prefill excluye el último token del prompt; decode empieza procesándolo para producir el primer output y continúa con inputs generados. #82 está CLOSED en `3c8a634`; CI `35652844078` pasó. El reporte raw permanece inmutable; la corrección semántica autoritativa es [`issue-82-timing-semantics.json`](../evidence/issue-82-timing-semantics.json), con enlace a la fuente primaria de Microsoft.
+
+Issue #83 añade `--capacity-profile` opt-in sin cambiar el JSON default, mantiene la API compatible de 64 posiciones y añade una API caller-buffer con admisión `<=4096`. El reporte real inmutable (`SHA-256 4fedd8cdf44496491e92a288304c5889b9f7a4634997d8892002158fe47ef91d`) sólo mide una corrida en 128 posiciones (127 prompt + 1 input generado) y una en 256 (255 + 1). Ambas producen IDs `[1124,264]` y texto `" \\ a"` desde prompts sintéticos de `a` repetida; no hay claim de calidad significativo.
+
+| Posiciones reales | Prompt + input generado | Wall E2E | RSS pico muestreado |
+|---:|---:|---:|---:|
+| 128 | 127 + 1 | 18.159802 min | 24.699 MiB |
+| 256 | 255 + 1 | 40.543901 min | 29.523 MiB |
+
+Los counters demuestran posiciones consumidas, no influencia semántica del último token. Los inputs nativos congelados pre/post son iguales. `native_cpu_seconds` vuelve a estar mal rotulado: bajo MSVC `clock()` mide wall elapsed de fase; prefill excluye el último prompt token y decode lo incluye. El reporte raw no se modifica; [`issue-83-timing-semantics.json`](../evidence/issue-83-timing-semantics.json) corrige la semántica. Una sola corrida por capacidad no permite generalizar throughput. #83 está medido localmente y release-pending; 4K real, quality sweep, soak/térmica y CUDA siguen sin verificar.
 
 ## Después
 
-1. Publicar Issue #82 sin cambiar defaults; su resultado negativo no abre un bisect automático de políticas.
-2. Ampliar el presupuesto real de posiciones con un milestone finito de 128 y luego 256, cada uno con outputs/provenance/RSS reproducibles.
-3. Sólo después, ejecutar un gate 4K real con calidad KV y soak explícitos; el límite de admisión 4096 no cuenta como cobertura.
-4. Diseñar CUDA híbrido más tarde, tras cerrar capacidad CPU y medir transferencias/residency; #81/#82 son CPU-only.
+1. Publicar Issue #83 sin cambiar defaults; #82 ya está cerrado en `3c8a634` con CI verde.
+2. Ejecutar un gate 4K real con calidad KV, soak/térmica y RSS explícitos; admisión 4096 no cuenta como cobertura.
+3. Diseñar CUDA híbrido más tarde, tras cerrar capacidad CPU y medir transferencias/residency; #81–#83 son CPU-only.
 
 ## Riesgos
 

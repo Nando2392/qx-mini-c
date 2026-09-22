@@ -67,7 +67,7 @@ build/qxqxf.exe generate --in models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer mode
 
 The parent-verified real-model acceptance result is prompt IDs `[9707, 0]` and deterministic generated IDs `[358, 1184]`, decoded through the same QXT sidecar. The public C API `qx_run_native_generation(...)` exposes the shared loop without routing generation through Python. Controlled API runs stop on token `358` when it is configured as EOS, stop on the second token for EOS `1184`, and return both tokens with `eos_token_id=-1`.
 
-Supported limits are explicit: `max_tokens` and prompt count are non-zero, `ctx` is `1..4096`, and the forward-position budget is `prompt_count + max_tokens - 1 <= 64` and `<= ctx`. The CLI binds vocabulary size, payload fingerprint, BOS, EOS and flags to the canonical Qwen3-30B-A3B QXT before model I/O. The `ctx <= 4096` argument boundary is not evidence of an actual 4K run, quality sweep or soak closure. The split-UTF-8 case is a tokenizer decoder fixture only, not generate end-to-end coverage. No forwarded-step counter is exposed, so step-count forwarding is not claimed from counters.
+Supported limits are explicit: `max_tokens` and prompt count are non-zero and `ctx` is `1..4096`. The compatibility API `qx_run_native_generation(...)` retains its 64-position result contract; the caller-buffer API `qx_run_native_generation_into_with_options(...)` admits a forward-position budget up to 4096 and `<= ctx`. Admission to 4096 is not evidence of an actual 4K run, quality sweep or soak closure. The CLI binds vocabulary size, payload fingerprint, BOS, EOS and flags to the canonical Qwen3-30B-A3B QXT before model I/O. The split-UTF-8 case is a tokenizer decoder fixture only, not generate end-to-end coverage.
 
 Issue #81 is closed in commit `0305290b3aba00d9db62f32caacfbc2e14cdbeb`; GitHub Actions run `35412907586` passed. This slice does not establish global model/logit parity, CUDA support, 4K runtime coverage or sustained throughput. Reproduction commands, exact gates and point-in-time source/test/executable hashes are in `wiki/evidence/issue-81-native-generation-report.json`.
 
@@ -86,7 +86,20 @@ The parent-verified real-model report has SHA-256 `ed801a0debc96d71dc7ea634cca43
 
 The predeclared recommendation required both at least 10% median decode gain beyond combined MAD and median RSS no greater than 110% of baseline. `recommended_cells` is therefore empty. The mmap combination lowers the median native decode phase by about 18.58%, but sampled RSS is about 124.28× baseline, so it is explicitly **not** recommended and no default is promoted. Sampled process RSS includes file-backed mmap pages; it is not a heap-only measurement and not total system RAM. On MSVC, `clock()` measures phase-local elapsed wall time, not process CPU time or summed worker CPU time. Prefill excludes the final prompt token; decode starts by processing that token to produce the first output and then processes subsequent generated-token inputs. The immutable raw report remains at `wiki/evidence/issue-82-native-cpu-policy-report.json`; [`wiki/evidence/issue-82-timing-semantics.json`](wiki/evidence/issue-82-timing-semantics.json) is the authoritative semantic correction and links Microsoft's primary documentation.
 
-Issue #82 is implemented and measured locally but remains release-pending. The finite next capacity milestone is 128 and then 256 supported forward positions, followed by a separately gated real 4K run; CUDA comes later. A negative cell does not trigger an automatic policy bisect or another optimization issue.
+Issue #82 is CLOSED in commit `3c8a634`; GitHub Actions run `35652844078` passed. Its negative policy result did not trigger an automatic policy bisect or default promotion.
+
+## Native CPU capacity measurement (Issue #83)
+
+Issue #83 adds the opt-in `--capacity-profile` payload and the caller-buffer generation API while leaving default CLI JSON unchanged and retaining the 64-position compatibility API. The new path admits up to 4096 forward positions, but the parent-verified real-model evidence exercises only 128 and 256 positions. The immutable report is `wiki/evidence/issue-83-native-capacity-report.json` (SHA-256 `4fedd8cdf44496491e92a288304c5889b9f7a4634997d8892002158fe47ef91d`).
+
+| Actual forward positions | Prompt + generated-input positions | End-to-end wall | Sampled peak RSS |
+|---:|---:|---:|---:|
+| 128 | 127 + 1 | 18.159802 min | 24.699 MiB |
+| 256 | 255 + 1 | 40.543901 min | 29.523 MiB |
+
+Each row is one Windows/MSVC CPU run with a repeated-`a` prompt. Both runs emitted IDs `[1124,264]` and decoded text `" \\ a"`; that synthetic output supports no meaningful quality claim. The capacity counters establish consumed prompt/generated-input positions only; they do not prove semantic influence of the final prompt token. All frozen native executable/source inputs recorded before and after measurement are equal.
+
+The report field `native_cpu_seconds` is again mislabeled: MSVC `clock()` is phase-local elapsed wall time, not process CPU time or summed worker CPU time. Prefill excludes the final prompt token; decode includes processing that token to produce the first output and then the generated-token input. The immutable raw report is not edited; [`wiki/evidence/issue-83-timing-semantics.json`](wiki/evidence/issue-83-timing-semantics.json) is the authoritative correction. With one run per capacity, these results do not support throughput generalization. A real 4K run, quality sweep, soak/thermal validation, and CUDA remain unverified. Issue #83 is measured locally and release-pending.
 
 ## Honest performance state
 
@@ -98,7 +111,7 @@ real one-token 48-layer state probe: ~8.50 s
 real one-token 48-layer + complete output head probe: ~8.35 s warm run
 ```
 
-The complete-head measurement includes final RMSNorm and all 151936 logits for one position. Issue #82 supersedes the statement that multi-token native execution was unmeasured, but its fixed two-token, one-prompt matrix is still not sustained conversational throughput and must not be reported as tok/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
+The complete-head measurement includes final RMSNorm and all 151936 logits for one position. Issues #82 and #83 supersede the statement that multi-token native execution was unmeasured, but their bounded cases are still not sustained conversational throughput and must not be reported as tok/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
 
 CUDA is planned but **not implemented**.
 

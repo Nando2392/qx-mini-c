@@ -157,8 +157,11 @@ int qx_dump_q8_k_activation_probe_summary(uint32_t values, const char *inject, F
 int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len);
 int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len);
 #define QX_NATIVE_GENERATION_MAX_TOKENS 64u
+#define QX_NATIVE_GENERATION_CAPACITY_MAX 4096u
 #define QX_NATIVE_GENERATION_OPTIONS_VERSION 1u
 #define QX_NATIVE_GENERATION_PROFILE_VERSION 1u
+#define QX_NATIVE_GENERATION_BUFFER_RESULT_VERSION 1u
+#define QX_NATIVE_GENERATION_BUFFER_PROFILE_VERSION 1u
 
 typedef enum qx_native_io_policy {
     QX_NATIVE_IO_BUFFERED = 0,
@@ -234,6 +237,53 @@ typedef struct qx_native_generation_result {
     double decode_seconds;
 } qx_native_generation_result;
 
+/* Caller-owned storage variant.  Initialize struct_size/version and provide
+ * token_ids/token_capacity before calling the corresponding entry point. */
+typedef struct qx_native_generation_buffer_result {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t *token_ids;
+    uint32_t token_capacity;
+    uint32_t token_count;
+    int stopped_on_eos;
+    uint32_t first_eos_output_index;
+    uint32_t executed_forward_steps;
+    uint32_t prompt_forward_steps;
+    uint32_t generated_input_forward_steps;
+    double prefill_seconds;
+    double decode_seconds;
+} qx_native_generation_buffer_result;
+
+typedef struct qx_native_generation_buffer_profile {
+    uint32_t struct_size;
+    uint32_t version;
+    qx_native_io_policy requested_io_backend;
+    qx_native_io_policy effective_io_backend;
+    qx_native_scratch_policy requested_scratch_policy;
+    qx_native_scratch_policy effective_scratch_policy;
+    qx_native_kernel_policy requested_kernel_policy;
+    qx_native_kernel_policy effective_kernel_policy;
+    qx_native_thread_policy requested_thread_policy;
+    qx_native_thread_policy effective_thread_policy;
+    uint32_t requested_thread_count;
+    uint32_t effective_thread_count;
+    uint32_t sampled_steps;
+    uint32_t workers_used;
+    uint64_t scratch_peak_capacity_bytes;
+    uint64_t scratch_growth_events;
+    uint64_t temporary_blocks_decoded;
+    uint64_t temporary_floats_materialized;
+    uint64_t temporary_bytes_materialized;
+    uint64_t fused_final_head_dot_calls;
+    uint64_t baseline_final_head_dot_calls;
+    uint64_t final_head_q6_k_blocks;
+    uint64_t final_head_parallel_jobs;
+    uint64_t final_head_serial_jobs;
+    uint64_t final_head_fallback_jobs;
+    uint64_t *full_logits_checksums;
+    uint32_t full_logits_checksums_capacity;
+} qx_native_generation_buffer_profile;
+
 /* Greedy native generation with the fixed 48-layer F32/INT8-KV runtime.
  * prompt_count and max_tokens must be non-zero; prompt_count + max_tokens - 1
  * must fit both ctx_tokens and QX_NATIVE_GENERATION_MAX_TOKENS. eos_token_id < 0
@@ -244,6 +294,10 @@ int qx_run_native_generation_with_options(const char *path, const uint32_t *prom
     uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id,
     const qx_native_generation_options *options, qx_native_generation_result *result,
     qx_native_generation_profile *profile, char *err, uint64_t err_len);
+int qx_run_native_generation_into_with_options(const char *path, const uint32_t *prompt_tokens,
+    uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id,
+    const qx_native_generation_options *options, qx_native_generation_buffer_result *result,
+    qx_native_generation_buffer_profile *profile, char *err, uint64_t err_len);
 int qx_dump_rope_gqa_golden_probe_summary(uint32_t tokens, uint32_t q_heads_run, uint32_t seed, FILE *out, char *err, uint64_t err_len);
 int qx_dump_real_qkv_golden_probe_summary(const char *path, uint32_t layer, uint32_t token_a, uint32_t token_b, uint32_t q_heads_run, uint32_t seed, int full_moe, FILE *out, char *err, uint64_t err_len);
 int qx_dump_attention_stage_probe_summary(const char *path, uint32_t layer, const char *layer_input_path, const char *output_dir, const char *activation_mode, const char *kv_format, FILE *out, char *err, uint64_t err_len);
