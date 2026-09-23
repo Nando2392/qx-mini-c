@@ -1,0 +1,11 @@
+{
+  "computation_resume_supported": false,
+  "elapsed_seconds": 28809.358999999997,
+  "error": "native deadline exceeded",
+  "error_type": "RunGateError",
+  "heartbeat_interval_seconds": 10.0,
+  "peak_rss_bytes": 0,
+  "phase": "prepare",
+  "schema": "qx-issue84-native-cpu4k-v1",
+  "status": "failed"
+}

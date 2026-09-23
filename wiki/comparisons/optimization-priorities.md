@@ -70,6 +70,7 @@ confidence: medium
 | 56 | canonical native CPU generation | Issue #81 añade CLI prompt-text/QXT/JSON y API C sobre el loop compartido de 48 layers F32/INT8-KV | CLOSED `0305290`; CI `35412907586` PASS; presupuesto forward <=64 y <=ctx; sin CUDA, 4K soak ni paridad global |
 | 57 | measured native CPU policy matrix | Issue #82 mide policies opt-in de I/O/scratch/final-head kernel/threading sin cambiar defaults ni API compatible | CLOSED `3c8a634`; CI `35652844078` PASS; `recommended_cells=[]`; sin promoción automática |
 | 58 | finite native CPU capacity | Issue #83 añade caller-buffer y `--capacity-profile` opt-in; mide 128 y 256 posiciones | una corrida por capacidad; release pendiente; no throughput/quality/4K/soak/CUDA claim |
+| 59 | native CPU 4K acceptance outcome | Issue #84 ejecuta una corrida 4096-position sobre baseline #83; excede deadline nativo 8 h y sale 2 sin output/reporte | OPEN; gate NOT MET; RSS final/posiciones completadas desconocidos; no causalidad ni default promotion |
 
 ## Estado tras el hardening report-level
 
@@ -106,7 +107,11 @@ La decisión exigía simultáneamente >=10% de ganancia decode más allá del MA
 
 Issue #83 completa el milestone finito de capacidad con una corrida real de 128 posiciones (127 prompt + 1 input generado; 18.159802 min; 24.699 MiB RSS) y una de 256 (255 + 1; 40.543901 min; 29.523 MiB). Ambas emiten `[1124,264]` / `" \\ a"` desde prompts de `a` repetida, sin claim de calidad. Los counters prueban posiciones consumidas, no influencia semántica del último token. El reporte raw inmutable tiene SHA-256 `4fedd8cdf44496491e92a288304c5889b9f7a4634997d8892002158fe47ef91d`; todos los inputs congelados pre/post son iguales.
 
-`--capacity-profile` es opt-in y no cambia el JSON default. La API compatible queda en 64 posiciones; caller-buffer admite `<=4096`, pero sólo 128/256 se ejecutaron. `native_cpu_seconds` debe leerse como wall elapsed de fase MSVC: prefill excluye el último prompt token y decode lo incluye. La corrección autoritativa está en [`issue-83-timing-semantics.json`](../evidence/issue-83-timing-semantics.json). Una corrida por capacidad no generaliza throughput. #83 está medido localmente/release-pending; 4K real, quality sweep, soak/térmica y CUDA permanecen sin verificar.
+`--capacity-profile` es opt-in y no cambia el JSON default. La API compatible queda en 64 posiciones; caller-buffer admite `<=4096`, pero sólo 128/256 se ejecutaron. `native_cpu_seconds` debe leerse como wall elapsed de fase MSVC: prefill excluye el último prompt token y decode lo incluye. La corrección autoritativa está en [`issue-83-timing-semantics.json`](../evidence/issue-83-timing-semantics.json). Una corrida por capacidad no generaliza throughput. #83 está CLOSED en `ec4d2fd`; CI `35674122057` pasó.
+
+Issue #84 ejecutó el gate CPU de 4096 posiciones una vez sobre ese baseline. Excedió el deadline nativo de 28,800 s, salió `2` y no produjo stdout, stderr, reporte ni conteo de posiciones completadas: gate **NOT MET**, issue OPEN. El journal raw fue sobrescrito por el manejo de excepción post-experimento y conserva `prepare/failed`, pico `0` y 28809.359 s; por ello el RSS final es desconocido/null. Los 142.48 MiB observados por el padre a ~7 h 40 min son históricos y no finales. El timeout no prueba incapacidad 4K ni root cause de CPU compute. La evidencia hash-bound está en [`issue-84-cpu4k-outcome.json`](../evidence/issue-84-cpu4k-outcome.json).
+
+El fix posterior del runner sólo preserva journals terminales en futuras corridas (60 tests padre PASS, 3.81 s); no repara ni reescribe los spools históricos. La próxima prioridad propuesta es CUDA opt-in limitado al final head, manteniendo sin cambios todos los defaults CPU. CPU 4K sigue sin probarse, y resume nativo, quality sweep KV y soak/térmica permanecen diferidos.
 
 ## No priorizar todavía
 

@@ -72,8 +72,10 @@ generación CPU nativa #81: CLOSED `0305290`; CI `35412907586` PASS; CLI texto�
 → #81 no implica paridad global, CUDA, cobertura/soak 4K, throughput ni release readiness
 políticas CPU nativas #82: implementación local y medición real completas; 24/24 outputs exactos; release pendiente
 → `recommended_cells=[]`: ninguna celda satisface simultáneamente >=10% decode y RSS <=110%; defaults sin cambios
-capacidad CPU nativa #83: medición local real de 128 y 256 posiciones; una corrida por capacidad; release pendiente
+capacidad CPU nativa #83: CLOSED en `ec4d2fd`; CI `35674122057` PASS; medición real de 128 y 256 posiciones, una corrida por capacidad
 → API compatible conserva 64 posiciones; API caller-buffer admite <=4096, pero sólo 128/256 tienen ejecución real
+gate CPU 4K #84: OPEN; una corrida excedió el deadline nativo de 8 h y salió 2 sin output ni reporte; gate NOT MET
+→ RSS final y posiciones completadas desconocidos; 142.48 MiB a ~7 h 40 min es observación histórica no final
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -210,13 +212,17 @@ Issue #83 añade `--capacity-profile` opt-in sin cambiar el JSON default, mantie
 | 128 | 127 + 1 | 18.159802 min | 24.699 MiB |
 | 256 | 255 + 1 | 40.543901 min | 29.523 MiB |
 
-Los counters demuestran posiciones consumidas, no influencia semántica del último token. Los inputs nativos congelados pre/post son iguales. `native_cpu_seconds` vuelve a estar mal rotulado: bajo MSVC `clock()` mide wall elapsed de fase; prefill excluye el último prompt token y decode lo incluye. El reporte raw no se modifica; [`issue-83-timing-semantics.json`](../evidence/issue-83-timing-semantics.json) corrige la semántica. Una sola corrida por capacidad no permite generalizar throughput. #83 está medido localmente y release-pending; 4K real, quality sweep, soak/térmica y CUDA siguen sin verificar.
+Los counters demuestran posiciones consumidas, no influencia semántica del último token. Los inputs nativos congelados pre/post son iguales. `native_cpu_seconds` vuelve a estar mal rotulado: bajo MSVC `clock()` mide wall elapsed de fase; prefill excluye el último prompt token y decode lo incluye. El reporte raw no se modifica; [`issue-83-timing-semantics.json`](../evidence/issue-83-timing-semantics.json) corrige la semántica. Una sola corrida por capacidad no permite generalizar throughput. #83 está CLOSED en `ec4d2fd`; CI `35674122057` pasó.
+
+Issue #84 intentó una corrida CPU real de 4096 posiciones sobre ese baseline: 4095 tokens de prompt + un input generado, F32/INT8-KV y políticas CPU default. El proceso excedió el deadline nativo de 28,800 s, salió `2` y dejó stdout/stderr vacíos, sin reporte ni conteo de posiciones completadas. Por tanto #84 sigue OPEN y el gate 4K está **NOT MET**. El timeout no demuestra imposibilidad de capacidad 4K ni identifica CPU compute como root cause.
+
+El journal histórico fue sobrescrito por un bug post-experimento con `phase=prepare`, `status=failed`, `peak_rss_bytes=0` y `elapsed_seconds=28809.359`; no es una medición terminal nativa válida. RSS final queda desconocido (`null`). La observación padre de 142.48 MiB a ~7 h 40 min es sólo histórica/no final. [`issue-84-cpu4k-outcome.json`](../evidence/issue-84-cpu4k-outcome.json) conserva hashes y provenance de los spools raw inmutables. El runner ejecutado tenía SHA-256 `116212700099472958e0cbacc7cd433de0cdf93e7e16bf37dabb6b6e8fd25150`; el fix posterior/future-only que retiene journals terminales tiene SHA-256 `4bba43948f03d79b51b8e4a0503a84c12f796709de2f4d322bf3f8d6b2c12f6b` y 60 tests padre PASS en 3.81 s. No reescribe la preparación ni los journals originales.
 
 ## Después
 
-1. Publicar Issue #83 sin cambiar defaults; #82 ya está cerrado en `3c8a634` con CI verde.
-2. Ejecutar un gate 4K real con calidad KV, soak/térmica y RSS explícitos; admisión 4096 no cuenta como cobertura.
-3. Diseñar CUDA híbrido más tarde, tras cerrar capacidad CPU y medir transferencias/residency; #81–#83 son CPU-only.
+1. Proponer como siguiente slice un backend CUDA **opt-in sólo para el final head**, con provenance y equivalencia fail-closed; no cambiar silenciosamente ningún default CPU.
+2. Mantener CPU 4K como no probado: #84 no completó el gate. No repetir por inercia ni convertir el timeout en una conclusión causal.
+3. Mantener diferidos resume nativo, quality sweep KV y soak/térmica hasta que cada uno tenga runner y evidencia propios.
 
 ## Riesgos
 

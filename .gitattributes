@@ -2,3 +2,8 @@
 wiki/evidence/issue-82-native-cpu-policy-report.json text eol=lf
 # Preserve the raw-byte identity of the immutable Issue 83 capacity report.
 wiki/evidence/issue-83-native-capacity-report.json text eol=lf
+# Historical Issue 84 failure evidence is byte-bound, including empty spools.
+scripts/native_4k_acceptance.py text eol=lf
+wiki/evidence/issue-84-cpu4k-run-1/** -text
+wiki/evidence/issue-84-cpu4k-preflight/** -text
+wiki/evidence/issue-84-cpu4k-preflight-v2/** -text

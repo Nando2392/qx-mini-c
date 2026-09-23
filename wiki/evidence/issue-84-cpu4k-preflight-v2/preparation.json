@@ -1,0 +1,123 @@
+{
+  "computation_started": false,
+  "fixed_contract": {
+    "activation": "f32",
+    "ctx": 4096,
+    "heartbeat_seconds": 10.0,
+    "io_backend": "buffered",
+    "kernel_policy": "baseline",
+    "kv": "int8",
+    "max_tokens": 2,
+    "native_deadline_seconds": 28800,
+    "positions": 4096,
+    "prompt_tokens": 4095,
+    "rss_ceiling_bytes": 536870912,
+    "rss_sample_interval_seconds": 0.1,
+    "runs": 1,
+    "scratch_policy": "ephemeral",
+    "thread_policy": "serial",
+    "threads": 1
+  },
+  "inputs": {
+    "git_revision": "ec4d2fd90cff93e3003ba82ba1ca332021168902",
+    "model_qxf": {
+      "path": "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+      "sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+      "size_bytes": 10860081152
+    },
+    "native_executable": {
+      "path": "build/qxqxf.exe",
+      "sha256": "3f76a3271fb06c2db08b54d48111dc1f81895f9b8576ab85650b4d300735d566",
+      "size_bytes": 645632
+    },
+    "source_files": [
+      {
+        "path": "build_msvc.bat",
+        "sha256": "9ddb3eeb2ed926d2995ace4a2bd017020c7b0d9dc418b048d11c2ab96a5dcb02",
+        "size_bytes": 2181
+      },
+      {
+        "path": "include/qx_format.h",
+        "sha256": "5f3056861ee3b42f8f9cc1b6e98f27100ebb71103217c233da1123ae2471f91b",
+        "size_bytes": 20390
+      },
+      {
+        "path": "include/qx_tokenizer.h",
+        "sha256": "f4d2f4ce46bcda736680cecd3eba7ba1ce7d6003f37a66a4e783eb620f12764d",
+        "size_bytes": 2345
+      },
+      {
+        "path": "src/qx_format.c",
+        "sha256": "e44575f91a8971a3779a76591a17488e8c5c94236548e102f24442aa23583df2",
+        "size_bytes": 497125
+      },
+      {
+        "path": "src/qx_qxf_main.c",
+        "sha256": "d94c4315d0344635ad3387750fe4125aafef0434b68f729c684f68c53098ad8f",
+        "size_bytes": 121609
+      },
+      {
+        "path": "src/qx_tokenizer.c",
+        "sha256": "191da7e87ddd2c8392156479d0108ccd3b47c07ec6a720aa9a6d4f537907f987",
+        "size_bytes": 37574
+      },
+      {
+        "path": "scripts/native_capacity_acceptance.py",
+        "sha256": "6f6aa698fed141e1fc851265bc152e39da8df508aaa0f0e423e64aba9dd78f44",
+        "size_bytes": 24069
+      },
+      {
+        "path": "scripts/native_4k_acceptance.py",
+        "sha256": "116212700099472958e0cbacc7cd433de0cdf93e7e16bf37dabb6b6e8fd25150",
+        "size_bytes": 38670
+      }
+    ],
+    "source_manifest_sha256": "dda27f1d7c0ce02c78ec425e180fa8ca2bf666c6aba68747f032095a49b8be47",
+    "tokenizer_qxt": {
+      "path": "models/Qwen3-30B-A3B.qxt",
+      "sha256": "8ec26e5ae058b271c0e17ee28aea3cf4d2b9ae9a4cd8f68f7aac81e9380761c6",
+      "size_bytes": 5168466
+    }
+  },
+  "issue": 84,
+  "prompt": {
+    "artifact": {
+      "path": "prompt.txt",
+      "sha256": "0921df23b30a89bb0b95a2d7a0ed4f15a22f4d0491bacda5e77339198ad65f10",
+      "size_bytes": 4095
+    },
+    "construction_attempts": 1,
+    "token_count": 4095,
+    "token_ids_sha256": "a8bf51e926c3610bf257a6576410a740db360e0d9864f52ca308a6e9763acccb"
+  },
+  "reproduction": {
+    "prepare_command": [
+      "python",
+      "scripts/native_4k_acceptance.py",
+      "--prepare-only",
+      "--output-dir",
+      "wiki/evidence/issue-84-cpu4k",
+      "--qx-exe",
+      "build/qxqxf.exe",
+      "--model",
+      "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+      "--tokenizer",
+      "models/Qwen3-30B-A3B.qxt"
+    ],
+    "run_command": [
+      "python",
+      "scripts/native_4k_acceptance.py",
+      "--output-dir",
+      "wiki/evidence/issue-84-cpu4k",
+      "--qx-exe",
+      "build/qxqxf.exe",
+      "--model",
+      "models/Qwen3-30B-A3B-UD-IQ2_M.qxf",
+      "--tokenizer",
+      "models/Qwen3-30B-A3B.qxt"
+    ],
+    "working_directory": "repository_root"
+  },
+  "schema": "qx-issue84-native-cpu4k-v1",
+  "status": "prepared"
+}

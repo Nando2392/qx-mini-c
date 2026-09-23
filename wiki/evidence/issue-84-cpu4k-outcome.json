@@ -1,0 +1,137 @@
+{
+  "schema": "qx-issue84-cpu4k-outcome-v1",
+  "issue": 84,
+  "issue_state": "open",
+  "gate": {
+    "name": "native_cpu_4096_positions",
+    "status": "not_met",
+    "completed": false,
+    "exit_code": 2,
+    "native_deadline_seconds": 28800,
+    "error": "native deadline exceeded",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0,
+    "report_produced": false,
+    "completed_position_count": null,
+    "final_peak_rss_bytes": null
+  },
+  "contract": {
+    "positions": 4096,
+    "prompt_tokens": 4095,
+    "max_tokens": 2,
+    "activation": "f32",
+    "kv": "int8",
+    "io_backend": "buffered",
+    "scratch_policy": "ephemeral",
+    "kernel_policy": "baseline",
+    "thread_policy": "serial",
+    "threads": 1,
+    "source_baseline_revision": "ec4d2fd90cff93e3003ba82ba1ca332021168902"
+  },
+  "historical_journal": {
+    "path": "wiki/evidence/issue-84-cpu4k-run-1/phase-journal.json",
+    "recorded_phase": "prepare",
+    "recorded_status": "failed",
+    "recorded_elapsed_seconds": 28809.358999999997,
+    "recorded_peak_rss_bytes": 0,
+    "interpretation": "post-experiment exception handling overwrote the native terminal state; retain as failure evidence, not as a valid final native RSS measurement"
+  },
+  "historical_parent_observation": {
+    "elapsed_description": "approximately 7 h 40 min",
+    "peak_rss_mib": 142.48,
+    "is_final": false,
+    "use_as_final_peak_rss": false
+  },
+  "runner_provenance": {
+    "executed_runner_sha256": "116212700099472958e0cbacc7cd433de0cdf93e7e16bf37dabb6b6e8fd25150",
+    "current_post_experiment_runner_sha256": "4bba43948f03d79b51b8e4a0503a84c12f796709de2f4d322bf3f8d6b2c12f6b",
+    "hash_byte_domains": {"executed_runner": "Raw bytes hashed during the historical campaign, never replaced by a Git-normalized hash", "current_post_experiment_runner": "LF worktree bytes, Git index blob and checkout bytes; scripts/native_4k_acceptance.py is pinned text eol=lf", "raw_files": "Exact historical bytes protected with -text attributes"},
+    "fix_scope": "future runs only: retain an already-written terminal native journal",
+    "original_records_rewritten": false,
+    "parent_test_result": {
+      "passed": 60,
+      "elapsed_seconds": 3.81,
+      "status": "pass"
+    }
+  },
+  "raw_files": [
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-run-1/preparation.json",
+      "size_bytes": 3753,
+      "sha256": "277a81050e3528f69edcc1032ff3a95ccfa03157a2411b31b6813de4b579b90c"
+    },
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-run-1/phase-journal.json",
+      "size_bytes": 303,
+      "sha256": "4ecefb63ced638ca34a000046e8cc920bd78ae05c6f4196cc797950df91aca01"
+    },
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-run-1/prompt.txt",
+      "size_bytes": 4095,
+      "sha256": "0921df23b30a89bb0b95a2d7a0ed4f15a22f4d0491bacda5e77339198ad65f10"
+    },
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-run-1/stdout.bin",
+      "size_bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-run-1/stderr.bin",
+      "size_bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "historical_preparation_spools": [
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-preflight/phase-journal.json",
+      "size_bytes": 291,
+      "sha256": "1df4c5b2715d91bde5b0d7370bb6761cb97bebe315591e01e01bb5b736c5faad",
+      "interpretation": "historical preparation failure evidence; not rewritten"
+    },
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-preflight/prompt.txt",
+      "size_bytes": 8189,
+      "sha256": "8b0793a8678bea2a9c2bece7cb00b54b0638afcb1bb8b13a3dcdb88229ec4d0b"
+    },
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-preflight-v2/phase-journal.json",
+      "size_bytes": 232,
+      "sha256": "01479463f79c9e3c3cf653181ea54736870d6aefdfcebdc08c6f1c6ad9690aed"
+    },
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-preflight-v2/preparation.json",
+      "size_bytes": 3753,
+      "sha256": "277a81050e3528f69edcc1032ff3a95ccfa03157a2411b31b6813de4b579b90c"
+    },
+    {
+      "path": "wiki/evidence/issue-84-cpu4k-preflight-v2/prompt.txt",
+      "size_bytes": 4095,
+      "sha256": "0921df23b30a89bb0b95a2d7a0ed4f15a22f4d0491bacda5e77339198ad65f10"
+    }
+  ],
+  "release_context": {
+    "issue_83_state": "closed",
+    "issue_83_baseline": "ec4d2fd",
+    "issue_83_ci_run": 35674122057,
+    "issue_83_ci_status": "pass"
+  },
+  "claims": {
+    "cpu_4k_proven": false,
+    "timeout_proves_capacity_impossible": false,
+    "cpu_compute_root_cause_identified": false,
+    "native_resume_validated": false,
+    "kv_quality_validated": false,
+    "soak_or_thermal_validated": false,
+    "cpu_defaults_changed": false
+  },
+  "roadmap_proposal": {
+    "next": "opt-in CUDA final-head implementation",
+    "preserve_cpu_defaults": true,
+    "cpu_4k_status": "unproven",
+    "deferred": [
+      "native resume",
+      "KV quality",
+      "soak and thermal validation"
+    ]
+  }
+}
