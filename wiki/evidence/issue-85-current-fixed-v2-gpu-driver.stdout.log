@@ -1,0 +1,14 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.37
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+qx_avx2.c
+qx_cuda_final_head.cu
+tmpxft_00004188_00000000-7_qx_cuda_final_head.cudafe1.cpp
+qx_format.c
+qx_gguf.c
+qx_tokenizer.c
+native_cuda_fixed_v2_gpu_driver.c
+Generating Code...
+{"status":"pass","fixed_v2_outputs":[1124,77],"legacy_profile_null_output":1124,"requested_cuda_policy":1,"effective_cuda_policy":1,"device":"NVIDIA GeForce RTX 4070 Laptop GPU","compute_capability":"8.9","weight_uploads":1,"kernel_launches":2,"cpu_fallbacks":0}

@@ -1,0 +1,134 @@
+{
+  "schema": "qx.issue-85.strict-actual-model-summary.v1",
+  "status": "pass",
+  "source_id": "actual-model-20260925T192200-914a6125",
+  "authoritative_report": {
+    "path": "build/issue85-acceptance/actual-model-20260925T192200-914a6125/acceptance-report.json",
+    "bytes": 21279,
+    "sha256": "0cba74521a13cabf3c1003385e5865a413784c813f59e804c92f186b25f98d7c"
+  },
+  "build_binding": {
+    "final_provenance_manifest_sha256": "e572a629104dc6170e86474cd77db87ebf7a2a7de641b50fa88f775b3d1237f9",
+    "driver_sha256": "ae5e4b5c76bab37bf43a0ff67bf61cf9b57c8ff97e39abdac47b2a1059ba561f",
+    "production_cuda_source_sha256": "a7a43140358be5cc4950f5f0d670e303fb2ca422a383584e71e743eb2dfe5e59",
+    "freeze_unchanged": true,
+    "product_rebuilt_in_acceptance_runner": false,
+    "note": "The driver was freshly rebuilt and hash-bound by the separate final-provenance build before this acceptance matrix; the acceptance runner itself did not rebuild the product."
+  },
+  "model_hashes": {
+    "models/Qwen3-30B-A3B-UD-IQ2_M.qxf": {
+      "bytes": 10860081152,
+      "sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840"
+    },
+    "models/Qwen3-30B-A3B-UD-IQ2_M.gguf": {
+      "bytes": 10865578560,
+      "sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652"
+    }
+  },
+  "fixed_input": {
+    "seed_token": 42,
+    "layers_argument": 47,
+    "kv": "f16",
+    "residual_bytes": 8192,
+    "residual_sha256": "2aa780e4a7399ac335720c9a1427c000727f3096eca49f3c388ea46060bef59b"
+  },
+  "strict_all_logit_gate": {
+    "count": 151936,
+    "finite_cpu": true,
+    "finite_gpu": true,
+    "max_abs": 0.0,
+    "rmse": 0.0,
+    "cosine": 1.0,
+    "thresholds": {
+      "max_abs_lte": 0.001,
+      "rmse_lte": 0.0001,
+      "cosine_gte": 0.999999
+    },
+    "pass": true,
+    "cpu_argmax": 1124,
+    "gpu_argmax": 1124,
+    "cpu_top8": [
+      1124,
+      220,
+      18137,
+      10236,
+      40666,
+      4891,
+      50331,
+      6567
+    ],
+    "gpu_top8": [
+      1124,
+      220,
+      18137,
+      10236,
+      40666,
+      4891,
+      50331,
+      6567
+    ]
+  },
+  "gpu_determinism": {
+    "process_runs": 3,
+    "computes_per_process": 2,
+    "total_gpu_computes": 6,
+    "all_six_outputs_byte_identical": true,
+    "common_logits_sha256": "cbc909d48020740bc4edf299d920174e670fd9fe518a1b8c4ad4fa197803f398"
+  },
+  "command_exit_codes": {
+    "01-inspect-output-weight.exitcode": "0",
+    "02-llama-oracle.exitcode": "0",
+    "03-cpu-final-head.exitcode": "0",
+    "04-gpu-driver-run-1-2calls.exitcode": "0",
+    "05-gpu-driver-run-2-2calls.exitcode": "0",
+    "06-gpu-driver-run-3-2calls.exitcode": "0"
+  },
+  "all_command_exit_codes_zero": true,
+  "stderr_records": {
+    "01-inspect-output-weight.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "empty": true
+    },
+    "02-llama-oracle.stderr.log": {
+      "bytes": 98291,
+      "sha256": "7692200190bd9f827ee7cfb9e2e88f3896a8e2d5dbb24ad24fea83ea1b99a99f",
+      "empty": false
+    },
+    "03-cpu-final-head.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "empty": true
+    },
+    "04-gpu-driver-run-1-2calls.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "empty": true
+    },
+    "05-gpu-driver-run-2-2calls.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "empty": true
+    },
+    "06-gpu-driver-run-3-2calls.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "empty": true
+    }
+  },
+  "stderr_note": "Five command stderr records are empty. The llama-oracle stderr record is non-empty and hash-preserved; no global empty-stderr claim is made.",
+  "limits": {
+    "same_input_final_head_only": true,
+    "global_model_parity_claim": false,
+    "speed_claim": false,
+    "four_k_exercised": false,
+    "timing_acceptance_measured": false
+  },
+  "privacy": {
+    "absolute_paths_removed": true,
+    "private_environment_removed": true,
+    "models_or_weights_included": false,
+    "executables_or_objects_included": false
+  },
+  "derivation": "Portable derived record from the authoritative acceptance report; absolute path fields and observational durations were omitted without changing hashes, counts, thresholds, or results."
+}

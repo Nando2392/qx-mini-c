@@ -6,6 +6,8 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import psutil
@@ -19,9 +21,10 @@ runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 
 
-def _tree_command(tmp_path: Path, mode: str) -> tuple[list[str], Path, Path]:
+def _tree_command(tmp_path: Path, mode: str, *, startup_delay: float = 0.0) -> tuple[list[str], Path, Path]:
     child_pid = tmp_path / "child.pid"
     grandchild_pid = tmp_path / "grandchild.pid"
+    ready = tmp_path / "tree.ready"
     grandchild = tmp_path / "grandchild.py"
     grandchild.write_text(
         "import os,sys,time\n"
@@ -35,18 +38,24 @@ def _tree_command(tmp_path: Path, mode: str) -> tuple[list[str], Path, Path]:
         "import os,subprocess,sys,time\n"
         "from pathlib import Path\n"
         "Path(sys.argv[1]).write_text(str(os.getpid()))\n"
+        "time.sleep(float(sys.argv[5]))\n"
         "subprocess.Popen([sys.executable, sys.argv[2], sys.argv[3]])\n"
         "deadline=time.time()+2\n"
         "while not Path(sys.argv[3]).exists() and time.time()<deadline: time.sleep(.01)\n"
         "mode=sys.argv[4]\n"
         "if mode != 'parent-zero': os.write(1,b'stdout-exact-tail\\n'); os.write(2,b'stderr-exact-tail\\n')\n"
+        "if mode != 'parent-zero': os.fsync(1); os.fsync(2)\n"
+        "ready_tmp=Path(sys.argv[6]+'.tmp')\n"
+        "ready_tmp.write_text('ready', encoding='utf-8')\n"
+        "os.replace(ready_tmp, sys.argv[6])\n"
         "if mode == 'nonzero': raise SystemExit(7)\n"
         "if mode == 'parent-zero': os.write(1,b'{}'); raise SystemExit(0)\n"
         "if mode == 'rss': allocation=bytearray(96 << 20)\n"
         "time.sleep(30)\n",
         encoding="utf-8",
     )
-    return [sys.executable, str(child), str(child_pid), str(grandchild), str(grandchild_pid), mode], child_pid, grandchild_pid
+    return [sys.executable, str(child), str(child_pid), str(grandchild), str(grandchild_pid), mode,
+            str(startup_delay), str(ready)], child_pid, grandchild_pid
 
 
 def _read_pid(path: Path) -> int:
@@ -66,17 +75,44 @@ def _assert_gone(*paths: Path) -> None:
     assert not [pid for pid in pids if psutil.pid_exists(pid)]
 
 
+@contextmanager
+def _cancel_after_ready(ready: Path, *, readiness_deadline_seconds: float = 4.0) -> Iterator[Callable[[], bool]]:
+    cancel = threading.Event()
+    stop_watcher = threading.Event()
+    failures: list[AssertionError] = []
+
+    def watch_readiness() -> None:
+        deadline = time.monotonic() + readiness_deadline_seconds
+        while not stop_watcher.is_set():
+            if ready.exists():
+                cancel.set()
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                failures.append(AssertionError(f"process tree did not become ready: {ready}"))
+                cancel.set()
+                return
+            stop_watcher.wait(min(0.01, remaining))
+
+    watcher = threading.Thread(target=watch_readiness, name="cancel-after-tree-ready")
+    watcher.start()
+    try:
+        yield cancel.is_set
+    finally:
+        stop_watcher.set()
+        watcher.join(timeout=1.0)
+        assert not watcher.is_alive(), "readiness watcher did not stop"
+        if failures:
+            raise failures[0]
+
+
 @pytest.mark.parametrize("mode", ["timeout", "cancel", "rss", "nonzero", "exception"])
 def test_failures_kill_child_and_grandchild_and_keep_exact_tails(tmp_path: Path, mode: str) -> None:
     command, child_pid, grandchild_pid = _tree_command(tmp_path, mode)
-    cancel = threading.Event()
     kwargs = dict(deadline_seconds=3.0, rss_ceiling_bytes=1 << 30,
                   sample_interval_seconds=0.02, heartbeat_seconds=0.05)
     if mode == "timeout":
         kwargs["deadline_seconds"] = 0.25
-    elif mode == "cancel":
-        threading.Timer(0.2, cancel.set).start()
-        kwargs["cancel_requested"] = cancel.is_set
     elif mode == "rss":
         # Let both interpreters publish PIDs/tails before deliberate allocation.
         kwargs["rss_ceiling_bytes"] = 96 << 20
@@ -88,14 +124,42 @@ def test_failures_kill_child_and_grandchild_and_keep_exact_tails(tmp_path: Path,
         kwargs["cancel_requested"] = explode
 
     expected = RuntimeError if mode == "exception" else runner.RunGateError
-    with pytest.raises(expected):
-        runner.run_supervised(command, tmp_path, **kwargs)
+    if mode == "cancel":
+        with _cancel_after_ready(tmp_path / "tree.ready") as cancel_requested:
+            kwargs["cancel_requested"] = cancel_requested
+            with pytest.raises(expected):
+                runner.run_supervised(command, tmp_path, **kwargs)
+    else:
+        with pytest.raises(expected):
+            runner.run_supervised(command, tmp_path, **kwargs)
 
     _assert_gone(child_pid, grandchild_pid)
     assert (tmp_path / "stdout.bin").read_bytes().endswith(b"stdout-exact-tail\n")
     assert (tmp_path / "stderr.bin").read_bytes().endswith(b"stderr-exact-tail\n")
     journal = json.loads((tmp_path / "phase-journal.json").read_text())
     assert journal["status"] not in {"completed", "pass"}
+
+
+def test_cancel_waits_for_tree_readiness_before_killing_delayed_descendants(tmp_path: Path) -> None:
+    command, child_pid, grandchild_pid = _tree_command(tmp_path, "cancel", startup_delay=1.0)
+    ready = tmp_path / "tree.ready"
+    with _cancel_after_ready(ready) as cancel_requested:
+        with pytest.raises(runner.RunGateError):
+            runner.run_supervised(
+                command,
+                tmp_path,
+                deadline_seconds=6.0,
+                rss_ceiling_bytes=1 << 30,
+                sample_interval_seconds=0.02,
+                heartbeat_seconds=0.05,
+                cancel_requested=cancel_requested,
+            )
+
+    assert ready.read_text(encoding="utf-8") == "ready"
+    _assert_gone(child_pid, grandchild_pid)
+    assert (tmp_path / "stdout.bin").read_bytes().endswith(b"stdout-exact-tail\n")
+    assert (tmp_path / "stderr.bin").read_bytes().endswith(b"stderr-exact-tail\n")
+    assert json.loads((tmp_path / "phase-journal.json").read_text())["status"] == "cancelled"
 
 
 def test_parent_exit_zero_with_live_descendant_is_nonpass_and_descendant_is_killed(tmp_path: Path) -> None:

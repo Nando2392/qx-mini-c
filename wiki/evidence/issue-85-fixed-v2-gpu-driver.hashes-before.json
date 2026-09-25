@@ -1,0 +1,18 @@
+{
+  "include/qx_cuda_final_head.h": "a151ed18c91823843e037db2576f63c0b2cd838656de0c653b3fd533bb661e8c",
+  "include/qx_format.h": "1863f7d750e569e49e034cffbc6c9936fe03f0170d83bc895d74bd3d60ecacc2",
+  "include/qx_gguf.h": "dfad9c3a10ec2d21cc6941362bc995abb84cb0b82a454dc1835f8a88e65fc701",
+  "include/qx_tokenizer.h": "f4d2f4ce46bcda736680cecd3eba7ba1ce7d6003f37a66a4e783eb620f12764d",
+  "include/qxfit.h": "4718b61971d30e5104b72ec210ac2c984828b48c501cccc3036b58bd329d938a",
+  "src/qx_avx2.c": "67c59e68727bdf5bc4a228ea6f9cd28d5a8f3bed0826be72de0c9b48cd0c170a",
+  "src/qx_cuda_final_head.cu": "90678314de36f63075cbb2d8cfdbba39c12b23c8d15de1cc7a1c7ea78a9c4eb2",
+  "src/qx_cuda_final_head_stub.c": "8b87fa8cde852a3a1665a9c358d27c2c74685f63bc96e96fd8bc28ceb0071a7e",
+  "src/qx_format.c": "262de32f99ebc9458e884acdcbf8f261838cbb8241f1ba99bea2180aad280337",
+  "src/qx_gguf.c": "61359e337c294e1316b57916e3fde607563af077505e3598a7773748e0be25b7",
+  "src/qx_iq2xs_tables.inc": "89552f36259a1107e207d20e392734ec77f0453e89deafd0a337507b8b332e08",
+  "src/qx_main.c": "040cd92a4320d13555833fe94dab9cb5f5d97e94c99bab01b863d99090cc1b42",
+  "src/qx_qxf_main.c": "21ce230e0f053d9a29afd2b57da7dce0e8dfc74a0ad5578ffe63741afcc5c3d1",
+  "src/qx_tokenizer.c": "191da7e87ddd2c8392156479d0108ccd3b47c07ec6a720aa9a6d4f537907f987",
+  "src/qxfit.c": "93dad629d82eacc731a641608050d6313cf4d86eac0b3092a90eaed9a748c4df",
+  "tests/native_cuda_fixed_v2_gpu_driver.c": "3dd4b0fee4e980aa8c46f382cac69531259457b13b53b8d1d8002fba06892fc0"
+}

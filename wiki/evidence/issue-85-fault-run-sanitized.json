@@ -1,0 +1,57 @@
+{
+  "schema": "qx.issue-85.cuda-final-head-fault-run-sanitized.v1",
+  "source_id": "final-fault-evidence-20260925T194218Z-8801",
+  "status": "pass",
+  "source_artifacts": {
+    "manifest": "final-fault-evidence-20260925T194218Z-8801/fault-run-manifest.json",
+    "stdout": "final-fault-evidence-20260925T194218Z-8801/driver.stdout.log",
+    "stderr": "final-fault-evidence-20260925T194218Z-8801/driver.stderr.log",
+    "exitcode": "final-fault-evidence-20260925T194218Z-8801/driver.exitcode",
+    "source_hashes_before": "final-fault-evidence-20260925T194218Z-8801/source-hashes-before.json",
+    "source_hashes_after": "final-fault-evidence-20260925T194218Z-8801/source-hashes-after.json"
+  },
+  "source_manifest_raw_sha256": "cc41c3ea549d2138299eb88e35ca2637fed3fcb5ab42948426b0dcb4e70c61af",
+  "source_stdout_raw_sha256": "115815519a3dd55353eba88c5cb97e5b248c67903f3fac0530db753bab89a41a",
+  "runner_sha256": "9f15a75d8a6b4f40776af44ede7ccb1d7925489d73dbf3072ff1b49d067675f5",
+  "production_cuda_source_sha256": "a7a43140358be5cc4950f5f0d670e303fb2ca422a383584e71e743eb2dfe5e59",
+  "source_hashes_unchanged": true,
+  "historical_manifests_modified": false,
+  "build_returncode": 0,
+  "driver_returncode": 0,
+  "stderr_empty": true,
+  "result": {
+    "schema": "qx.cuda-final-head-faults.v1",
+    "status": "pass",
+    "tests_passed": 10,
+    "tests": [
+      "incompatible_kernel_rejected",
+      "allocation_1_cleanup",
+      "allocation_2_cleanup",
+      "allocation_3_cleanup",
+      "weight_upload_cleanup",
+      "activation_upload_preserves_output",
+      "get_last_error_preserves_output",
+      "synchronize_preserves_output",
+      "download_preserves_output",
+      "real_gpu_success_control"
+    ],
+    "real_device": "NVIDIA GeForce RTX 4070 Laptop GPU",
+    "launch_injection": "cudaGetLastError return injection after a real kernel launch; not an actually failed device kernel",
+    "whole_backend_mocked": false,
+    "production_source_included": true,
+    "exact_alloc_free_tracking": true,
+    "silent_fallbacks": 0
+  },
+  "versioned_raw_stdout": "wiki/evidence/issue-85-fault-driver.stdout.log",
+  "historical_runs": [
+    {
+      "source_id": "final-fault-evidence-20260925T185955-28027",
+      "source_manifest_raw_sha256": "e1a0c0d5bd4184a6a57f43079a25de876ea52530a2887ce808ea7792d998546c",
+      "source_stdout_raw_sha256": "115815519a3dd55353eba88c5cb97e5b248c67903f3fac0530db753bab89a41a",
+      "status": "pass",
+      "tests_passed": 10
+    }
+  ],
+  "sanitization": "The source manifest remains immutable and is not versioned because it contains private absolute paths. This derived record retains portable source IDs, hashes, return codes, and the driver result without those paths.",
+  "scope_limit": "The injected launch case exercises cudaGetLastError return handling after a real launch; it is not evidence of an actually failed device kernel or device-loss recovery."
+}

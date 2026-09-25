@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-09-21
+updated: 2026-09-25
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -76,6 +76,11 @@ capacidad CPU nativa #83: CLOSED en `ec4d2fd`; CI `35674122057` PASS; medición 
 → API compatible conserva 64 posiciones; API caller-buffer admite <=4096, pero sólo 128/256 tienen ejecución real
 gate CPU 4K #84: OPEN; una corrida excedió el deadline nativo de 8 h y salió 2 sin output ni reporte; gate NOT MET
 → RSS final y posiciones completadas desconocidos; 142.48 MiB a ~7 h 40 min es observación histórica no final
+CUDA final-head #85: progreso opt-in verificado en una RTX 4070 Laptop (CC 8.9); CPU/F32 y policy `none` siguen default
+→ driver fixed-v2: outputs `[1124,77]`, un upload, dos launches, cero fallbacks; copies raw byte-exactas con hashes raw/LF separados
+→ actual-model current-source PASS: 151936 logits exactos con thresholds 0.001/0.0001/0.999999 y 6/6 outputs byte-identical
+→ package local PASS: build/model/source hashes, logs completos, preflight, fault, runtime/memoria y regresiones verificados
+→ RELEASE GATES NOT PASSED: faltan dos reviews independientes del staged digest exacto y los gates Auto Research/CI de la revisión final
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -218,11 +223,18 @@ Issue #84 intentó una corrida CPU real de 4096 posiciones sobre ese baseline: 4
 
 El journal histórico fue sobrescrito por un bug post-experimento con `phase=prepare`, `status=failed`, `peak_rss_bytes=0` y `elapsed_seconds=28809.359`; no es una medición terminal nativa válida. RSS final queda desconocido (`null`). La observación padre de 142.48 MiB a ~7 h 40 min es sólo histórica/no final. [`issue-84-cpu4k-outcome.json`](../evidence/issue-84-cpu4k-outcome.json) conserva hashes y provenance de los spools raw inmutables. El runner ejecutado tenía SHA-256 `116212700099472958e0cbacc7cd433de0cdf93e7e16bf37dabb6b6e8fd25150`; el fix posterior/future-only que retiene journals terminales tiene SHA-256 `4bba43948f03d79b51b8e4a0503a84c12f796709de2f4d322bf3f8d6b2c12f6b` y 60 tests padre PASS en 3.81 s. No reescribe la preparación ni los journals originales.
 
+Issue #85 implementa sólo el final head CUDA F32 opt-in: el build CPU conserva el stub no disponible y el runtime CUDA exige `--cuda-policy final-head-f32`. Desde la raíz del repositorio, `QX_CUDA_ROOT` (preferido) o `CUDA_PATH` debe apuntar al toolkit antes de ejecutar `build_cuda_msvc.bat cuda`; el fault runner admite además `python tests/run_cuda_final_head_faults.py --cuda-root <cuda-toolkit-root>`. La ruta privada real no se documenta. El preflight current-source `fresh-preflight-cudafuncattrs-20260925T184644-008440` pasó en una NVIDIA GeForce RTX 4070 Laptop GPU (CC 8.9), produjo `[1124,77]`, conservó output legacy profile-NULL `1124`, registró un upload, dos kernel launches y cero fallbacks. El stdout raw current-source y los hashes before/after están versionados en `wiki/evidence/issue-85-current-fixed-v2-*`; [`issue-85-artifact-manifest.json`](../evidence/issue-85-artifact-manifest.json) distingue SHA-256 de bytes ejecutados CRLF y SHA-256 normalizado a LF.
+
+La corrida strict actual-model current-source más reciente es `build/issue85-acceptance/actual-model-20260925T192200-914a6125/acceptance-report.json`, SHA-256 `0cba74521a13cabf3c1003385e5865a413784c813f59e804c92f186b25f98d7c`. El manifest final-provenance SHA-256 `e572a629104dc6170e86474cd77db87ebf7a2a7de641b50fa88f775b3d1237f9` liga build fresco, logs completos, source CUDA `a7a43140358be5cc4950f5f0d670e303fb2ca422a383584e71e743eb2dfe5e59`, modelos y driver. Para un residual fijo de layer 47, los 151936 logits CPU/GPU son finitos y exactos: `max_abs=0`, RMSE `0`, cosine `1`, thresholds `0.001/0.0001/0.999999`, argmax `1124` y 6/6 outputs GPU byte-identical. Es evidencia same-input final-head, no paridad global.
+
+El paquete local de publicación #85 queda **PASS**, pero los release gates siguen **NOT PASSED**: faltan dos reviews independientes sobre el staged digest exacto y después los gates Auto Research/CI de la revisión final. También pasan preflight en un dispositivo, 10 tests negativos fail-closed, runtime/memoria same-process acotado y suites solapadas (`780 passed, 3 skipped`; `76`; `36`; `61`, no se suman). La evidencia negativa inyecta retornos de error de APIs CUDA, incluido `cudaGetLastError` después de un launch real; no prueba un kernel realmente fallido ni recuperación de device loss. El desglose de performance/latencia es explícitamente nongating. Cobertura de más dispositivos, pruebas de kernel real/device loss y caracterización de performance quedan como limitaciones o trabajo futuro, no blockers de release de #85; no autorizan claims de velocidad ni recuperación de device loss. CPU 4K sigue siendo un gate separado de #84 y permanece NOT MET. No hay claim global, 4K, velocidad, release readiness ni promoción de defaults. Detalle: [`issue-85-cuda-final-head-report.json`](../evidence/issue-85-cuda-final-head-report.json).
+
 ## Después
 
-1. Proponer como siguiente slice un backend CUDA **opt-in sólo para el final head**, con provenance y equivalencia fail-closed; no cambiar silenciosamente ningún default CPU.
-2. Mantener CPU 4K como no probado: #84 no completó el gate. No repetir por inercia ni convertir el timeout en una conclusión causal.
-3. Mantener diferidos resume nativo, quality sweep KV y soak/térmica hasta que cada uno tenga runner y evidencia propios.
+1. Mantener #85 opt-in; congelar el staged digest exacto, obtener dos reviews independientes y después ejecutar los gates Auto Research/CI sobre la revisión final.
+2. Tratar cobertura adicional de dispositivos, fallo real de kernel/device loss y desglose/medición de latencia como limitaciones nongating o trabajo futuro; la evidencia actual no autoriza claims de speedup, throughput sostenido, ausencia general de leaks ni recuperación de device loss.
+3. Mantener CPU 4K como no probado: #84 no completó el gate. No repetir por inercia ni convertir el timeout en una conclusión causal.
+4. Mantener diferidos resume nativo, quality sweep KV y soak/térmica hasta que cada uno tenga runner y evidencia propios.
 
 ## Riesgos
 

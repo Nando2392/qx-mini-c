@@ -1,0 +1,152 @@
+{
+  "driver_report": {
+    "budgets": {
+      "gpu_post_warmup_bytes": 8388608,
+      "host_budget_reason": "bounded allowance for CRT, file mapping, and runtime allocator bookkeeping; 255 MiB repeated retention is rejected",
+      "host_post_warmup_bytes": 33554432
+    },
+    "calls": [
+      {
+        "call_index": 0,
+        "cpu_fallbacks": 0,
+        "kernel_launches": 2,
+        "phase": "warmup",
+        "token_ids": [
+          1124,
+          77
+        ],
+        "weight_uploads": 1
+      },
+      {
+        "call_index": 1,
+        "cpu_fallbacks": 0,
+        "kernel_launches": 2,
+        "phase": "measured",
+        "token_ids": [
+          1124,
+          77
+        ],
+        "weight_uploads": 1
+      },
+      {
+        "call_index": 2,
+        "cpu_fallbacks": 0,
+        "kernel_launches": 2,
+        "phase": "measured",
+        "token_ids": [
+          1124,
+          77
+        ],
+        "weight_uploads": 1
+      },
+      {
+        "call_index": 3,
+        "cpu_fallbacks": 0,
+        "kernel_launches": 2,
+        "phase": "measured",
+        "token_ids": [
+          1124,
+          77
+        ],
+        "weight_uploads": 1
+      }
+    ],
+    "cuda_mem_get_info_interpretation": "shared-device free-memory samples include external activity; an unstable GPU bound is inconclusive and is not a leak claim",
+    "gates": {
+      "cuda_total_stable": true,
+      "exact_per_call_counters": true,
+      "gpu_within_budget": true,
+      "host_within_budget": true,
+      "leak_claim": false,
+      "stable_token_ids": true
+    },
+    "measured_calls": 3,
+    "measurements": {
+      "gpu_post_warmup_free_span_bytes": 0,
+      "gpu_retained_growth_bytes": 0,
+      "process_private_post_warmup_span_bytes": 2347008,
+      "process_private_retained_growth_bytes": 2347008,
+      "process_working_set_post_warmup_span_bytes": 794624,
+      "process_working_set_retained_growth_bytes": 745472
+    },
+    "outputs_per_call": 2,
+    "process_restart_substitution": false,
+    "same_process": true,
+    "samples": [
+      {
+        "call_index": 0,
+        "cuda_free_bytes": 7411335168,
+        "cuda_total_bytes": 8585216000,
+        "phase": "warmup_before",
+        "process_private_bytes": 234012672,
+        "process_working_set_bytes": 121757696
+      },
+      {
+        "call_index": 0,
+        "cuda_free_bytes": 7411335168,
+        "cuda_total_bytes": 8585216000,
+        "phase": "warmup_after",
+        "process_private_bytes": 492687360,
+        "process_working_set_bytes": 122396672
+      },
+      {
+        "call_index": 1,
+        "cuda_free_bytes": 7411335168,
+        "cuda_total_bytes": 8585216000,
+        "phase": "measured_before",
+        "process_private_bytes": 492687360,
+        "process_working_set_bytes": 122396672
+      },
+      {
+        "call_index": 1,
+        "cuda_free_bytes": 7411335168,
+        "cuda_total_bytes": 8585216000,
+        "phase": "measured_after",
+        "process_private_bytes": 494047232,
+        "process_working_set_bytes": 122347520
+      },
+      {
+        "call_index": 2,
+        "cuda_free_bytes": 7411335168,
+        "cuda_total_bytes": 8585216000,
+        "phase": "measured_before",
+        "process_private_bytes": 494047232,
+        "process_working_set_bytes": 122347520
+      },
+      {
+        "call_index": 2,
+        "cuda_free_bytes": 7411335168,
+        "cuda_total_bytes": 8585216000,
+        "phase": "measured_after",
+        "process_private_bytes": 495034368,
+        "process_working_set_bytes": 123142144
+      },
+      {
+        "call_index": 3,
+        "cuda_free_bytes": 7411335168,
+        "cuda_total_bytes": 8585216000,
+        "phase": "measured_before",
+        "process_private_bytes": 495034368,
+        "process_working_set_bytes": 123142144
+      },
+      {
+        "call_index": 3,
+        "cuda_free_bytes": 7411335168,
+        "cuda_total_bytes": 8585216000,
+        "phase": "measured_after",
+        "process_private_bytes": 494383104,
+        "process_working_set_bytes": 122494976
+      }
+    ],
+    "schema": "qx.native-cuda-runtime-memory.v1",
+    "status": "pass",
+    "warmup_calls": 1
+  },
+  "driver_returncode": 0,
+  "elapsed_seconds": 72.21186790000138,
+  "hard_timeout_seconds": 180,
+  "raw_hashes_unchanged": true,
+  "schema": "qx.native-cuda-runtime-memory-run.v1",
+  "status": "pass",
+  "stderr_empty": true
+}

@@ -1,4 +1,5 @@
 #include "qx_format.h"
+#include "qx_cuda_final_head.h"
 #include "qx_gguf.h"
 #include "qx_tokenizer.h"
 
@@ -40,7 +41,7 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-inspect --tokenizer model.qxt\n"
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
-        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64 [--io-backend buffered|mmap] [--scratch-policy ephemeral|persistent] [--kernel-policy baseline|fused] [--thread-policy serial|pool] [--threads N] [--execution-profile] [--capacity-profile]\n"
+        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64 [--io-backend buffered|mmap] [--scratch-policy ephemeral|persistent] [--kernel-policy baseline|fused] [--thread-policy serial|pool] [--threads N] [--cuda-policy none|final-head-f32] [--execution-profile] [--capacity-profile]\n"
         "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
         "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --scratch-policy ephemeral|persistent --kernel-policy baseline|fused --thread-policy serial --threads 1 --temperature 0 --seed 7 --full-moe --final-head [--bench] [--dequant-profile] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
@@ -466,6 +467,12 @@ chat_fail:
                     fprintf(stderr, "generate failed: invalid --threads\n"); return 2;
                 }
             }
+            else if (strcmp(argv[i], "--cuda-policy") == 0 && i + 1 < argc) {
+                const char *value = argv[++i];
+                if (strcmp(value, "none") == 0) options.cuda_policy = QX_NATIVE_CUDA_NONE;
+                else if (strcmp(value, "final-head-f32") == 0) options.cuda_policy = QX_NATIVE_CUDA_FINAL_HEAD_F32;
+                else { fprintf(stderr, "generate failed: unsupported native generation CUDA policy\n"); return 2; }
+            }
             else if (strcmp(argv[i], "--execution-profile") == 0) execution_profile = 1;
             else if (strcmp(argv[i], "--capacity-profile") == 0) capacity_profile = 1;
             else { usage(argv[0]); return 2; }
@@ -482,6 +489,10 @@ chat_fail:
                 (options.thread_count < 2u || options.thread_count > 64u)) {
             fprintf(stderr, "generate failed: pool native generation policy requires 2..64 threads\n");
             return 2;
+        }
+        if (options.cuda_policy == QX_NATIVE_CUDA_FINAL_HEAD_F32 &&
+                !qx_cuda_final_head_is_available(NULL, err, sizeof(err))) {
+            fprintf(stderr, "generate failed: %s\n", err); return 2;
         }
 
         qx_tokenizer tokenizer;
@@ -647,7 +658,36 @@ chat_fail:
                 printf("%s\"%llu\"", i ? "," : "",
                     (unsigned long long)profile.full_logits_checksums[i]);
             }
-            printf("]}");
+            printf("]");
+            if (options.cuda_policy == QX_NATIVE_CUDA_FINAL_HEAD_F32) {
+                printf(",\"requested_cuda_policy\":\"final-head-f32\","
+                    "\"effective_cuda_policy\":\"%s\",\"cuda_device_name\":",
+                    profile.effective_cuda_policy == QX_NATIVE_CUDA_FINAL_HEAD_F32
+                        ? "final-head-f32" : "none");
+                qx_cli_json_string((const unsigned char *)profile.cuda_device_name,
+                    (uint32_t)strlen(profile.cuda_device_name));
+                printf(",\"cuda_compute_capability_major\":%u,"
+                    "\"cuda_compute_capability_minor\":%u,"
+                    "\"cuda_resident_weight_bytes\":%llu,"
+                    "\"cuda_persistent_allocations\":%llu,"
+                    "\"cuda_weight_uploads\":%llu,"
+                    "\"cuda_weight_upload_bytes\":%llu,"
+                    "\"cuda_host_to_device_bytes\":%llu,"
+                    "\"cuda_device_to_host_bytes\":%llu,"
+                    "\"cuda_kernel_launches\":%llu,"
+                    "\"cuda_cpu_fallbacks\":%llu",
+                    profile.cuda_compute_capability_major,
+                    profile.cuda_compute_capability_minor,
+                    (unsigned long long)profile.cuda_resident_weight_bytes,
+                    (unsigned long long)profile.cuda_persistent_allocations,
+                    (unsigned long long)profile.cuda_weight_uploads,
+                    (unsigned long long)profile.cuda_weight_upload_bytes,
+                    (unsigned long long)profile.cuda_host_to_device_bytes,
+                    (unsigned long long)profile.cuda_device_to_host_bytes,
+                    (unsigned long long)profile.cuda_kernel_launches,
+                    (unsigned long long)profile.cuda_cpu_fallbacks);
+            }
+            printf("}");
         }
         if (capacity_profile) {
             printf(",\"capacity_profile\":{\"executed_forward_steps\":%u,"
@@ -787,8 +827,15 @@ chat_fail:
         if (strcmp(expert_cache_policy, "none") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported expert cache policy\n"); return 2;
         }
-        if (strcmp(cuda_policy, "none") != 0) {
+        if (strcmp(cuda_policy, "none") != 0 && strcmp(cuda_policy, "final-head-f32") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported CUDA policy\n"); return 2;
+        }
+        if (strcmp(cuda_policy, "final-head-f32") == 0 && strcmp(activation_format, "f32") != 0) {
+            fprintf(stderr, "prompt-state-loop-probe failed: final-head-f32 requires F32 activation\n"); return 2;
+        }
+        if (strcmp(cuda_policy, "final-head-f32") == 0 &&
+                !qx_cuda_final_head_is_available(NULL, err, sizeof(err))) {
+            fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;
         }
         if (strcmp(prefill_gemm_policy, "none") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported prefill GEMM policy\n"); return 2;

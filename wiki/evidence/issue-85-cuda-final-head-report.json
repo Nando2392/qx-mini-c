@@ -1,0 +1,295 @@
+{
+  "schema": "qx.issue-85.cuda-final-head-portable-evidence.v3",
+  "issue": 85,
+  "status": "pass",
+  "release_status": "pending",
+  "summary": "The portable Issue #85 evidence package passes its local publication gates. A fresh hash-bound build and the latest strict actual-model matrix pass on one RTX 4070 Laptop GPU: all 151936 same-input final-head logits are finite and exact at thresholds max_abs<=0.001, RMSE<=0.0001, cosine>=0.999999, with 6/6 GPU outputs byte-identical. This is not global model parity, a speed or device-loss recovery claim, 4K evidence, release readiness, or a default promotion. The true remaining release gates are two independent reviews of the exact staged digest followed by Auto Research and repository CI on the final revision; performance characterization and actual-kernel/device-loss testing are nongating limitations or future work.",
+  "current_final_source": {
+    "production_cuda_source_sha256": "a7a43140358be5cc4950f5f0d670e303fb2ca422a383584e71e743eb2dfe5e59",
+    "binding": "The final-provenance bundle records a successful fresh build, complete stdout/stderr/exit-code records, unchanged source/model hashes, fresh driver SHA-256 ae5e4b5c76bab37bf43a0ff67bf61cf9b57c8ff97e39abdac47b2a1059ba561f, and the latest strict acceptance report SHA-256 0cba74521a13cabf3c1003385e5865a413784c813f59e804c92f186b25f98d7c.",
+    "claim_limit": "This binds the local build and strict same-input final-head matrix to exact source/model/driver bytes. It does not bind a staged digest, commit, pushed revision, release CI run, global model parity, speed, or 4K behavior."
+  },
+  "sources": {
+    "current_fixed_v2_preflight": {
+      "source_id": "fresh-preflight-cudafuncattrs-20260925T184644-008440",
+      "source_root": "build/issue85-fixed-v2-verification",
+      "derived_summary": "wiki/evidence/issue-85-current-preflight-summary.json",
+      "versioned_raw_stdout": "wiki/evidence/issue-85-current-fixed-v2-gpu-driver.stdout.log",
+      "versioned_source_hashes": "wiki/evidence/issue-85-current-fixed-v2-source-hashes.json",
+      "result": {
+        "status": "pass",
+        "fixed_v2_outputs": [
+          1124,
+          77
+        ],
+        "legacy_profile_null_output": 1124,
+        "requested_cuda_policy": 1,
+        "effective_cuda_policy": 1,
+        "device": "NVIDIA GeForce RTX 4070 Laptop GPU",
+        "compute_capability": "8.9",
+        "weight_uploads": 1,
+        "kernel_launches": 2,
+        "cpu_fallbacks": 0,
+        "source_hashes_unchanged": true,
+        "driver_hashes_unchanged": true
+      }
+    },
+    "current_runtime_memory": {
+      "source_id": "issue85-runtime-memory-20260925-185018",
+      "source_report": "build/issue85-runtime-memory-20260925-185018/run-report.json",
+      "versioned_raw_report": "wiki/evidence/issue-85-runtime-memory-run-report.json",
+      "result": {
+        "status": "pass",
+        "same_process": true,
+        "process_restart_substitution": false,
+        "warmup_calls": 1,
+        "measured_calls": 3,
+        "outputs_per_call": 2,
+        "stable_token_ids": [
+          1124,
+          77
+        ],
+        "weight_uploads_per_call": 1,
+        "kernel_launches_per_call": 2,
+        "cpu_fallbacks_per_call": 0,
+        "gpu_post_warmup_budget_bytes": 8388608,
+        "gpu_retained_growth_bytes": 0,
+        "gpu_post_warmup_free_span_bytes": 0,
+        "host_post_warmup_budget_bytes": 33554432,
+        "process_private_retained_growth_bytes": 2347008,
+        "process_private_post_warmup_span_bytes": 2347008,
+        "process_working_set_retained_growth_bytes": 745472,
+        "process_working_set_post_warmup_span_bytes": 794624,
+        "raw_hashes_unchanged": true
+      },
+      "scope_limit": "This is a repeated same-process native final-head functional/memory gate on the actual model. It records no latency distribution and supports no speedup or sustained-generation throughput claim. Shared-device cudaMemGetInfo samples are not a general leak proof."
+    },
+    "current_fault_injection": {
+      "source_id": "final-fault-evidence-20260925T194218Z-8801",
+      "source_manifest": "final-fault-evidence-20260925T194218Z-8801/fault-run-manifest.json",
+      "source_manifest_raw_sha256": "cc41c3ea549d2138299eb88e35ca2637fed3fcb5ab42948426b0dcb4e70c61af",
+      "runner_sha256": "9f15a75d8a6b4f40776af44ede7ccb1d7925489d73dbf3072ff1b49d067675f5",
+      "derived_sanitized_manifest": "wiki/evidence/issue-85-fault-run-sanitized.json",
+      "versioned_raw_stdout": "wiki/evidence/issue-85-fault-driver.stdout.log",
+      "result": {
+        "status": "pass",
+        "tests_passed": 10,
+        "exact_alloc_free_tracking": true,
+        "silent_fallbacks": 0,
+        "whole_backend_mocked": false,
+        "production_source_included": true,
+        "source_hashes_unchanged": true
+      },
+      "scope_limit": "The launch injection is cudaGetLastError return injection after a real launch, not an actually failed device kernel. Device-loss recovery remains unproven.",
+      "historical_runs": [
+        {
+          "source_id": "final-fault-evidence-20260925T185955-28027",
+          "source_manifest_raw_sha256": "e1a0c0d5bd4184a6a57f43079a25de876ea52530a2887ce808ea7792d998546c",
+          "status": "pass",
+          "tests_passed": 10
+        }
+      ]
+    },
+    "historical_actual_model_all_logit": {
+      "source_id": "actual-model-20260925T160620-7c7b1e07",
+      "source_report": "build/issue85-acceptance/actual-model-20260925T160620-7c7b1e07/acceptance-report.json",
+      "source_report_raw_sha256": "9bb590ab65ce159d0e0d3ccffab0d2485928062b69cf2107e8e092863d72d6b2",
+      "source_report_lf_normalized_sha256": "83cdf03c96d26639d5e3d91f39583414c1a6dd8caab7b67c4d034db4c996d71c",
+      "source_version_relation": "historical_pre_additive_fixed_v2_api",
+      "result": {
+        "comparison_domain": "one fixed layer-47 residual from seed token 42, F32 final norm, complete Q6_K output.weight head",
+        "vocabulary_logits_compared": 151936,
+        "cpu_argmax": 1124,
+        "gpu_argmax": 1124,
+        "finite_cpu": true,
+        "finite_gpu": true,
+        "max_abs": 0.0,
+        "rmse": 0.0,
+        "cosine": 1.0,
+        "process_runs": 3,
+        "computes_per_process": 2,
+        "total_gpu_computes": 6,
+        "all_six_outputs_byte_identical": true,
+        "common_logits_sha256": "cbc909d48020740bc4edf299d920174e670fd9fe518a1b8c4ad4fa197803f398"
+      },
+      "scope_limit": "Historical same-input final-head evidence only. It is not evidence that the current fixed-v2 source reran the all-logit gate and does not establish global model, residual, multi-token, semantic, or 4K parity."
+    },
+    "current_strict_actual_model_all_logit": {
+      "source_id": "actual-model-20260925T192200-914a6125",
+      "source_report": "build/issue85-acceptance/actual-model-20260925T192200-914a6125/acceptance-report.json",
+      "source_report_raw_sha256": "0cba74521a13cabf3c1003385e5865a413784c813f59e804c92f186b25f98d7c",
+      "portable_summary": "wiki/evidence/issue-85-strict-actual-model-summary.json",
+      "final_provenance_manifest": "build/issue85-final-provenance-20260925T191833Z/manifest.json",
+      "final_provenance_manifest_sha256": "e572a629104dc6170e86474cd77db87ebf7a2a7de641b50fa88f775b3d1237f9",
+      "portable_build_provenance": "wiki/evidence/issue-85-final-build-provenance.json",
+      "result": {
+        "comparison_domain": "one fixed layer-47 residual from seed token 42, F32 final norm, complete Q6_K output.weight head",
+        "vocabulary_logits_compared": 151936,
+        "thresholds": {
+          "max_abs_lte": 0.001,
+          "rmse_lte": 0.0001,
+          "cosine_gte": 0.999999
+        },
+        "finite_cpu": true,
+        "finite_gpu": true,
+        "max_abs": 0.0,
+        "rmse": 0.0,
+        "cosine": 1.0,
+        "pass": true,
+        "cpu_argmax": 1124,
+        "gpu_argmax": 1124,
+        "process_runs": 3,
+        "computes_per_process": 2,
+        "total_gpu_computes": 6,
+        "all_six_outputs_byte_identical": true,
+        "common_logits_sha256": "cbc909d48020740bc4edf299d920174e670fd9fe518a1b8c4ad4fa197803f398"
+      },
+      "source_and_model_binding": {
+        "production_cuda_source_sha256": "a7a43140358be5cc4950f5f0d670e303fb2ca422a383584e71e743eb2dfe5e59",
+        "driver_sha256": "ae5e4b5c76bab37bf43a0ff67bf61cf9b57c8ff97e39abdac47b2a1059ba561f",
+        "qxf_sha256": "5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840",
+        "gguf_sha256": "c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652",
+        "freeze_unchanged": true
+      },
+      "scope_limit": "Current exact-byte same-input final-head evidence only; no global model, residual, multi-token, semantic, speed, 4K, or release-readiness claim."
+    }
+  },
+  "build_and_runtime": {
+    "default_build": "build_msvc.bat",
+    "opt_in_cuda_build": "build_cuda_msvc.bat cuda",
+    "repository_root_cwd_required": true,
+    "cuda_toolchain_scope": "user-local installation; not a repository dependency and not a global machine configuration",
+    "runtime_path_requirement": "Prepend the user-local CUDA bin directory to PATH only for the CUDA-linked process/session; do not mutate global PATH.",
+    "default_execution": "CPU-only build and F32 activation remain the defaults; CUDA final-head execution requires both the CUDA build and explicit --cuda-policy final-head-f32.",
+    "final_build_provenance": {
+      "status": "pass",
+      "source_id": "issue85-final-provenance-20260925T191833Z",
+      "manifest_sha256": "e572a629104dc6170e86474cd77db87ebf7a2a7de641b50fa88f775b3d1237f9",
+      "full_stdout_stderr_exitcode_verified": true,
+      "portable_record": "wiki/evidence/issue-85-final-build-provenance.json"
+    }
+  },
+  "claims": {
+    "speed_claim": false,
+    "memory_leak_absence_claim": false,
+    "default_promoted": false,
+    "cpu_default_activation": "f32",
+    "cuda_policy_default": "none",
+    "four_k_gate": "not_met",
+    "issue_84": "open",
+    "timing_acceptance": "nongating_unmeasured",
+    "device_loss_recovery_claim": false
+  },
+  "release_gates": {
+    "status": "not_passed",
+    "issue_85_complete": false,
+    "passed": [
+      {
+        "gate": "current-source one-device fixed-v2 preflight",
+        "source_id": "fresh-preflight-cudafuncattrs-20260925T184644-008440"
+      },
+      {
+        "gate": "current-source fault injection and fail-closed cleanup",
+        "source_id": "final-fault-evidence-20260925T194218Z-8801"
+      },
+      {
+        "gate": "current-source repeated same-process native final-head runtime and bounded memory",
+        "source_id": "issue85-runtime-memory-20260925-185018"
+      },
+      {
+        "gate": "fresh build with source/model/driver hash binding and complete build logs",
+        "source_id": "issue85-final-provenance-20260925T191833Z"
+      },
+      {
+        "gate": "current-source strict actual-model all-151936-logit matrix",
+        "source_id": "actual-model-20260925T192200-914a6125",
+        "thresholds": {
+          "max_abs_lte": 0.001,
+          "rmse_lte": 0.0001,
+          "cosine_gte": 0.999999
+        },
+        "result": "pass"
+      },
+      {
+        "gate": "CPU and CUDA/MoE regression logs",
+        "result": "pass",
+        "note": "Suites overlap and are not summed.",
+        "records": {
+          "cpu": {
+            "result": "780 passed, 3 skipped",
+            "sha256": "64d2f9e081de83a046c698e5a9b1f277fd7b487d71ed76e4ef9636601c8ec44a"
+          },
+          "moe": {
+            "result": "76 passed",
+            "sha256": "00df049b9a4f259cb64ac2e7b5fc0129babd22397a311a2065dbda1e34cdb196"
+          },
+          "hardening": {
+            "result": "36 passed",
+            "sha256": "bf1ddef7a4192fbe999f373a83a3adaa484a38284521794de4ce81db5323195c"
+          },
+          "ready_fix": {
+            "result": "61 passed",
+            "sha256": "4254fc6cdd68886bb68ddf1f4a6449c1558ccebf0ae0c06cab8e79bd93ea5362"
+          }
+        }
+      }
+    ]
+  },
+  "remaining_gates": [
+    {
+      "gate": "two independent reviews of the exact staged digest",
+      "status": "pending",
+      "reason": "The final frozen 44-file staged payload must receive two independent PASS reviews over its exact full-diff SHA-256."
+    },
+    {
+      "gate": "Auto Research and repository CI on the final revision",
+      "status": "pending",
+      "reason": "After dual review, the final revision still requires the project Auto Research gate and repository CI; current local provenance does not bind a commit, pushed revision, or post-change CI run."
+    }
+  ],
+  "non_gating_limitations_and_future_work": [
+    {
+      "item": "supported-device breadth",
+      "status": "limited_to_one_verified_device",
+      "reason": "Current execution covers one NVIDIA GeForce RTX 4070 Laptop GPU with compute capability 8.9. The incompatible-kernel rejection test is fail-closed coverage, not a broad supported-device matrix."
+    },
+    {
+      "item": "actual device-kernel failure and device-loss recovery",
+      "status": "unproven_nongating",
+      "reason": "The negative gate injects CUDA API return failures, including cudaGetLastError after a real launch; it does not create an actually failed device kernel or exercise device-loss recovery. This testing is beyond the bounded Issue #85 contract, and no recovery claim is authorized."
+    },
+    {
+      "item": "performance breakdown and latency characterization",
+      "status": "unmeasured_nongating",
+      "reason": "The issue contract explicitly marks performance as non-gating. Observed step durations are not an acceptance distribution and authorize no speedup or sustained-generation throughput claim."
+    },
+    {
+      "item": "native CPU 4K",
+      "status": "separate_issue_84_gate_not_met",
+      "reason": "Issue #84 remains open after its timed-out attempt; Issue #85 does not promote, replace, or depend on that separate gate."
+    }
+  ],
+  "portable_packaging": {
+    "original_raw_sources_modified": false,
+    "models_or_weights_included": false,
+    "executables_or_object_files_included": false,
+    "private_absolute_paths_in_versioned_artifacts": false,
+    "large_logit_sidecars_included": false,
+    "raw_records": [
+      "wiki/evidence/issue-85-current-fixed-v2-gpu-driver.stdout.log",
+      "wiki/evidence/issue-85-runtime-memory-run-report.json",
+      "wiki/evidence/issue-85-fault-driver.stdout.log",
+      "wiki/evidence/issue-85-final-build.stdout.raw.log",
+      "wiki/evidence/issue-85-final-build.stderr.raw.log",
+      "wiki/evidence/issue-85-final-build.exitcode"
+    ],
+    "derived_sanitized_records": [
+      "wiki/evidence/issue-85-current-preflight-summary.json",
+      "wiki/evidence/issue-85-fault-run-sanitized.json",
+      "wiki/evidence/issue-85-final-build-provenance.json",
+      "wiki/evidence/issue-85-strict-actual-model-summary.json"
+    ],
+    "hash_manifest": "wiki/evidence/issue-85-artifact-manifest.json",
+    "hash_domain_note": "raw_sha256 hashes exact bytes. lf_normalized_sha256 hashes the same text after CRLF-to-LF conversion only; it is supplied to distinguish executed Windows bytes from Git/index-style LF text."
+  }
+}

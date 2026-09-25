@@ -2,7 +2,7 @@
 
 Experimental C runtime and mmap-oriented model format for correctness-first local inference of **Qwen3-30B-A3B MoE**.
 
-> Status: research runtime. Qwen3 GPT-2/Qwen2 BPE parity is GREEN for fixed ASCII, Unicode, whitespace and ChatML prompts. QXF1 now rejects malformed manifests, directories, dimensions, placements, overlaps and legacy truncated rows fail-closed. The C loop prefills IDs, then re-embeds greedy outputs with persistent per-layer INT8 KV across all 48 layers and the complete 151936-row Q6_K head. Exhaustive Unicode/chat-template coverage and external end-to-end residual parity are not finished. Probe timing is not conversational decode throughput.
+> Status: research runtime. Qwen3 GPT-2/Qwen2 BPE parity is GREEN for fixed ASCII, Unicode, whitespace and ChatML prompts. QXF1 now rejects malformed manifests, directories, dimensions, placements, overlaps and legacy truncated rows fail-closed. The C loop prefills IDs, then re-embeds greedy outputs with persistent per-layer INT8 KV across all 48 layers and the complete 151936-row Q6_K head. An opt-in CUDA final-head path has point-in-time functional evidence, but its release gates are not passed. Exhaustive Unicode/chat-template coverage and external end-to-end residual parity are not finished. Probe timing is not conversational decode throughput.
 
 ## Goals
 
@@ -111,6 +111,14 @@ The runner used by the attempt had SHA-256 `116212700099472958e0cbacc7cd433de0cd
 
 Roadmap proposal: implement an opt-in CUDA path for the final output head next, with CPU-only behavior and all current CPU policies remaining the defaults. CPU 4K remains unproven; native resume, KV-quality validation, and soak/thermal validation remain deferred and must not be inferred from admission limits or the timed-out attempt.
 
+## Opt-in CUDA final output head (Issue #85)
+
+Issue #85 has meaningful opt-in implementation progress: the CPU-only build still links the unavailable stub, while `build_cuda_msvc.bat cuda` builds a CUDA-enabled executable and runtime selection requires explicit `--cuda-policy final-head-f32`. From the repository root, point `QX_CUDA_ROOT` (preferred) or `CUDA_PATH` at a CUDA toolkit directory, then run `build_cuda_msvc.bat cuda`; the fault runner also accepts an explicit portable override via `python tests/run_cuda_final_head_faults.py --cuda-root <cuda-toolkit-root>`. Do not record a private machine's actual toolkit path. The fixed-v2 GPU driver returned `[1124,77]`, retained legacy profile-NULL output `1124`, recorded one weight upload, two kernel launches and zero CPU fallbacks on an NVIDIA GeForce RTX 4070 Laptop GPU (compute capability 8.9). The raw run is preserved through byte-exact versioned copies and `wiki/evidence/issue-85-artifact-manifest.json`; raw-byte and LF-normalized hashes are deliberately separate.
+
+The latest current-source strict actual-model run is `build/issue85-acceptance/actual-model-20260925T192200-914a6125/acceptance-report.json`, SHA-256 `0cba74521a13cabf3c1003385e5865a413784c813f59e804c92f186b25f98d7c`. The final-provenance manifest SHA-256 is `e572a629104dc6170e86474cd77db87ebf7a2a7de641b50fa88f775b3d1237f9`; it binds the fresh driver to production CUDA source SHA-256 `a7a43140358be5cc4950f5f0d670e303fb2ca422a383584e71e743eb2dfe5e59`, QXF SHA-256 `5609589e45a610bee6699f336109f3231326850d8f1ca839c614667c2f439840`, GGUF SHA-256 `c8c2dc330dd1ec0c72c31b12e318647e6f9e0c773b9123eccfc3d12d9acc6652`, and complete build stdout/stderr/exit-code records. For one fixed layer-47 residual, all 151936 CPU/GPU logits are finite and exact (`max_abs=0`, `RMSE=0`, cosine `1`) under strict thresholds `0.001`, `0.0001`, and `0.999999`; argmax is `1124`, and 6/6 GPU outputs are byte-identical. This is exact same-input final-head evidence, not global model parity.
+
+The local Issue #85 publication package is **PASS**, but Issue #85 release gates are **NOT PASSED**: the exact staged digest still requires two independent reviews, followed by the Auto Research and repository CI gates on the final revision. Current contract gates pass the one-device fixed-v2 preflight, 10 fail-closed negative tests, repeated same-process bounded-memory coverage, and overlapping regression suites (`780 passed, 3 skipped`; `76 passed`; `36 passed`; `61 passed`, not summed). The negative evidence injects CUDA API return failures, including `cudaGetLastError` after a real launch; it does not demonstrate an actually failed kernel or device-loss recovery. Performance breakdown/latency acceptance is explicitly nongating. Broader device coverage, actual-kernel/device-loss testing, and performance characterization remain limitations or future work, not Issue #85 release blockers; no speed or device-loss recovery claim is authorized. CPU 4K remains a separate unmet Issue #84 gate. CPU/F32 and `--cuda-policy none` remain defaults; no default promotion, 4K claim, or release-readiness claim is authorized. Portable details and claim limits are in `wiki/evidence/issue-85-cuda-final-head-report.json`.
+
 ## Honest performance state
 
 Earlier probe measurements on the scalar CPU path:
@@ -123,7 +131,7 @@ real one-token 48-layer + complete output head probe: ~8.35 s warm run
 
 The complete-head measurement includes final RMSNorm and all 151936 logits for one position. Issues #82 and #83 supersede the statement that multi-token native execution was unmeasured, but their bounded cases are still not sustained conversational throughput and must not be reported as tok/s. See [`wiki/concepts/performance-model.md`](wiki/concepts/performance-model.md).
 
-CUDA is planned but **not implemented**.
+CUDA is implemented only for the opt-in F32 final output head. It is not the default and is not release-complete; attention and MoE remain on CPU, and the Issue #85 release gates above are not passed.
 
 Long-context experimentation is opt-in and gated. The default remains
 `--long-context-policy none`; `--long-context-policy ctx4k-smoke` is only an
@@ -275,10 +283,10 @@ See [`wiki/concepts/auto-research-loop.md`](wiki/concepts/auto-research-loop.md)
 
 ## Roadmap
 
-1. Release the verified Issue #81 native CPU generation slice with its source/test/executable provenance; commit and CI are still pending.
-2. Preserve closed Issue #80's token-1000 layer-3 seam evidence without extrapolating that fixed case to global parity or an identified kernel origin.
-3. Convert the existing 4K/RSS/KV-quality/soak contracts into real measurements outside heavy default CI; the Issue #81 `ctx` limit is not that coverage.
-4. Design a hybrid CUDA backend only after the CPU/parity milestone closes and transfer/residency costs are measured.
+1. Keep Issue #85 opt-in; freeze the exact staged digest, obtain two independent reviews, then run the Auto Research and repository CI gates on the final revision.
+2. Treat broader device coverage, actual device-kernel/device-loss testing, and performance breakdown/latency measurement as nongating limitations or future work. Current evidence authorizes no speed, sustained-throughput, general leak-absence, or device-loss recovery claim.
+3. Preserve CPU/F32 and `--cuda-policy none` defaults while the true Issue #85 release gates remain **NOT PASSED**.
+4. Convert the existing 4K/RSS/KV-quality/soak contracts into real measurements outside heavy default CI; Issue #84 remains open and its timed-out attempt does not establish 4K capacity.
 
 ## License
 

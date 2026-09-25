@@ -7,3 +7,23 @@ scripts/native_4k_acceptance.py text eol=lf
 wiki/evidence/issue-84-cpu4k-run-1/** -text
 wiki/evidence/issue-84-cpu4k-preflight/** -text
 wiki/evidence/issue-84-cpu4k-preflight-v2/** -text
+
+# Issue #85 executed Windows records: preserve exact raw bytes.
+wiki/evidence/issue-85-fixed-v2-gpu-driver.* -text whitespace=cr-at-eol
+wiki/evidence/issue-85-current-fixed-v2-gpu-driver.stdout.log -text whitespace=cr-at-eol
+wiki/evidence/issue-85-runtime-memory-run-report.json -text whitespace=cr-at-eol
+wiki/evidence/issue-85-fault-driver.stdout.log -text whitespace=cr-at-eol
+wiki/evidence/issue-85-final-build.stdout.raw.log -text whitespace=cr-at-eol
+wiki/evidence/issue-85-final-build.stderr.raw.log -text whitespace=cr-at-eol
+wiki/evidence/issue-85-final-build.exitcode -text whitespace=cr-at-eol
+
+# Issue #85 derived publication records are canonical LF text.
+wiki/evidence/issue-85-cuda-final-head-report.json text eol=lf
+wiki/evidence/issue-85-artifact-manifest.json text eol=lf
+wiki/evidence/issue-85-current-fixed-v2-source-hashes.json text eol=lf
+wiki/evidence/issue-85-current-preflight-summary.json text eol=lf
+wiki/evidence/issue-85-fault-run-sanitized.json text eol=lf
+wiki/evidence/issue-85-final-build-provenance.json text eol=lf
+wiki/evidence/issue-85-strict-actual-model-summary.json text eol=lf
+# Preserve the immutable raw-byte source-hash record exactly as captured.
+wiki/evidence/issue-85-current-fixed-v2-source-hashes.json -text whitespace=cr-at-eol

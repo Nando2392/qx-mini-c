@@ -1,0 +1,52 @@
+qxfit.c
+qx_main.c
+qx_cuda_final_head_stub.c
+Generating Code...
+qx_avx2.c
+qx_format.c
+qx_gguf.c
+qx_tokenizer.c
+qx_qxf_main.c
+qx_cuda_final_head_stub.c
+Generating Code...
+qx_format.c
+qx_gguf.c
+qx_tokenizer.c
+qx_cuda_final_head_stub.c
+state_loop_replay_api_contract.c
+Generating Code...
+qx_format.c
+qx_gguf.c
+qx_tokenizer.c
+qx_cuda_final_head_stub.c
+qxf_mmap_api_contract.c
+Generating Code...
+qx_format.c
+qx_gguf.c
+qx_tokenizer.c
+qx_cuda_final_head_stub.c
+native_generation_api_contract.c
+Generating Code...
+qx_format.c
+qx_gguf.c
+qx_tokenizer.c
+qx_cuda_final_head_stub.c
+native_generation_policy_api_contract.c
+Generating Code...
+qx_format.c
+qx_gguf.c
+qx_tokenizer.c
+qx_cuda_final_head_stub.c
+native_generation_capacity_contract.c
+Generating Code...
+qx_cuda_final_head.cu
+tmpxft_00004fe0_00000000-7_qx_cuda_final_head.cudafe1.cpp
+qx_format.c
+qx_gguf.c
+qx_tokenizer.c
+qx_qxf_main.c
+Generating Code...
+cuda_final_head_backend_driver.cu
+tmpxft_00005d54_00000000-7_cuda_final_head_backend_driver.cudafe1.cpp
+qx_cuda_final_head.cu
+tmpxft_00005d54_00000000-11_qx_cuda_final_head.cudafe1.cpp

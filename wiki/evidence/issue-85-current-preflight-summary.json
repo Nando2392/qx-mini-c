@@ -1,0 +1,35 @@
+{
+  "schema": "qx.issue-85.current-preflight-summary.v1",
+  "source_id": "fresh-preflight-cudafuncattrs-20260925T184644-008440",
+  "status": "pass",
+  "source_artifacts": {
+    "stdout": "build/issue85-fixed-v2-verification/fresh-preflight-cudafuncattrs-20260925T184644-008440.stdout.log",
+    "stderr": "build/issue85-fixed-v2-verification/fresh-preflight-cudafuncattrs-20260925T184644-008440.stderr.log",
+    "exitcode": "build/issue85-fixed-v2-verification/fresh-preflight-cudafuncattrs-20260925T184644-008440.exitcode",
+    "hashes_before": "build/issue85-fixed-v2-verification/fresh-preflight-cudafuncattrs-20260925T184644-008440.hashes-before.json",
+    "hashes_after": "build/issue85-fixed-v2-verification/fresh-preflight-cudafuncattrs-20260925T184644-008440.hashes-after.json"
+  },
+  "returncode": 0,
+  "stderr_empty": true,
+  "source_hashes_unchanged": true,
+  "driver_hashes_unchanged": true,
+  "production_cuda_source_sha256": "a7a43140358be5cc4950f5f0d670e303fb2ca422a383584e71e743eb2dfe5e59",
+  "driver_executable_sha256": "ed695594b6d9a245a26e6b6fd28530b92841ce78b06b3cea335153390e5fb032",
+  "nested_driver_source_id": "fixed-v2-gpu-driver-20260925T184644-101003",
+  "nested_driver_result": {
+    "status": "pass",
+    "fixed_v2_outputs": [1124, 77],
+    "legacy_profile_null_output": 1124,
+    "requested_cuda_policy": 1,
+    "effective_cuda_policy": 1,
+    "device": "NVIDIA GeForce RTX 4070 Laptop GPU",
+    "compute_capability": "8.9",
+    "weight_uploads": 1,
+    "kernel_launches": 2,
+    "cpu_fallbacks": 0
+  },
+  "versioned_raw_stdout": "wiki/evidence/issue-85-current-fixed-v2-gpu-driver.stdout.log",
+  "versioned_source_hashes": "wiki/evidence/issue-85-current-fixed-v2-source-hashes.json",
+  "sanitization": "Derived from the named preflight artifacts. Private absolute paths, model paths, toolchain paths, and command lines are intentionally omitted; raw source artifacts remain unmodified outside the versioned package.",
+  "scope_limit": "This passes the current-source preflight and one-device functional driver gate. It is not a supported-device compatibility matrix, an all-logit rerun, a speed benchmark, or final commit/CI binding."
+}

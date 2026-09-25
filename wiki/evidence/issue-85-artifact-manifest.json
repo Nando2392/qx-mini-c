@@ -1,0 +1,216 @@
+{
+  "schema": "qx.issue-85.portable-artifact-manifest.v3",
+  "status": "final",
+  "source_ids": [
+    "fixed-v2-gpu-driver-20260925T182810-884971",
+    "fresh-preflight-cudafuncattrs-20260925T184644-008440",
+    "fixed-v2-gpu-driver-20260925T184644-101003",
+    "issue85-runtime-memory-20260925-185018",
+    "final-fault-evidence-20260925T185955-28027",
+    "final-fault-evidence-20260925T194218Z-8801",
+    "issue85-final-provenance-20260925T191833Z",
+    "actual-model-20260925T192200-914a6125"
+  ],
+  "authoritative_inputs": {
+    "final_provenance_manifest": {
+      "path": "build/issue85-final-provenance-20260925T191833Z/manifest.json",
+      "sha256": "e572a629104dc6170e86474cd77db87ebf7a2a7de641b50fa88f775b3d1237f9"
+    },
+    "latest_strict_acceptance_report": {
+      "path": "build/issue85-acceptance/actual-model-20260925T192200-914a6125/acceptance-report.json",
+      "sha256": "0cba74521a13cabf3c1003385e5865a413784c813f59e804c92f186b25f98d7c"
+    }
+  },
+  "hash_domains": {
+    "raw_sha256": "SHA-256 over exact on-disk bytes of the versioned artifact.",
+    "lf_normalized_sha256": "SHA-256 after replacing CRLF with LF only; no other normalization.",
+    "interpretation": "Use raw_sha256 for executed/raw byte provenance and exact-copy verification. Use lf_normalized_sha256 only for text line-ending comparison."
+  },
+  "artifacts": [
+    {
+      "kind": "derived_portable",
+      "path": "wiki/evidence/issue-85-cuda-final-head-report.json",
+      "bytes": 15179,
+      "raw_sha256": "171b1f5a831ed1979a108ac0b23666f82a62cb607a3cf2330b55718f8945d371",
+      "lf_normalized_sha256": "171b1f5a831ed1979a108ac0b23666f82a62cb607a3cf2330b55718f8945d371",
+      "crlf_sequences": 0
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-current-fixed-v2-gpu-driver.stdout.log",
+      "bytes": 751,
+      "raw_sha256": "b9ca45823bbdc7ca1d11ad67656b48731c2ecd4eb7dc75ff4202306e81bcb2d9",
+      "lf_normalized_sha256": "66bb9cbdf0729d57198f5d1cccc6308d7126e5c158494736b55d2e9e655b4749",
+      "crlf_sequences": 14
+    },
+    {
+      "kind": "derived_portable",
+      "path": "wiki/evidence/issue-85-current-fixed-v2-source-hashes.json",
+      "bytes": 1522,
+      "raw_sha256": "0e80378a62a379090f9997286e8deb2fc66aafd184eb0453675834b360c6fd00",
+      "lf_normalized_sha256": "3ef008885535552eeff858446ccf7adf619ef994ef8064875a55080acc16c38a",
+      "crlf_sequences": 18
+    },
+    {
+      "kind": "derived_portable",
+      "path": "wiki/evidence/issue-85-current-preflight-summary.json",
+      "bytes": 2168,
+      "raw_sha256": "ddabaeb32bf135595da95e6151916bfd19cd365e5bcdf63308265bb0d45241b6",
+      "lf_normalized_sha256": "ddabaeb32bf135595da95e6151916bfd19cd365e5bcdf63308265bb0d45241b6",
+      "crlf_sequences": 0
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-fault-driver.stdout.log",
+      "bytes": 655,
+      "raw_sha256": "115815519a3dd55353eba88c5cb97e5b248c67903f3fac0530db753bab89a41a",
+      "lf_normalized_sha256": "115815519a3dd55353eba88c5cb97e5b248c67903f3fac0530db753bab89a41a",
+      "crlf_sequences": 0
+    },
+    {
+      "kind": "derived_portable",
+      "path": "wiki/evidence/issue-85-fault-run-sanitized.json",
+      "bytes": 2905,
+      "raw_sha256": "a16f060f3a28a18f7d511b2f29f407d1c55b31176bd54b15a0f46b083e042683",
+      "lf_normalized_sha256": "a16f060f3a28a18f7d511b2f29f407d1c55b31176bd54b15a0f46b083e042683",
+      "crlf_sequences": 0
+    },
+    {
+      "kind": "derived_portable",
+      "path": "wiki/evidence/issue-85-final-build-provenance.json",
+      "bytes": 5851,
+      "raw_sha256": "8330576065c0dfa46158bc920f5574b11452a7561c121c2ecb24ece14ef7944f",
+      "lf_normalized_sha256": "8330576065c0dfa46158bc920f5574b11452a7561c121c2ecb24ece14ef7944f",
+      "crlf_sequences": 0
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-final-build.exitcode",
+      "bytes": 3,
+      "raw_sha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+      "lf_normalized_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "crlf_sequences": 1
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-final-build.stderr.raw.log",
+      "bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "lf_normalized_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "crlf_sequences": 0
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-final-build.stdout.raw.log",
+      "bytes": 1134,
+      "raw_sha256": "5b0e3a06807db6ab76ca6404119bb5bf6f9113140617e693029a46bea2147bfc",
+      "lf_normalized_sha256": "7e37df1b57284f9e41847aa22c185fc5da4ef181ec93f8b20c7f7e09c9073467",
+      "crlf_sequences": 52
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-fixed-v2-gpu-driver.exitcode",
+      "bytes": 3,
+      "raw_sha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+      "lf_normalized_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "crlf_sequences": 1
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-fixed-v2-gpu-driver.hashes-after.json",
+      "bytes": 1522,
+      "raw_sha256": "5230d90ace0d2216b4054e378619706657f46f23cfda72fc8f62828efa9aaf17",
+      "lf_normalized_sha256": "600fef8dd4d5a4a96c4a0d04a7a1cb0e44dca471e6a33af994374f6aadfe8cc0",
+      "crlf_sequences": 18
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-fixed-v2-gpu-driver.hashes-before.json",
+      "bytes": 1522,
+      "raw_sha256": "5230d90ace0d2216b4054e378619706657f46f23cfda72fc8f62828efa9aaf17",
+      "lf_normalized_sha256": "600fef8dd4d5a4a96c4a0d04a7a1cb0e44dca471e6a33af994374f6aadfe8cc0",
+      "crlf_sequences": 18
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-fixed-v2-gpu-driver.stderr.log",
+      "bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "lf_normalized_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "crlf_sequences": 0
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-fixed-v2-gpu-driver.stdout.log",
+      "bytes": 751,
+      "raw_sha256": "064269ce414192d0105c03760fb55787a01909d4ea50863963366f17e5ff5fd2",
+      "lf_normalized_sha256": "8b3cb221ca776b38063546d38e5975b4683a0e7b35481e3aff862f4a1309874c",
+      "crlf_sequences": 14
+    },
+    {
+      "kind": "raw_exact_copy",
+      "path": "wiki/evidence/issue-85-runtime-memory-run-report.json",
+      "bytes": 4497,
+      "raw_sha256": "1b8ab9066d4fd39c169b272ac3a7ffed21a7d90a9faea611976b85f960562cc3",
+      "lf_normalized_sha256": "44335cc22eba1071ae8fea6f5272064dc495931228bd47e1a47f3facd05545e0",
+      "crlf_sequences": 152
+    },
+    {
+      "kind": "derived_portable",
+      "path": "wiki/evidence/issue-85-strict-actual-model-summary.json",
+      "bytes": 4498,
+      "raw_sha256": "88b5b57e62b51a16755cde0b8b2b85005d2cdc7a73afdc34a18410fcd12c7e8e",
+      "lf_normalized_sha256": "88b5b57e62b51a16755cde0b8b2b85005d2cdc7a73afdc34a18410fcd12c7e8e",
+      "crlf_sequences": 0
+    }
+  ],
+  "source_copy_checks": [
+    {
+      "source_path": "build/issue85-final-provenance-20260925T191833Z/02-build.stdout.raw.log",
+      "versioned_path": "wiki/evidence/issue-85-final-build.stdout.raw.log",
+      "byte_exact_copy": true,
+      "sha256": "5b0e3a06807db6ab76ca6404119bb5bf6f9113140617e693029a46bea2147bfc"
+    },
+    {
+      "source_path": "build/issue85-final-provenance-20260925T191833Z/02-build.stderr.raw.log",
+      "versioned_path": "wiki/evidence/issue-85-final-build.stderr.raw.log",
+      "byte_exact_copy": true,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "build/issue85-final-provenance-20260925T191833Z/02-build.exitcode",
+      "versioned_path": "wiki/evidence/issue-85-final-build.exitcode",
+      "byte_exact_copy": true,
+      "sha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354"
+    }
+  ],
+  "regression_log_sources_not_copied": {
+    "reason": "Original logs are build artifacts; only small result/hash records are published, and overlapping suites are not summed.",
+    "records": {
+      "cpu": {
+        "result": "780 passed, 3 skipped",
+        "sha256": "64d2f9e081de83a046c698e5a9b1f277fd7b487d71ed76e4ef9636601c8ec44a"
+      },
+      "moe": {
+        "result": "76 passed",
+        "sha256": "00df049b9a4f259cb64ac2e7b5fc0129babd22397a311a2065dbda1e34cdb196"
+      },
+      "hardening": {
+        "result": "36 passed",
+        "sha256": "bf1ddef7a4192fbe999f373a83a3adaa484a38284521794de4ce81db5323195c"
+      },
+      "ready_fix": {
+        "result": "61 passed",
+        "sha256": "4254fc6cdd68886bb68ddf1f4a6449c1558ccebf0ae0c06cab8e79bd93ea5362"
+      }
+    }
+  },
+  "excluded": [
+    "model weights and extracted output.weight",
+    "151936-float CPU/GPU logit sidecars",
+    "raw manifests/logs containing private absolute paths or private environment values",
+    "executables and object files"
+  ],
+  "line_ending_policy": ".gitattributes preserves exact raw Issue #85 execution records with -text and canonicalizes derived records to LF.",
+  "manifest_self_hash": "omitted_by_design"
+}
