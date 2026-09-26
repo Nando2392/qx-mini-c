@@ -1,0 +1,173 @@
+{
+  "schema": "qx.issue-86.portable-verification-summary.v1",
+  "issue": 86,
+  "status": "pass",
+  "matrix": {
+    "derived_report": "wiki/evidence/issue-86-final-matrix-portable.json",
+    "derived_report_sha256": "4888fe6185f68f8dceffbd919a6dc181ff88497e240f0c837f6de031a3b721e4",
+    "derived_hash_domain": "SHA-256 over exact UTF-8/LF bytes of the derived portable report",
+    "raw_source_report": "build/issue86-postrace-final-matrix-20260926-232650/report.json",
+    "raw_source_report_sha256": "4775fa1a7c39fb87c9d22d8472b6ae26418544ddbef24cd5715163eee7be187e",
+    "raw_hash_domain": "SHA-256 over exact on-disk bytes of the unsanitized source report",
+    "run_count": 16,
+    "full_logit_artifact_count": 32,
+    "frozen_hash_count": 22,
+    "all_runs_returncode_zero": true,
+    "gate_true_count": 12,
+    "all_gates_true": true,
+    "inputs_pre_post_equal": true,
+    "independent_raw_verification": "PARENT-VERIFIED: 16 runs, 12 true gates, and pre/post input equality were verified before publication. This refresh did not rehash the 10 GB model or reverify the 32 logit sidecars."
+  },
+  "full_cpu_regression": {
+    "source_directory": "build/issue86-postrace-fullcpu-20260926T204940336497Z",
+    "stdout_log": {
+      "path": "build/issue86-postrace-fullcpu-20260926T204940336497Z/pytest.stdout.log",
+      "bytes": 11827,
+      "raw_sha256": "3eb26c7ca2903deb875153616d5513544253f00dcf60c1bbc3e5c3f541cad47e"
+    },
+    "result": "965 passed, 3 skipped in 1243.42s (0:20:43)",
+    "passed": 965,
+    "skipped": 3,
+    "duration_seconds": 1243.42,
+    "started_utc": "2026-09-26T20:49:45Z",
+    "ended_utc": "2026-09-26T21:10:29Z",
+    "exit_code": 0,
+    "timed_out": false,
+    "skip_reasons": [
+      {
+        "count": 1,
+        "test": "tests/test_cuda_final_head_acceptance.py:105",
+        "reason": "GPU execution is opt-in; set QX_REQUIRE_CUDA_FINAL_HEAD=1 for release acceptance"
+      },
+      {
+        "count": 1,
+        "test": "tests/test_real_iq4xs_projection.py:199",
+        "reason": "real Qwen runtime fixtures are not available"
+      },
+      {
+        "count": 1,
+        "test": "tests/test_real_iq4xs_projection.py:300",
+        "reason": "real Qwen runtime fixtures are not available"
+      }
+    ],
+    "status": "pass"
+  },
+  "smoke_and_wiki": {
+    "source_directory": "build/issue86-postrace-nextgates-20260926T211507508122500Z",
+    "status": "pass",
+    "smoke_status_from_log": "pass",
+    "wiki_status_from_log": "PASS",
+    "records": [
+      {
+        "path": "build/issue86-postrace-nextgates-20260926T211507508122500Z/smoke.log",
+        "bytes": 441,
+        "raw_sha256": "e2e15d8fa573db671d4f042cadc506e1f0cd31af045fc664bb638af9f379b850",
+        "kind": "smoke"
+      },
+      {
+        "path": "build/issue86-postrace-nextgates-20260926T211507508122500Z/lint-wiki.log",
+        "bytes": 54,
+        "raw_sha256": "94782a9bdebc4779e981aa30cf9695f956de43d4a1be13d6c2c4dd52441e440e",
+        "kind": "wiki_lint"
+      }
+    ],
+    "batch_status": "aborted_after_smoke_and_wiki",
+    "batch_abort_reason": "active process gate failed",
+    "batch_abort_record": {
+      "path": "build/issue86-postrace-nextgates-20260926T211507508122500Z/ABORTED.txt",
+      "bytes": 27,
+      "raw_sha256": "c5ab4eda6f66411da8210f16097771a1c15f2310ced86b269a71fd85e51273ae"
+    },
+    "interpretation_limit": "The smoke and wiki logs explicitly report pass; the containing next-gates batch is not claimed as a pass because it aborted at a later active-process gate."
+  },
+  "driver_rebuild": {
+    "path": "build/issue86-driver-testonly/issue86-final-driver-build-20260926-232432.json",
+    "bytes": 4305,
+    "raw_sha256": "f07a108179e51a79f8871aa8b4dcb268a503acf1573ca96fbcdf4d94b21b1367",
+    "status": "PASS",
+    "exit_code": 0,
+    "elapsed_seconds": 6.706,
+    "executable_sha256": "ca8ece23d7e7b2e7869ffd2a19abe3f39fe41386ab340a9bc852a041fc52a0c5",
+    "pre_and_new_executable_sha256_equal": true,
+    "source_hashes_unchanged": true
+  },
+  "historical_gates": {
+    "note": "These are earlier independent gate records. They are preserved for provenance and are not summed with or substituted for the current 965-pass full-CPU gate or the current smoke/wiki records.",
+    "full_cpu_regression": {
+      "source_manifest": "build/issue86-fullcpu-verified-20260926T183717Z/copy-manifest.json",
+      "source_manifest_raw_sha256": "238ab263e71c932a6a5299455c30d83c3a480b9cc2ccb6aab4f4b8aaf1dde772",
+      "result": "960 passed, 3 skipped in 1235.60s (0:20:35)",
+      "passed": 960,
+      "skipped": 3,
+      "duration_seconds": 1235.6,
+      "started_utc": "2026-09-26T18:16:41Z",
+      "ended_utc": "2026-09-26T18:37:17Z",
+      "pid": 24016,
+      "exit_code": 0,
+      "timed_out": false,
+      "preservation_limit": "The successful run overwrote prior failed-run logs in place. The preserved summary cannot identify the exact three skipped tests; it does not claim recovery of overwritten logs or exact skip identities."
+    },
+    "smoke_and_wiki": {
+      "source_pattern": "build/issue86-smoke-wiki-20260926T184555Z-*.log",
+      "status": "pass",
+      "logs_exit_code": 0,
+      "records": [
+        {
+          "path": "build/issue86-smoke-wiki-20260926T184555Z-gitdiffcheck.log",
+          "bytes": 648,
+          "raw_sha256": "1fa1273db04688462b51695af2a8b7b154b7d4b7c6cfaa7725fce921e98d4f84",
+          "exit_code": 0
+        },
+        {
+          "path": "build/issue86-smoke-wiki-20260926T184555Z-smoke.log",
+          "bytes": 527,
+          "raw_sha256": "ad1d6047815368fa966d52fb06a3a9d9f921b94b76fd3d6d2fb1baace26f4cc1",
+          "exit_code": 0
+        },
+        {
+          "path": "build/issue86-smoke-wiki-20260926T184555Z-summary.log",
+          "bytes": 234,
+          "raw_sha256": "1ff41ef6f63e3fc91ee1b44e9a65a71adec0188b127e72bebfcadf440cf531aa",
+          "exit_code": 0
+        },
+        {
+          "path": "build/issue86-smoke-wiki-20260926T184555Z-wiki.log",
+          "bytes": 146,
+          "raw_sha256": "d3f1e6082dca326706e1ce69e6e296832b670d7ae088e89a211200f11e6837d2",
+          "exit_code": 0
+        }
+      ]
+    },
+    "post_full_suite": {
+      "path": "build/issue86-privacygate-pytest-20260926T212636.log",
+      "raw_sha256": "d4b7390900dbe43877e5a9e0cfb972bdb494cfc3c1acc12238379f55a63c47f1",
+      "bytes": 685,
+      "passed": 33,
+      "duration_seconds": 5.86,
+      "result": "33 passed in 5.86s",
+      "status": "pass"
+    },
+    "patched_platform_tests": {
+      "path": "build/issue86-patchedplatform-pytest-20260926-220702.log",
+      "raw_sha256": "0a5db633d3b92f1f6f92975240fa7f2c25207d047fc32ac9ae32fe6bb23ba152",
+      "bytes": 1010,
+      "argv_sanitized": "<python> -m pytest tests/test_build_expert_cache_acceptance_driver.py tests/test_expert_cache_core.py tests/test_expert_cache_raw_read_adapter.py tests/test_native_expert_cache_abi.py tests/test_expert_cache_acceptance.py tests/test_expert_cache_logit_bytes.py -q -ra",
+      "actual_argv_verified_from_raw_log": true,
+      "exit_code": 0,
+      "passed": 47,
+      "duration_seconds": 23.39,
+      "result": "47 passed in 23.39s",
+      "status": "pass",
+      "execution_scope": "targeted six-file pytest gate; independent of and not summed with the historical full-suite or post-full-suite records",
+      "platform_interpretation": "Executed on Windows. The added non-Windows branches are simulated by monkeypatching sys.platform and verify skip-before-subprocess behavior; this is not native Linux execution.",
+      "simulated_non_windows": true,
+      "native_linux_execution": false,
+      "raw_log_publication": "excluded because the raw log contains private absolute paths; only its sanitized relative path, exact-byte SHA-256, byte count, argv shape, exit code, and result are published"
+    }
+  },
+  "publication_limits": [
+    "No raw logit bytes are included.",
+    "No model weights, executable binaries, private absolute paths, home-directory strings, or machine identifiers are included.",
+    "This refresh did not rehash the raw model or reverify the 32 logit sidecars; those checks are owned by another worker."
+  ]
+}

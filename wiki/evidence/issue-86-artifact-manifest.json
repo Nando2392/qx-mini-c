@@ -1,0 +1,168 @@
+{
+  "schema": "qx.issue-86.portable-artifact-manifest.v1",
+  "issue": 86,
+  "status": "final",
+  "authoritative_inputs": {
+    "raw_final_matrix_report": {
+      "path": "build/issue86-postrace-final-matrix-20260926-232650/report.json",
+      "raw_sha256": "4775fa1a7c39fb87c9d22d8472b6ae26418544ddbef24cd5715163eee7be187e",
+      "bytes": 68445
+    },
+    "full_cpu_regression": {
+      "source_directory": "build/issue86-postrace-fullcpu-20260926T204940336497Z",
+      "stdout_log": {
+        "path": "build/issue86-postrace-fullcpu-20260926T204940336497Z/pytest.stdout.log",
+        "bytes": 11827,
+        "raw_sha256": "3eb26c7ca2903deb875153616d5513544253f00dcf60c1bbc3e5c3f541cad47e"
+      },
+      "result": "965 passed, 3 skipped in 1243.42s (0:20:43)",
+      "passed": 965,
+      "skipped": 3,
+      "duration_seconds": 1243.42,
+      "started_utc": "2026-09-26T20:49:45Z",
+      "ended_utc": "2026-09-26T21:10:29Z",
+      "exit_code": 0,
+      "timed_out": false,
+      "skip_reasons": [
+        {
+          "count": 1,
+          "test": "tests/test_cuda_final_head_acceptance.py:105",
+          "reason": "GPU execution is opt-in; set QX_REQUIRE_CUDA_FINAL_HEAD=1 for release acceptance"
+        },
+        {
+          "count": 1,
+          "test": "tests/test_real_iq4xs_projection.py:199",
+          "reason": "real Qwen runtime fixtures are not available"
+        },
+        {
+          "count": 1,
+          "test": "tests/test_real_iq4xs_projection.py:300",
+          "reason": "real Qwen runtime fixtures are not available"
+        }
+      ],
+      "status": "pass"
+    },
+    "smoke_and_wiki": {
+      "source_directory": "build/issue86-postrace-nextgates-20260926T211507508122500Z",
+      "status": "pass",
+      "smoke_status_from_log": "pass",
+      "wiki_status_from_log": "PASS",
+      "records": [
+        {
+          "path": "build/issue86-postrace-nextgates-20260926T211507508122500Z/smoke.log",
+          "bytes": 441,
+          "raw_sha256": "e2e15d8fa573db671d4f042cadc506e1f0cd31af045fc664bb638af9f379b850",
+          "kind": "smoke"
+        },
+        {
+          "path": "build/issue86-postrace-nextgates-20260926T211507508122500Z/lint-wiki.log",
+          "bytes": 54,
+          "raw_sha256": "94782a9bdebc4779e981aa30cf9695f956de43d4a1be13d6c2c4dd52441e440e",
+          "kind": "wiki_lint"
+        }
+      ],
+      "batch_status": "aborted_after_smoke_and_wiki",
+      "batch_abort_reason": "active process gate failed",
+      "batch_abort_record": {
+        "path": "build/issue86-postrace-nextgates-20260926T211507508122500Z/ABORTED.txt",
+        "bytes": 27,
+        "raw_sha256": "c5ab4eda6f66411da8210f16097771a1c15f2310ced86b269a71fd85e51273ae"
+      },
+      "interpretation_limit": "The smoke and wiki logs explicitly report pass; the containing next-gates batch is not claimed as a pass because it aborted at a later active-process gate."
+    },
+    "driver_rebuild_result": {
+      "path": "build/issue86-driver-testonly/issue86-final-driver-build-20260926-232432.json",
+      "bytes": 4305,
+      "raw_sha256": "f07a108179e51a79f8871aa8b4dcb268a503acf1573ca96fbcdf4d94b21b1367",
+      "status": "PASS",
+      "exit_code": 0,
+      "elapsed_seconds": 6.706,
+      "executable_sha256": "ca8ece23d7e7b2e7869ffd2a19abe3f39fe41386ab340a9bc852a041fc52a0c5",
+      "pre_and_new_executable_sha256_equal": true,
+      "source_hashes_unchanged": true
+    }
+  },
+  "historical_inputs": {
+    "note": "Earlier gate episodes are retained for provenance only and are not summed with or substituted for current gates.",
+    "raw_final_matrix_report": {
+      "path": "build/issue86-portable-final-matrix-20260926T192939Z/report.json",
+      "raw_sha256": "2c7e11c3d9ae64f953a1beaec4d1cca4aa1b0d190f16cd4e28702cb9ed7d620a"
+    },
+    "full_cpu_verified_copy_manifest": {
+      "path": "build/issue86-fullcpu-verified-20260926T183717Z/copy-manifest.json",
+      "raw_sha256": "238ab263e71c932a6a5299455c30d83c3a480b9cc2ccb6aab4f4b8aaf1dde772"
+    },
+    "smoke_wiki_logs": {
+      "result": "exit 0",
+      "files": [
+        {
+          "path": "build/issue86-smoke-wiki-20260926T184555Z-gitdiffcheck.log",
+          "bytes": 648,
+          "raw_sha256": "1fa1273db04688462b51695af2a8b7b154b7d4b7c6cfaa7725fce921e98d4f84"
+        },
+        {
+          "path": "build/issue86-smoke-wiki-20260926T184555Z-smoke.log",
+          "bytes": 527,
+          "raw_sha256": "ad1d6047815368fa966d52fb06a3a9d9f921b94b76fd3d6d2fb1baace26f4cc1"
+        },
+        {
+          "path": "build/issue86-smoke-wiki-20260926T184555Z-summary.log",
+          "bytes": 234,
+          "raw_sha256": "1ff41ef6f63e3fc91ee1b44e9a65a71adec0188b127e72bebfcadf440cf531aa"
+        },
+        {
+          "path": "build/issue86-smoke-wiki-20260926T184555Z-wiki.log",
+          "bytes": 146,
+          "raw_sha256": "d3f1e6082dca326706e1ce69e6e296832b670d7ae088e89a211200f11e6837d2"
+        }
+      ]
+    },
+    "post_full_suite_log": {
+      "path": "build/issue86-privacygate-pytest-20260926T212636.log",
+      "raw_sha256": "d4b7390900dbe43877e5a9e0cfb972bdb494cfc3c1acc12238379f55a63c47f1",
+      "bytes": 685,
+      "result": "33 passed in 5.86s"
+    },
+    "patched_platform_test_log": {
+      "path": "build/issue86-patchedplatform-pytest-20260926-220702.log",
+      "raw_sha256": "0a5db633d3b92f1f6f92975240fa7f2c25207d047fc32ac9ae32fe6bb23ba152",
+      "bytes": 1010,
+      "result": "47 passed in 23.39s",
+      "exit_code": 0,
+      "publication": "raw log excluded; metadata/path sanitized in versioned evidence",
+      "platform_limit": "Windows execution with simulated non-Windows branches; not native Linux execution"
+    }
+  },
+  "hash_domains": {
+    "raw_source_report_sha256": "SHA-256 over exact unsanitized source report bytes; identifies the private raw input and is not the digest of the portable derivative.",
+    "derived_artifact_raw_sha256": "SHA-256 over exact versioned derived-artifact bytes after sanitization.",
+    "lf_normalized_sha256": "SHA-256 after replacing CRLF with LF only; no other normalization.",
+    "interpretation": "Raw-source and derived-artifact digests are intentionally different hash domains and must not be substituted for each other."
+  },
+  "artifacts": [
+    {
+      "kind": "derived_portable",
+      "path": "wiki/evidence/issue-86-final-matrix-portable.json",
+      "bytes": 73270,
+      "raw_sha256": "4888fe6185f68f8dceffbd919a6dc181ff88497e240f0c837f6de031a3b721e4",
+      "lf_normalized_sha256": "4888fe6185f68f8dceffbd919a6dc181ff88497e240f0c837f6de031a3b721e4",
+      "crlf_sequences": 0
+    },
+    {
+      "kind": "derived_portable",
+      "path": "wiki/evidence/issue-86-verification-summary.json",
+      "bytes": 8115,
+      "raw_sha256": "ae93d6059dc7601e6fb5483568970fbb8aad4f0db489ccebfb7cbbc7c17b1028",
+      "lf_normalized_sha256": "ae93d6059dc7601e6fb5483568970fbb8aad4f0db489ccebfb7cbbc7c17b1028",
+      "crlf_sequences": 0
+    }
+  ],
+  "excluded": [
+    "manifest self-hash (omitted by design)",
+    "raw .f32 logit bytes",
+    "model weights",
+    "executables",
+    "private absolute paths and machine identifiers"
+  ],
+  "manifest_self_hash": "omitted_by_design"
+}

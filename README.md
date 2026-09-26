@@ -119,6 +119,28 @@ The latest current-source strict actual-model run is `build/issue85-acceptance/a
 
 The local Issue #85 publication package is **PASS**, but Issue #85 release gates are **NOT PASSED**: the exact staged digest still requires two independent reviews, followed by the Auto Research and repository CI gates on the final revision. Current contract gates pass the one-device fixed-v2 preflight, 10 fail-closed negative tests, repeated same-process bounded-memory coverage, and overlapping regression suites (`780 passed, 3 skipped`; `76 passed`; `36 passed`; `61 passed`, not summed). The negative evidence injects CUDA API return failures, including `cudaGetLastError` after a real launch; it does not demonstrate an actually failed kernel or device-loss recovery. Performance breakdown/latency acceptance is explicitly nongating. Broader device coverage, actual-kernel/device-loss testing, and performance characterization remain limitations or future work, not Issue #85 release blockers; no speed or device-loss recovery claim is authorized. CPU 4K remains a separate unmet Issue #84 gate. CPU/F32 and `--cuda-policy none` remain defaults; no default promotion, 4K claim, or release-readiness claim is authorized. Portable details and claim limits are in `wiki/evidence/issue-85-cuda-final-head-report.json`.
 
+Release update: Issue #85 is CLOSED in `766d5fdb`; GitHub Actions run `36187262586` passed. The implementation and evidence limits above remain historical context.
+
+## Opt-in resident packed-expert cache (Issue #86)
+
+Issue #86 is implemented and locally verified, but is pending release and is not published. `none` remains the default and preserves legacy JSON. The opt-in path requires buffered I/O, `--expert-cache-policy resident-packed`, and a positive `--expert-cache-budget-bytes`; unsupported combinations fail closed before model execution. The cache is a budget-capped LRU of raw packed expert bytes. Its cap counts resident packed bytes, not globally decoded expert tensors, and its counters describe explicit buffered reads/avoided reads rather than physical disk I/O.
+
+```bash
+build/qxqxf.exe generate --in models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt --text-file prompt.txt --max-tokens 2 --ctx 16 --io-backend buffered --expert-cache-policy resident-packed --expert-cache-budget-bytes 616464384 --execution-profile
+```
+
+The public ABI change is additive: the options struct remains 64 bytes; fixed profile v3 is 952 bytes and caller-buffer profile v3 is 456 bytes; older profile sizes remain unchanged. The post-race backend selection is per run through the native v3 entry points, without global backend mutation, and does not change the ABI. Cache entries are borrowed only for the active expert operation, released before cache destruction, and are not retained across generation reinitialization. This is not a claim that the whole runtime is thread-safe: the public setter and global-allocation caveat remain.
+
+The post-race final bounded acceptance matrix contains 16 runs across F32/Q8_K-compatible and `none`/`resident-packed`. Every run returned `[1124,77]`, all 151936 logits per step were finite and raw-byte exact within each activation, the measured resident budget was 616464384 bytes, and resident runs recorded positive hits. This proves bounded cache activity and case-local output preservation only: no speedup, global parity, Q8_K promotion, or physical-disk-I/O claim is made. The current full CPU regression completed in 1243.42 s with `965 passed, 3 skipped`: one CUDA opt-in skip and two skips for missing real Qwen fixtures. Earlier overwritten failed logs remain a historical limitation only; the current skip reasons are known. Smoke and wiki lint also passed in the preserved verification package.
+
+Current post-race evidence is the raw `build/issue86-postrace-final-matrix-20260926-232650/report.json` (SHA-256 `4775fa1a7c39fb87c9d22d8472b6ae26418544ddbef24cd5715163eee7be187e`), the portable [`wiki/evidence/issue-86-final-matrix-portable.json`](wiki/evidence/issue-86-final-matrix-portable.json) (SHA-256 `4888fe6185f68f8dceffbd919a6dc181ff88497e240f0c837f6de031a3b721e4`), and the [`wiki/evidence/issue-86-verification-summary.json`](wiki/evidence/issue-86-verification-summary.json) (SHA-256 `ae93d6059dc7601e6fb5483568970fbb8aad4f0db489ccebfb7cbbc7c17b1028`). To reproduce locally from the repository root, build the current acceptance driver with `cmd /c scripts\build_expert_cache_acceptance_driver.cmd`, then run:
+
+```bash
+python scripts/expert_cache_acceptance.py --driver-exe build/issue86-driver-testonly/expert_cache_acceptance_driver.exe --model models/Qwen3-30B-A3B-UD-IQ2_M.qxf --tokenizer models/Qwen3-30B-A3B.qxt --output-dir build/issue86-local-repro
+```
+
+The output directory must not already exist. Do not substitute a private absolute path in published reproduction instructions.
+
 ## Honest performance state
 
 Earlier probe measurements on the scalar CPU path:

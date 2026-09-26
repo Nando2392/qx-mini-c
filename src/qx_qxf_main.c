@@ -41,9 +41,9 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-inspect --tokenizer model.qxt\n"
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
-        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64 [--io-backend buffered|mmap] [--scratch-policy ephemeral|persistent] [--kernel-policy baseline|fused] [--thread-policy serial|pool] [--threads N] [--cuda-policy none|final-head-f32] [--execution-profile] [--capacity-profile]\n"
+        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64 [--io-backend buffered|mmap] [--scratch-policy ephemeral|persistent] [--kernel-policy baseline|fused] [--thread-policy serial|pool] [--threads N] [--expert-cache-policy none|resident-packed] [--expert-cache-budget-bytes N] [--cuda-policy none|final-head-f32] [--execution-profile] [--capacity-profile]\n"
         "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
-        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --scratch-policy ephemeral|persistent --kernel-policy baseline|fused --thread-policy serial --threads 1 --temperature 0 --seed 7 --full-moe --final-head [--bench] [--dequant-profile] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
+        "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --scratch-policy ephemeral|persistent --kernel-policy baseline|fused --thread-policy serial --threads 1 --expert-cache-policy none|resident-packed [--expert-cache-budget-bytes N] --temperature 0 --seed 7 --full-moe --final-head [--bench] [--dequant-profile] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
         "  %s generate-probe --in model.qxf --tokens model.tokens.tsv --prompt-token 42 --steps 3 --top-k 5 --scan 64 --temperature 0 --seed 7\n"
         "  %s residual-vector-probe --in model.qxf --token-id 42 --norm blk.0.attn_norm.weight --dims 64 --seed 7\n"
@@ -217,6 +217,11 @@ static int qx_cli_parse_u32_arg(const char *name, const char *text, uint32_t *ou
 
 static int qx_cli_parse_u64_arg(const char *name, const char *text, uint64_t *out, char *err, size_t err_len) {
     if (!text || !*text) { snprintf(err, err_len, "invalid %s", name); return 0; }
+    for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
+        if (*p < (unsigned char)'0' || *p > (unsigned char)'9') {
+            snprintf(err, err_len, "invalid %s", name); return 0;
+        }
+    }
     errno = 0;
     char *end = NULL;
     unsigned long long parsed = strtoull(text, &end, 10);
@@ -473,6 +478,18 @@ chat_fail:
                 else if (strcmp(value, "final-head-f32") == 0) options.cuda_policy = QX_NATIVE_CUDA_FINAL_HEAD_F32;
                 else { fprintf(stderr, "generate failed: unsupported native generation CUDA policy\n"); return 2; }
             }
+            else if (strcmp(argv[i], "--expert-cache-policy") == 0 && i + 1 < argc) {
+                const char *value = argv[++i];
+                if (strcmp(value, "none") == 0) options.expert_cache_policy = QX_NATIVE_EXPERT_CACHE_NONE;
+                else if (strcmp(value, "resident-packed") == 0) options.expert_cache_policy = QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED;
+                else { fprintf(stderr, "generate failed: unsupported expert cache policy\n"); return 2; }
+            }
+            else if (strcmp(argv[i], "--expert-cache-budget-bytes") == 0 && i + 1 < argc) {
+                if (!qx_cli_parse_u64_arg("--expert-cache-budget-bytes", argv[++i],
+                        &options.expert_cache_budget_bytes, err, sizeof(err))) {
+                    fprintf(stderr, "generate failed: %s\n", err); return 2;
+                }
+            }
             else if (strcmp(argv[i], "--execution-profile") == 0) execution_profile = 1;
             else if (strcmp(argv[i], "--capacity-profile") == 0) capacity_profile = 1;
             else { usage(argv[0]); return 2; }
@@ -488,6 +505,21 @@ chat_fail:
         if (options.thread_policy == QX_NATIVE_THREAD_POOL &&
                 (options.thread_count < 2u || options.thread_count > 64u)) {
             fprintf(stderr, "generate failed: pool native generation policy requires 2..64 threads\n");
+            return 2;
+        }
+        if (options.expert_cache_policy == QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED &&
+                options.expert_cache_budget_bytes == 0u) {
+            fprintf(stderr, "generate failed: resident-packed expert cache policy requires --expert-cache-budget-bytes > 0\n");
+            return 2;
+        }
+        if (options.expert_cache_policy == QX_NATIVE_EXPERT_CACHE_NONE &&
+                options.expert_cache_budget_bytes != 0u) {
+            fprintf(stderr, "generate failed: expert cache budget requires resident-packed policy\n");
+            return 2;
+        }
+        if (options.expert_cache_policy == QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED &&
+                options.io_backend != QX_NATIVE_IO_BUFFERED) {
+            fprintf(stderr, "generate failed: resident-packed expert cache policy requires buffered I/O\n");
             return 2;
         }
         if (options.cuda_policy == QX_NATIVE_CUDA_FINAL_HEAD_F32 &&
@@ -545,16 +577,15 @@ chat_fail:
             return 2;
         }
         uint32_t *generated_ids = (uint32_t *)calloc(max_tokens, sizeof(*generated_ids));
-        uint64_t *logits_checksums = execution_profile
-            ? (uint64_t *)calloc(max_tokens, sizeof(*logits_checksums)) : NULL;
-        if (!generated_ids || (execution_profile && !logits_checksums)) {
+        uint64_t *logits_checksums = (uint64_t *)calloc(max_tokens, sizeof(*logits_checksums));
+        if (!generated_ids || !logits_checksums) {
             free(generated_ids); free(logits_checksums); qx_tokenizer_free(&tokenizer);
             fprintf(stderr, "generate failed: out of memory\n");
             return 1;
         }
 
         qx_native_generation_buffer_result result;
-        qx_native_generation_buffer_profile profile;
+        qx_native_generation_buffer_profile_v3 profile;
         memset(&result, 0, sizeof(result));
         memset(&profile, 0, sizeof(profile));
         result.struct_size = (uint32_t)sizeof(result);
@@ -562,12 +593,11 @@ chat_fail:
         result.token_ids = generated_ids;
         result.token_capacity = max_tokens;
         profile.struct_size = (uint32_t)sizeof(profile);
-        profile.version = QX_NATIVE_GENERATION_BUFFER_PROFILE_VERSION;
+        profile.version = QX_NATIVE_GENERATION_BUFFER_PROFILE_V3_VERSION;
         profile.full_logits_checksums = logits_checksums;
-        profile.full_logits_checksums_capacity = execution_profile ? max_tokens : 0u;
-        if (!qx_run_native_generation_into_with_options(in_path, prompt_ids, prompt_count, max_tokens, ctx,
-                tokenizer.eos_token_id, &options, &result, execution_profile ? &profile : NULL,
-                err, sizeof(err))) {
+        profile.full_logits_checksums_capacity = max_tokens;
+        if (!qx_run_native_generation_into_with_options_v3(in_path, prompt_ids, prompt_count, max_tokens, ctx,
+                tokenizer.eos_token_id, &options, &result, &profile, err, sizeof(err))) {
             free(generated_ids); free(logits_checksums); qx_tokenizer_free(&tokenizer);
             fprintf(stderr, "generate failed: %s\n", err); return 1;
         }
@@ -689,6 +719,29 @@ chat_fail:
             }
             printf("}");
         }
+        if (options.expert_cache_policy ==
+                QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED) {
+            printf(",\"expert_cache_profile\":{"
+                "\"requested_policy\":\"%s\",\"effective_policy\":\"%s\","
+                "\"budget_bytes\":%llu,\"requests\":%llu,\"hits\":%llu,"
+                "\"misses\":%llu,\"loads\":%llu,\"evictions\":%llu,"
+                "\"current_resident_packed_bytes\":%llu,\"peak_resident_packed_bytes\":%llu,"
+                "\"buffered_bytes_read\":%llu,\"buffered_bytes_avoided\":%llu}",
+                profile.requested_expert_cache_policy == QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED
+                    ? "resident-packed" : "none",
+                profile.effective_expert_cache_policy == QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED
+                    ? "resident-packed" : "none",
+                (unsigned long long)profile.expert_cache_budget_bytes,
+                (unsigned long long)profile.expert_cache_requests,
+                (unsigned long long)profile.expert_cache_hits,
+                (unsigned long long)profile.expert_cache_misses,
+                (unsigned long long)profile.expert_cache_loads,
+                (unsigned long long)profile.expert_cache_evictions,
+                (unsigned long long)profile.expert_cache_current_resident_packed_bytes,
+                (unsigned long long)profile.expert_cache_peak_resident_packed_bytes,
+                (unsigned long long)profile.expert_cache_buffered_bytes_read,
+                (unsigned long long)profile.expert_cache_buffered_bytes_avoided);
+        }
         if (capacity_profile) {
             printf(",\"capacity_profile\":{\"executed_forward_steps\":%u,"
                 "\"prompt_forward_steps\":%u,\"generated_input_forward_steps\":%u,"
@@ -719,6 +772,7 @@ chat_fail:
         const char *thread_policy = "serial";
         const char *simd_policy = "scalar";
         const char *expert_cache_policy = "none";
+        uint64_t expert_cache_budget_bytes = 0u;
         const char *cuda_policy = "none";
         const char *prefill_gemm_policy = "none";
         const char *speculative_policy = "none";
@@ -757,6 +811,11 @@ chat_fail:
             else if (strcmp(argv[i], "--thread-policy") == 0 && i + 1 < argc) thread_policy = argv[++i];
             else if (strcmp(argv[i], "--simd-policy") == 0 && i + 1 < argc) simd_policy = argv[++i];
             else if (strcmp(argv[i], "--expert-cache-policy") == 0 && i + 1 < argc) expert_cache_policy = argv[++i];
+            else if (strcmp(argv[i], "--expert-cache-budget-bytes") == 0 && i + 1 < argc) {
+                if (!qx_cli_parse_u64_arg("--expert-cache-budget-bytes", argv[++i], &expert_cache_budget_bytes, err, sizeof(err))) {
+                    fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 2;
+                }
+            }
             else if (strcmp(argv[i], "--cuda-policy") == 0 && i + 1 < argc) cuda_policy = argv[++i];
             else if (strcmp(argv[i], "--prefill-gemm-policy") == 0 && i + 1 < argc) prefill_gemm_policy = argv[++i];
             else if (strcmp(argv[i], "--speculative-policy") == 0 && i + 1 < argc) speculative_policy = argv[++i];
@@ -824,8 +883,18 @@ chat_fail:
         if (avx2_fma_policy && thread_pool_policy) {
             fprintf(stderr, "prompt-state-loop-probe failed: avx2-fma simd policy currently requires serial thread policy\n"); return 2;
         }
-        if (strcmp(expert_cache_policy, "none") != 0) {
+        int resident_packed_expert_cache = strcmp(expert_cache_policy, "resident-packed") == 0;
+        if (!resident_packed_expert_cache && strcmp(expert_cache_policy, "none") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported expert cache policy\n"); return 2;
+        }
+        if (resident_packed_expert_cache && expert_cache_budget_bytes == 0u) {
+            fprintf(stderr, "prompt-state-loop-probe failed: resident-packed expert cache policy requires --expert-cache-budget-bytes > 0\n"); return 2;
+        }
+        if (!resident_packed_expert_cache && expert_cache_budget_bytes != 0u) {
+            fprintf(stderr, "prompt-state-loop-probe failed: expert cache budget requires resident-packed policy\n"); return 2;
+        }
+        if (resident_packed_expert_cache && strcmp(io_backend, "buffered") != 0) {
+            fprintf(stderr, "prompt-state-loop-probe failed: resident-packed expert cache policy requires buffered I/O\n"); return 2;
         }
         if (strcmp(cuda_policy, "none") != 0 && strcmp(cuda_policy, "final-head-f32") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported CUDA policy\n"); return 2;
@@ -891,7 +960,7 @@ chat_fail:
         }
         qx_tokenizer_free(&tokenizer);
         free(input);
-        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format, scratch_policy, kernel_policy, thread_policy, threads, simd_policy, expert_cache_policy, cuda_policy, prefill_gemm_policy, speculative_policy, kv2_policy, sampling_policy, long_context_policy, long_context_rss_limit_bytes, long_context_kv_quality_checks, long_context_soak_seconds, dequant_profile,
+        if (!qx_dump_prompt_state_loop_probe_summary(in_path, NULL, ids, count, generation_steps, layers, ctx, kv_format, activation_format, scratch_policy, kernel_policy, thread_policy, threads, simd_policy, expert_cache_policy, expert_cache_budget_bytes, cuda_policy, prefill_gemm_policy, speculative_policy, kv2_policy, sampling_policy, long_context_policy, long_context_rss_limit_bytes, long_context_kv_quality_checks, long_context_soak_seconds, dequant_profile,
                 1, 1, 1, 1, 1, 1, 1, 1, 1, full_moe, final_head, bench, 2048u, NULL, 8u, 151936u,
                 top_n, temperature, seed, NULL, 0u, NULL, kv_snapshot_out_path, NULL, stdout, err, sizeof(err))) {
             fprintf(stderr, "prompt-state-loop-probe failed: %s\n", err); return 1;

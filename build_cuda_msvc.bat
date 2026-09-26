@@ -32,5 +32,5 @@ call build_msvc.bat
 if errorlevel 1 exit /b %errorlevel%
 "%CUDA_ROOT%\bin\nvcc.exe" -arch=sm_89 -cudart shared -Iinclude -c src\qx_cuda_final_head.cu -o build\qx_cuda_final_head.obj
 if errorlevel 1 exit /b %errorlevel%
-cl /nologo /std:c17 /O2 /W4 /D_CRT_SECURE_NO_WARNINGS /Iinclude src\qx_format.c src\qx_gguf.c src\qx_tokenizer.c src\qx_qxf_main.c build\qx_avx2.obj build\qx_cuda_final_head.obj /Fo:build\ /Fe:build\qxqxf_cuda.exe /link /Brepro /LIBPATH:"%CUDA_ROOT%\lib\x64" cudart.lib
+cl /nologo /std:c17 /O2 /W4 /D_CRT_SECURE_NO_WARNINGS /Iinclude /Isrc src\qx_format.c src\qx_expert_cache.c src\qx_gguf.c src\qx_tokenizer.c src\qx_qxf_main.c build\qx_avx2.obj build\qx_cuda_final_head.obj /Fo:build\ /Fe:build\qxqxf_cuda.exe /link /Brepro /LIBPATH:"%CUDA_ROOT%\lib\x64" cudart.lib
 exit /b %errorlevel%

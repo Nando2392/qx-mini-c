@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-09-25
+updated: 2026-09-26
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -76,11 +76,15 @@ capacidad CPU nativa #83: CLOSED en `ec4d2fd`; CI `35674122057` PASS; medición 
 → API compatible conserva 64 posiciones; API caller-buffer admite <=4096, pero sólo 128/256 tienen ejecución real
 gate CPU 4K #84: OPEN; una corrida excedió el deadline nativo de 8 h y salió 2 sin output ni reporte; gate NOT MET
 → RSS final y posiciones completadas desconocidos; 142.48 MiB a ~7 h 40 min es observación histórica no final
-CUDA final-head #85: progreso opt-in verificado en una RTX 4070 Laptop (CC 8.9); CPU/F32 y policy `none` siguen default
+CUDA final-head #85: CLOSED `766d5fdb`; CI `36187262586` PASS; CPU/F32 y policy `none` siguen default
 → driver fixed-v2: outputs `[1124,77]`, un upload, dos launches, cero fallbacks; copies raw byte-exactas con hashes raw/LF separados
 → actual-model current-source PASS: 151936 logits exactos con thresholds 0.001/0.0001/0.999999 y 6/6 outputs byte-identical
 → package local PASS: build/model/source hashes, logs completos, preflight, fault, runtime/memoria y regresiones verificados
-→ RELEASE GATES NOT PASSED: faltan dos reviews independientes del staged digest exacto y los gates Auto Research/CI de la revisión final
+expert cache #86: implementado y verificado localmente; release pendiente, no publicado
+→ `resident-packed` es opt-in, sólo buffered y con budget positivo; `none` y JSON legacy permanecen default
+→ LRU de bytes packed raw, cap sobre bytes packed residentes (no tensores globales decodificados); lifetime borrowed termina antes de destroy y no sobrevive reinit
+→ matriz final post-race 16 corridas: `[1124,77]`, 151936 logits/paso finitos y raw-byte exactos por activación, budget 616464384 y hits positivos; backend native v3 por corrida sin mutación global ni cambio ABI, pero sin afirmar thread-safety total por el setter público/asignación global; sin claim de speedup/paridad global/I/O físico ni promoción Q8_K
+→ regresión actual: `965 passed, 3 skipped` en 1243.42 s; skips conocidos: 1 CUDA opt-in y 2 por fixtures Qwen reales ausentes
 ```
 
 El issue GitHub #7 quedó cerrado como validación completada en el commit `42b3fd8b76acc26efdc7c53b6e7b427825b56b95`. GitHub Actions `32064105028` pasó build, tests y wiki lint. El cierre significa que la hipótesis de paridad fue probada y refutada de forma reproducible; no significa que QX sea numéricamente idéntico a llama.cpp.
@@ -229,11 +233,15 @@ La corrida strict actual-model current-source más reciente es `build/issue85-ac
 
 El paquete local de publicación #85 queda **PASS**, pero los release gates siguen **NOT PASSED**: faltan dos reviews independientes sobre el staged digest exacto y después los gates Auto Research/CI de la revisión final. También pasan preflight en un dispositivo, 10 tests negativos fail-closed, runtime/memoria same-process acotado y suites solapadas (`780 passed, 3 skipped`; `76`; `36`; `61`, no se suman). La evidencia negativa inyecta retornos de error de APIs CUDA, incluido `cudaGetLastError` después de un launch real; no prueba un kernel realmente fallido ni recuperación de device loss. El desglose de performance/latencia es explícitamente nongating. Cobertura de más dispositivos, pruebas de kernel real/device loss y caracterización de performance quedan como limitaciones o trabajo futuro, no blockers de release de #85; no autorizan claims de velocidad ni recuperación de device loss. CPU 4K sigue siendo un gate separado de #84 y permanece NOT MET. No hay claim global, 4K, velocidad, release readiness ni promoción de defaults. Detalle: [`issue-85-cuda-final-head-report.json`](../evidence/issue-85-cuda-final-head-report.json).
 
+Actualización de release: #85 está CLOSED en `766d5fdb` y CI `36187262586` pasó. Issue #86 implementa el siguiente slice CPU opt-in: `resident-packed` requiere backend `buffered` y budget positivo; `none` permanece default y conserva el JSON legacy. El cache es un LRU acotado de bytes packed raw y su límite no representa memoria global de tensores decodificados. La ABI es aditiva: options conserva 64 bytes, profile v3 fijo usa 952 bytes y buffer-profile v3 456 bytes, sin cambiar tamaños anteriores; el ajuste post-race tampoco cambia la ABI. El backend se selecciona por corrida en las entradas native v3 sin mutar estado global. Cada borrow se libera antes de destruir el cache y ninguna residencia se retiene tras reinicializar generación. Esto no vuelve thread-safe todo el runtime: persiste la salvedad del setter público y la asignación global.
+
+La matriz final post-race de #86 ejecutó 16 corridas (F32/Q8_K-compatible × `none`/`resident-packed`, warmup y medidas). Todas emitieron `[1124,77]`; los 151936 logits de cada paso fueron finitos y raw-byte exactos dentro de cada activación; el budget medido fue 616464384 bytes y las corridas residentes tuvieron hits positivos. No exige ni demuestra speedup, no prueba paridad global, no promueve Q8_K y sus contadores buffered no son medición de I/O físico. La regresión CPU actual fue `965 passed, 3 skipped` en 1243.42 s: un skip CUDA opt-in y dos por fixtures Qwen reales ausentes. Los logs fallidos sobrescritos son una limitación histórica, no una razón para declarar desconocidos los skips actuales. Smoke y wiki lint quedaron PASS. Evidencia vigente: raw `build/issue86-postrace-final-matrix-20260926-232650/report.json` (SHA-256 `4775fa1a7c39fb87c9d22d8472b6ae26418544ddbef24cd5715163eee7be187e`), [`issue-86-final-matrix-portable.json`](../evidence/issue-86-final-matrix-portable.json) (SHA-256 `4888fe6185f68f8dceffbd919a6dc181ff88497e240f0c837f6de031a3b721e4`) y [`issue-86-verification-summary.json`](../evidence/issue-86-verification-summary.json) (SHA-256 `ae93d6059dc7601e6fb5483568970fbb8aad4f0db489ccebfb7cbbc7c17b1028`). #86 sigue pendiente de release y no publicado.
+
 ## Después
 
-1. Mantener #85 opt-in; congelar el staged digest exacto, obtener dos reviews independientes y después ejecutar los gates Auto Research/CI sobre la revisión final.
-2. Tratar cobertura adicional de dispositivos, fallo real de kernel/device loss y desglose/medición de latencia como limitaciones nongating o trabajo futuro; la evidencia actual no autoriza claims de speedup, throughput sostenido, ausencia general de leaks ni recuperación de device loss.
-3. Mantener CPU 4K como no probado: #84 no completó el gate. No repetir por inercia ni convertir el timeout en una conclusión causal.
+1. Publicar #86 sólo después de sus gates finales; mantener `none` como default y `resident-packed` como opt-in bounded/buffered.
+2. Mantener CPU 4K como no probado: #84 sigue OPEN, no completó el gate y no se volvió a ejecutar. No repetir por inercia ni convertir el timeout en una conclusión causal.
+3. Tratar speedup, I/O físico, paridad global y promoción Q8_K como claims no autorizados por #86.
 4. Mantener diferidos resume nativo, quality sweep KV y soak/térmica hasta que cada uno tenga runner y evidencia propios.
 
 ## Riesgos

@@ -1,10 +1,11 @@
 #include "qx_format.h"
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-static int expect_preflight_failure(qx_native_generation_options *options, const char *needle) {
+static int expect_preflight_failure(qx_native_generation_options *options, const char *expected) {
     static const uint32_t prompt[] = {9707u};
     qx_native_generation_result result;
     qx_native_generation_profile profile;
@@ -12,7 +13,29 @@ static int expect_preflight_failure(qx_native_generation_options *options, const
     int ok = qx_run_native_generation_with_options(
         "definitely-missing-model.qxf", prompt, 1u, 1u, 1u, -1,
         options, &result, &profile, err, sizeof(err));
-    return !ok && strstr(err, needle) != NULL && strstr(err, "open") == NULL;
+    int matched = ok == 0 && strcmp(err, expected) == 0;
+    if (!matched) {
+        fprintf(stderr, "[ISSUE86-PREFLIGHT] version=%u ok=%d expected=\"%s\" error=\"%s\"\n",
+            options->version, ok, expected, err);
+    }
+    return matched;
+}
+
+static int expect_model_io_failure(qx_native_generation_options *options) {
+    static const uint32_t prompt[] = {9707u};
+    qx_native_generation_result result;
+    qx_native_generation_profile profile;
+    const char *expected = strerror(ENOENT);
+    char err[256] = {0};
+    int ok = qx_run_native_generation_with_options(
+        "definitely-missing-model.qxf", prompt, 1u, 1u, 1u, -1,
+        options, &result, &profile, err, sizeof(err));
+    int matched = ok == 0 && strcmp(err, expected) == 0;
+    if (!matched) {
+        fprintf(stderr, "[ISSUE86-MODEL-IO] version=%u ok=%d expected=\"%s\" error=\"%s\"\n",
+            options->version, ok, expected, err);
+    }
+    return matched;
 }
 
 static int verify_global_backend(const char *model, qx_io_backend expected) {
@@ -69,8 +92,27 @@ static int run_preflight_contract(void) {
     options.thread_count = 65u;
     if (!expect_preflight_failure(&options, "pool native generation policy requires 2..64 threads")) return 11;
     qx_native_generation_options_init(&options);
-    options.reserved[0] = 1u;
+    options.reserved_alignment = 1u;
     if (!expect_preflight_failure(&options, "reserved native generation option fields must be zero")) return 12;
+    qx_native_generation_options_init(&options);
+    options.reserved_v3[0] = 1u;
+    if (!expect_preflight_failure(&options, "reserved native generation option fields must be zero")) return 13;
+    qx_native_generation_options_init(&options);
+    options.version = 2u;
+    options.reserved[0] = 1u;
+    if (!expect_preflight_failure(&options, "reserved native generation option fields must be zero")) return 14;
+    qx_native_generation_options_init(&options);
+    options.version = 1u;
+    options.reserved[0] = 1u;
+    if (!expect_preflight_failure(&options, "reserved native generation option fields must be zero")) return 15;
+
+    /* The current v3 initializer and both legacy layouts must remain valid. */
+    qx_native_generation_options_init(&options);
+    if (!expect_model_io_failure(&options)) return 16;
+    options.version = 2u;
+    if (!expect_model_io_failure(&options)) return 17;
+    options.version = 1u;
+    if (!expect_model_io_failure(&options)) return 18;
 
     puts("native generation policy API contract: pass");
     return 0;

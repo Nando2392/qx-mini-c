@@ -1,7 +1,7 @@
 ---
 title: Optimization Priorities
 created: 2026-08-17
-updated: 2026-09-21
+updated: 2026-09-26
 type: comparison
 tags: [performance, cpu, cuda, memory, roadmap]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -71,6 +71,8 @@ confidence: medium
 | 57 | measured native CPU policy matrix | Issue #82 mide policies opt-in de I/O/scratch/final-head kernel/threading sin cambiar defaults ni API compatible | CLOSED `3c8a634`; CI `35652844078` PASS; `recommended_cells=[]`; sin promoción automática |
 | 58 | finite native CPU capacity | Issue #83 añade caller-buffer y `--capacity-profile` opt-in; mide 128 y 256 posiciones | una corrida por capacidad; release pendiente; no throughput/quality/4K/soak/CUDA claim |
 | 59 | native CPU 4K acceptance outcome | Issue #84 ejecuta una corrida 4096-position sobre baseline #83; excede deadline nativo 8 h y sale 2 sin output/reporte | OPEN; gate NOT MET; RSS final/posiciones completadas desconocidos; no causalidad ni default promotion |
+| 60 | CUDA final-head F32 opt-in | Issue #85 limita CUDA al output head y conserva CPU/F32 como default | CLOSED `766d5fdb`; CI `36187262586` PASS; sin claim de speedup global |
+| 61 | resident packed-expert cache | Issue #86 añade LRU opt-in de bytes packed raw, sólo buffered y con budget positivo | post-race verificado; release pendiente, no publicado; backend native v3 por corrida, ABI/defaults/JSON legacy sin cambios |
 
 ## Estado tras el hardening report-level
 
@@ -113,6 +115,10 @@ Issue #84 ejecutó el gate CPU de 4096 posiciones una vez sobre ese baseline. Ex
 
 El fix posterior del runner sólo preserva journals terminales en futuras corridas (60 tests padre PASS, 3.81 s); no repara ni reescribe los spools históricos. La próxima prioridad propuesta es CUDA opt-in limitado al final head, manteniendo sin cambios todos los defaults CPU. CPU 4K sigue sin probarse, y resume nativo, quality sweep KV y soak/térmica permanecen diferidos.
 
+#85 cerró en `766d5fdb` con CI `36187262586`. #86 implementa la prioridad de expert cache como `--expert-cache-policy resident-packed`: sólo backend buffered, `--expert-cache-budget-bytes > 0`, y `none` como default con JSON legacy intacto. Es un LRU de bytes packed raw; el cap y los contadores no representan un cache global de tensores decodificados ni I/O físico. La ABI añade perfiles v3 (952 bytes fijo, 456 bytes caller-buffer), conserva options en 64 bytes y no cambia tamaños previos; el ajuste post-race no cambia la ABI. La selección de backend es por corrida mediante native v3 y no muta estado global. Los borrows terminan antes de destroy y la residencia no cruza reinit. No se afirma thread-safety total: el setter público y la asignación global siguen siendo una salvedad.
+
+La aceptación final post-race hizo 16 corridas. F32 y Q8_K-compatible conservaron `[1124,77]`, 151936 logits/paso finitos y raw-byte exactos dentro de cada activación; budget 616464384 bytes y hits residentes positivos. No se exige ni se afirma speedup, paridad global o promoción Q8_K. La regresión CPU actual terminó en 1243.42 s: `965 passed, 3 skipped`, con un skip CUDA opt-in y dos por fixtures Qwen reales ausentes. Los logs fallidos sobrescritos sólo son una limitación histórica; los skips actuales sí están identificados. Smoke/wiki PASS. Evidencia vigente: raw `build/issue86-postrace-final-matrix-20260926-232650/report.json` (SHA-256 `4775fa1a7c39fb87c9d22d8472b6ae26418544ddbef24cd5715163eee7be187e`), [`issue-86-final-matrix-portable.json`](../evidence/issue-86-final-matrix-portable.json) (SHA-256 `4888fe6185f68f8dceffbd919a6dc181ff88497e240f0c837f6de031a3b721e4`) y [`issue-86-verification-summary.json`](../evidence/issue-86-verification-summary.json) (SHA-256 `ae93d6059dc7601e6fb5483568970fbb8aad4f0db489ccebfb7cbbc7c17b1028`). Estado: implementado/verificado, pendiente de release y no publicado. #84 permanece OPEN/NOT MET y no se repitió.
+
 ## No priorizar todavía
 
 - CUDA Graphs sin backend CUDA.
@@ -133,7 +139,7 @@ La prioridad 3 se ejecutó en Issue #26 como `--kernel-policy fused` opt-in limi
 
 La prioridad 4 empezó en Issue #27 con contrato `--thread-policy serial --threads 1`, `thread_profile` y rechazo fail-closed. Issue #28 añade `--thread-policy pool --threads N` como opt-in limitado al row loop independiente de `output.weight` en final-head Q6_K F32. Serial sigue default; `q8_k_compat`, `threads < 2`, `threads > 64`, políticas no soportadas, y rutas sin `--final-head` fallan cerradas. La evidencia mínima está en `wiki/evidence/issue-27-thread-policy-serial-baseline.json` y `wiki/evidence/issue-28-thread-pool-final-head-baseline.json`. No autoriza paralelizar MoE/expertos ni promover defaults.
 
-La prioridad 6 empieza en Issue #30 como contrato de provenance: `--expert-cache-policy none` es el único valor soportado, queda default, y el payload nativo expone `expert_cache_profile` con hits/misses/bytes en cero. Este slice no implementa cache residente ni autoriza speedup; sólo bloquea claims falsos y prepara el A/B futuro.
+La prioridad 6 empezó en Issue #30 como contrato de provenance con `none`. Issue #86 añade `resident-packed` opt-in y acotado, sin cambiar ese default ni autorizar speedup. El A/B final prueba hits positivos y equivalencia raw dentro de cada activación, no paridad global, promoción Q8_K ni ahorro de I/O físico.
 
 La prioridad 7 empieza en Issue #31 como contrato de provenance CUDA: `--cuda-policy none` es el único valor soportado, queda default, y el payload nativo expone `cuda_profile` con backend `none`, bytes de dispositivo/transferencias y launches en cero. Este slice no implementa CUDA, residency ni scheduler híbrido; sólo bloquea claims falsos y prepara el gate futuro.
 

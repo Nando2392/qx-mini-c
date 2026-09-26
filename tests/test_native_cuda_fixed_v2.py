@@ -39,7 +39,7 @@ def test_native_cuda_fixed_v2_contract(tmp_path: Path) -> None:
         "cl /nologo /std:c17 /O2 /W4 /WX /arch:AVX2 /D_CRT_SECURE_NO_WARNINGS "
         f'/Iinclude /c src\\qx_avx2.c /Fo:"{avx_object.as_posix()}" && '
         "cl /nologo /std:c17 /O2 /W4 /WX /D_CRT_SECURE_NO_WARNINGS /Iinclude "
-        "src\\qx_format.c src\\qx_gguf.c src\\qx_tokenizer.c src\\qx_cuda_final_head_stub.c "
+        "src\\qx_format.c src\\qx_expert_cache.c src\\qx_gguf.c src\\qx_tokenizer.c src\\qx_cuda_final_head_stub.c "
         f'"{DRIVER_SOURCE}" "{avx_object.as_posix()}" /Fo:"{object_dir}" '
         f'/Fe:"{executable.as_posix()}" /link /Brepro'
     )

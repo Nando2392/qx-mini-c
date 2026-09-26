@@ -155,17 +155,25 @@ int qx_dump_residual_vector_probe_summary(const char *path, uint32_t token_id, c
 int qx_dump_projection_matvec_probe_summary(const char *path, uint32_t layer, uint32_t token_id, uint32_t rows, uint32_t dims, const char *kv_format, int residual_vector, const char *norm_name, uint32_t seed, FILE *out, char *err, uint64_t err_len);
 int qx_dump_q8_k_activation_probe_summary(uint32_t values, const char *inject, FILE *out, char *err, uint64_t err_len);
 int qx_dump_state_loop_probe_summary(const char *path, const char *tokens_path, uint32_t prompt_token, uint32_t steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len);
-int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len);
+int qx_dump_prompt_state_loop_probe_summary(const char *path, const char *tokens_path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t generation_steps, uint32_t layers, uint32_t ctx_tokens, const char *kv_format, const char *activation_format, const char *scratch_policy, const char *kernel_policy, const char *thread_policy, uint32_t threads, const char *simd_policy, const char *expert_cache_policy, uint64_t expert_cache_budget_bytes, const char *cuda_policy, const char *prefill_gemm_policy, const char *speculative_policy, const char *kv2_policy, const char *sampling_policy, const char *long_context_policy, uint64_t long_context_rss_limit_bytes, uint64_t long_context_kv_quality_checks, uint64_t long_context_soak_seconds, int dequant_profile, int real_kv, int projection_matvec, int residual_vector, int residual_carry, int numeric_deltas, int delta_vectors, int attention_output_vector, int causal_attention, int rope_gqa_attention, int full_moe, int final_head, int bench, uint32_t residual_dims, const char *norm_name, uint32_t top_k, uint32_t scan, uint32_t logits_top_n, double temperature, uint32_t seed, const char *residual_dump_dir, uint32_t start_layer, const char *residual_input_path, const char *kv_snapshot_out_path, const char *kv_snapshot_in_path, FILE *out, char *err, uint64_t err_len);
 #define QX_NATIVE_GENERATION_MAX_TOKENS 64u
 #define QX_NATIVE_GENERATION_CAPACITY_MAX 4096u
-#define QX_NATIVE_GENERATION_OPTIONS_VERSION 2u
+#define QX_NATIVE_GENERATION_OPTIONS_VERSION 3u
 #define QX_NATIVE_GENERATION_PROFILE_VERSION 1u
 #define QX_NATIVE_GENERATION_PROFILE_V2_VERSION 2u
+#define QX_NATIVE_GENERATION_PROFILE_V3_VERSION 3u
 #define QX_NATIVE_GENERATION_BUFFER_RESULT_VERSION 1u
 #define QX_NATIVE_GENERATION_BUFFER_PROFILE_VERSION 2u
+#define QX_NATIVE_GENERATION_BUFFER_PROFILE_V3_VERSION 3u
 #define QX_NATIVE_GENERATION_OPTIONS_V1_SIZE 64u
+#define QX_NATIVE_GENERATION_OPTIONS_V2_SIZE 64u
+#define QX_NATIVE_GENERATION_OPTIONS_V3_SIZE 64u
 #define QX_NATIVE_GENERATION_PROFILE_V1_SIZE 656u
+#define QX_NATIVE_GENERATION_PROFILE_V2_SIZE 864u
+#define QX_NATIVE_GENERATION_PROFILE_V3_SIZE 952u
 #define QX_NATIVE_GENERATION_BUFFER_PROFILE_V1_SIZE 160u
+#define QX_NATIVE_GENERATION_BUFFER_PROFILE_V2_SIZE 368u
+#define QX_NATIVE_GENERATION_BUFFER_PROFILE_V3_SIZE 456u
 
 typedef enum qx_native_io_policy {
     QX_NATIVE_IO_BUFFERED = 0,
@@ -192,9 +200,15 @@ typedef enum qx_native_cuda_policy {
     QX_NATIVE_CUDA_FINAL_HEAD_F32 = 1
 } qx_native_cuda_policy;
 
-/* Shared version 1/version 2 policy layout.  In version 1 the word at offset
- * 28 is reserved and must be zero; version 2 names it cuda_policy.  Call
- * qx_native_generation_options_init before changing fields. */
+typedef enum qx_native_expert_cache_policy {
+    QX_NATIVE_EXPERT_CACHE_NONE = 0,
+    QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED = 1
+} qx_native_expert_cache_policy;
+
+/* Shared version 1/version 2/version 3 policy layout.  Version 1 reserves the
+ * word at offset 28; versions 1 and 2 reserve bytes 32..63.  The union keeps
+ * the legacy reserved[8] source spelling while version 3 names those bytes.
+ * Call qx_native_generation_options_init before changing fields. */
 typedef struct qx_native_generation_options {
     uint32_t struct_size;
     uint32_t version;
@@ -204,7 +218,15 @@ typedef struct qx_native_generation_options {
     qx_native_thread_policy thread_policy;
     uint32_t thread_count;
     qx_native_cuda_policy cuda_policy;
-    uint32_t reserved[8];
+    union {
+        struct {
+            qx_native_expert_cache_policy expert_cache_policy;
+            uint32_t reserved_alignment;
+            uint64_t expert_cache_budget_bytes;
+            uint64_t reserved_v3[2];
+        };
+        uint32_t reserved[8];
+    };
 } qx_native_generation_options;
 
 /* Optional, separately versioned execution provenance.  Logit checksums are
@@ -282,6 +304,62 @@ typedef struct qx_native_generation_profile_v2 {
     uint64_t cuda_cpu_fallbacks;
 } qx_native_generation_profile_v2;
 
+/* Fixed-result v3 provenance.  Its first 864 bytes are byte-for-byte the v2
+ * layout; resident packed-expert cache provenance is an additive suffix. */
+typedef struct qx_native_generation_profile_v3 {
+    uint32_t struct_size;
+    uint32_t version;
+    qx_native_io_policy requested_io_backend;
+    qx_native_io_policy effective_io_backend;
+    qx_native_scratch_policy requested_scratch_policy;
+    qx_native_scratch_policy effective_scratch_policy;
+    qx_native_kernel_policy requested_kernel_policy;
+    qx_native_kernel_policy effective_kernel_policy;
+    qx_native_thread_policy requested_thread_policy;
+    qx_native_thread_policy effective_thread_policy;
+    uint32_t requested_thread_count;
+    uint32_t effective_thread_count;
+    uint32_t sampled_steps;
+    uint32_t workers_used;
+    uint64_t scratch_peak_capacity_bytes;
+    uint64_t scratch_growth_events;
+    uint64_t temporary_blocks_decoded;
+    uint64_t temporary_floats_materialized;
+    uint64_t temporary_bytes_materialized;
+    uint64_t fused_final_head_dot_calls;
+    uint64_t baseline_final_head_dot_calls;
+    uint64_t final_head_q6_k_blocks;
+    uint64_t final_head_parallel_jobs;
+    uint64_t final_head_serial_jobs;
+    uint64_t final_head_fallback_jobs;
+    uint64_t full_logits_checksums[QX_NATIVE_GENERATION_MAX_TOKENS];
+    qx_native_cuda_policy requested_cuda_policy;
+    qx_native_cuda_policy effective_cuda_policy;
+    char cuda_device_name[128];
+    uint32_t cuda_compute_capability_major;
+    uint32_t cuda_compute_capability_minor;
+    uint64_t cuda_resident_weight_bytes;
+    uint64_t cuda_persistent_allocations;
+    uint64_t cuda_weight_uploads;
+    uint64_t cuda_weight_upload_bytes;
+    uint64_t cuda_host_to_device_bytes;
+    uint64_t cuda_device_to_host_bytes;
+    uint64_t cuda_kernel_launches;
+    uint64_t cuda_cpu_fallbacks;
+    qx_native_expert_cache_policy requested_expert_cache_policy;
+    qx_native_expert_cache_policy effective_expert_cache_policy;
+    uint64_t expert_cache_budget_bytes;
+    uint64_t expert_cache_requests;
+    uint64_t expert_cache_hits;
+    uint64_t expert_cache_misses;
+    uint64_t expert_cache_loads;
+    uint64_t expert_cache_evictions;
+    uint64_t expert_cache_current_resident_packed_bytes;
+    uint64_t expert_cache_peak_resident_packed_bytes;
+    uint64_t expert_cache_buffered_bytes_read;
+    uint64_t expert_cache_buffered_bytes_avoided;
+} qx_native_generation_profile_v3;
+
 typedef struct qx_native_generation_result {
     uint32_t token_ids[QX_NATIVE_GENERATION_MAX_TOKENS];
     uint32_t token_count;
@@ -351,6 +429,64 @@ typedef struct qx_native_generation_buffer_profile {
     uint64_t cuda_cpu_fallbacks;
 } qx_native_generation_buffer_profile;
 
+/* Caller-owned v3 provenance.  The legacy buffer profile remains 368 bytes;
+ * callers opting into v3 use this distinct additive type and entry point. */
+typedef struct qx_native_generation_buffer_profile_v3 {
+    uint32_t struct_size;
+    uint32_t version;
+    qx_native_io_policy requested_io_backend;
+    qx_native_io_policy effective_io_backend;
+    qx_native_scratch_policy requested_scratch_policy;
+    qx_native_scratch_policy effective_scratch_policy;
+    qx_native_kernel_policy requested_kernel_policy;
+    qx_native_kernel_policy effective_kernel_policy;
+    qx_native_thread_policy requested_thread_policy;
+    qx_native_thread_policy effective_thread_policy;
+    uint32_t requested_thread_count;
+    uint32_t effective_thread_count;
+    uint32_t sampled_steps;
+    uint32_t workers_used;
+    uint64_t scratch_peak_capacity_bytes;
+    uint64_t scratch_growth_events;
+    uint64_t temporary_blocks_decoded;
+    uint64_t temporary_floats_materialized;
+    uint64_t temporary_bytes_materialized;
+    uint64_t fused_final_head_dot_calls;
+    uint64_t baseline_final_head_dot_calls;
+    uint64_t final_head_q6_k_blocks;
+    uint64_t final_head_parallel_jobs;
+    uint64_t final_head_serial_jobs;
+    uint64_t final_head_fallback_jobs;
+    uint64_t *full_logits_checksums;
+    uint32_t full_logits_checksums_capacity;
+    uint32_t v1_compatibility_padding;
+    qx_native_cuda_policy requested_cuda_policy;
+    qx_native_cuda_policy effective_cuda_policy;
+    char cuda_device_name[128];
+    uint32_t cuda_compute_capability_major;
+    uint32_t cuda_compute_capability_minor;
+    uint64_t cuda_resident_weight_bytes;
+    uint64_t cuda_persistent_allocations;
+    uint64_t cuda_weight_uploads;
+    uint64_t cuda_weight_upload_bytes;
+    uint64_t cuda_host_to_device_bytes;
+    uint64_t cuda_device_to_host_bytes;
+    uint64_t cuda_kernel_launches;
+    uint64_t cuda_cpu_fallbacks;
+    qx_native_expert_cache_policy requested_expert_cache_policy;
+    qx_native_expert_cache_policy effective_expert_cache_policy;
+    uint64_t expert_cache_budget_bytes;
+    uint64_t expert_cache_requests;
+    uint64_t expert_cache_hits;
+    uint64_t expert_cache_misses;
+    uint64_t expert_cache_loads;
+    uint64_t expert_cache_evictions;
+    uint64_t expert_cache_current_resident_packed_bytes;
+    uint64_t expert_cache_peak_resident_packed_bytes;
+    uint64_t expert_cache_buffered_bytes_read;
+    uint64_t expert_cache_buffered_bytes_avoided;
+} qx_native_generation_buffer_profile_v3;
+
 /* Greedy native generation with the fixed 48-layer F32/INT8-KV runtime.
  * prompt_count and max_tokens must be non-zero; prompt_count + max_tokens - 1
  * must fit both ctx_tokens and QX_NATIVE_GENERATION_MAX_TOKENS. eos_token_id < 0
@@ -358,6 +494,8 @@ typedef struct qx_native_generation_buffer_profile {
 int qx_run_native_generation(const char *path, const uint32_t *prompt_tokens, uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id, qx_native_generation_result *result, char *err, uint64_t err_len);
 void qx_native_generation_options_init(qx_native_generation_options *options);
 void qx_native_generation_profile_v2_init(qx_native_generation_profile_v2 *profile);
+void qx_native_generation_profile_v3_init(qx_native_generation_profile_v3 *profile);
+void qx_native_generation_buffer_profile_v3_init(qx_native_generation_buffer_profile_v3 *profile);
 int qx_run_native_generation_with_options(const char *path, const uint32_t *prompt_tokens,
     uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id,
     const qx_native_generation_options *options, qx_native_generation_result *result,
@@ -366,10 +504,18 @@ int qx_run_native_generation_with_options_v2(const char *path, const uint32_t *p
     uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id,
     const qx_native_generation_options *options, qx_native_generation_result *result,
     qx_native_generation_profile_v2 *profile, char *err, uint64_t err_len);
+int qx_run_native_generation_with_options_v3(const char *path, const uint32_t *prompt_tokens,
+    uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id,
+    const qx_native_generation_options *options, qx_native_generation_result *result,
+    qx_native_generation_profile_v3 *profile, char *err, uint64_t err_len);
 int qx_run_native_generation_into_with_options(const char *path, const uint32_t *prompt_tokens,
     uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id,
     const qx_native_generation_options *options, qx_native_generation_buffer_result *result,
     qx_native_generation_buffer_profile *profile, char *err, uint64_t err_len);
+int qx_run_native_generation_into_with_options_v3(const char *path, const uint32_t *prompt_tokens,
+    uint32_t prompt_count, uint32_t max_tokens, uint32_t ctx_tokens, int32_t eos_token_id,
+    const qx_native_generation_options *options, qx_native_generation_buffer_result *result,
+    qx_native_generation_buffer_profile_v3 *profile, char *err, uint64_t err_len);
 int qx_dump_rope_gqa_golden_probe_summary(uint32_t tokens, uint32_t q_heads_run, uint32_t seed, FILE *out, char *err, uint64_t err_len);
 int qx_dump_real_qkv_golden_probe_summary(const char *path, uint32_t layer, uint32_t token_a, uint32_t token_b, uint32_t q_heads_run, uint32_t seed, int full_moe, FILE *out, char *err, uint64_t err_len);
 int qx_dump_attention_stage_probe_summary(const char *path, uint32_t layer, const char *layer_input_path, const char *output_dir, const char *activation_mode, const char *kv_format, FILE *out, char *err, uint64_t err_len);

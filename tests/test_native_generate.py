@@ -238,18 +238,55 @@ def test_generate_real_hello_is_deterministic_qxt_decoded_and_exact_context_fit(
     command = real_generate_command(executable, model, tokenizer, prompt, max_tokens=2, ctx=3)
 
     payload = run_generate(command)
-    repeat = run_generate(command)
+    resident_budget = 616_464_384
+    resident = run_generate(
+        command
+        + [
+            "--expert-cache-policy",
+            "resident-packed",
+            "--expert-cache-budget-bytes",
+            str(resident_budget),
+        ]
+    )
 
     assert set(payload) == {"prompt_token_count", "generated_token_ids", "generated_text", "stop_reason", "timing"}
+    assert set(resident) == set(payload) | {"expert_cache_profile"}
     assert set(payload["timing"]) == {"prefill_seconds", "decode_seconds"}
     assert payload["prompt_token_count"] == 2
     assert payload["generated_token_ids"] == [358, 1184]
-    assert payload["generated_token_ids"] == repeat["generated_token_ids"]
-    assert payload["generated_text"] == repeat["generated_text"]
+    assert payload["generated_token_ids"] == resident["generated_token_ids"]
+    assert payload["generated_text"] == resident["generated_text"]
     assert payload["stop_reason"] == "max_tokens"
     assert payload["timing"]["prefill_seconds"] >= 0
     assert payload["timing"]["decode_seconds"] > 0
     assert "<token-" not in payload["generated_text"]
+
+    cache_profile = resident["expert_cache_profile"]
+    assert set(cache_profile) == {
+        "requested_policy",
+        "effective_policy",
+        "budget_bytes",
+        "requests",
+        "hits",
+        "misses",
+        "loads",
+        "evictions",
+        "current_resident_packed_bytes",
+        "peak_resident_packed_bytes",
+        "buffered_bytes_read",
+        "buffered_bytes_avoided",
+    }
+    assert cache_profile["requested_policy"] == "resident-packed"
+    assert cache_profile["effective_policy"] == "resident-packed"
+    assert cache_profile["budget_bytes"] == resident_budget
+    assert cache_profile["requests"] == cache_profile["hits"] + cache_profile["misses"]
+    assert cache_profile["loads"] == cache_profile["misses"]
+    assert cache_profile["requests"] > 0
+    assert cache_profile["hits"] > 0
+    assert cache_profile["buffered_bytes_read"] > 0
+    assert cache_profile["buffered_bytes_avoided"] > 0
+    assert 0 < cache_profile["peak_resident_packed_bytes"] <= resident_budget
+    assert 0 < cache_profile["current_resident_packed_bytes"] <= resident_budget
 
     decoded = subprocess.run(
         [str(executable), "tokenizer-decode", "--tokenizer", str(tokenizer), "--ids", "358,1184"],
