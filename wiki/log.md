@@ -196,3 +196,10 @@
 - Peor bloque local: layer 2, weighted max-abs `1.83105e-4`, `l_out` max-abs `2.32019e-4`, RMSE `5.12959e-6`.
 - Treinta y siete capas exceden sólo el umbral diagnóstico de router logits; pesos normalizados, weighted y reconstrucción permanecen dentro del gate.
 - La provenance pytest versiona routing, kernels por rol y métricas exactas sin guardar sidecars; el siguiente gate es acumulación híbrida del residual.
+
+## [2026-10-04] implementation | Issue 87 workers por filas MoE
+
+- #86 cerrado/publicado confirmado en GitHub; #84 sigue OPEN/NOT MET sin nueva campaña.
+- Implementado opt-in Windows/F32/buffered `moe-pool`; pool persistente por generación y ownership del cache exclusivo del coordinador. [[moe-row-pool]] documenta alcance y límites.
+- La revisión independiente y ejecución real detectaron callback con convención invertida; corregido y reejecutados gates numéricos y preflight del modelo. Corregida también la adición indebida de metadata MoE al JSON serial.
+- Publicación pendiente de regresión/matriz final y gates exact-digest; no se declara speedup ni thread-safety global.

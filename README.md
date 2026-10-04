@@ -123,6 +123,8 @@ Release update: Issue #85 is CLOSED in `766d5fdb`; GitHub Actions run `361872625
 
 ## Opt-in resident packed-expert cache (Issue #86)
 
+Release update: Issue #86 is CLOSED at `01dac26576146e00ed34c3fc4a193bfc03f2a1ae`; [CI run 36275648525](https://github.com/Nando2392/qx-mini-c/actions/runs/36275648525) succeeded. The pending-release wording below records the pre-publication package, not the live issue state.
+
 Issue #86 is implemented and locally verified, but is pending release and is not published. `none` remains the default and preserves legacy JSON. The opt-in path requires buffered I/O, `--expert-cache-policy resident-packed`, and a positive `--expert-cache-budget-bytes`; unsupported combinations fail closed before model execution. The cache is a budget-capped LRU of raw packed expert bytes. Its cap counts resident packed bytes, not globally decoded expert tensors, and its counters describe explicit buffered reads/avoided reads rather than physical disk I/O.
 
 ```bash
@@ -142,6 +144,14 @@ python scripts/expert_cache_acceptance.py --driver-exe build/issue86-driver-test
 The output directory must not already exist. Do not substitute a private absolute path in published reproduction instructions.
 
 ## Honest performance state
+
+### Persistent MoE row workers (Issue #87)
+
+The new explicit `--thread-policy moe-pool --threads N` path uses 2–64 persistent Windows workers for packed-expert F32 gate/up/down rows, with buffered I/O. Existing `pool` still means final-head threading only. `moe-pool` leaves the final head serial; experts, routing, and mixture accumulation remain serial. Default CPU/F32/cache-none/serial behavior and public struct sizes are unchanged. Unsupported Q8_K activation, mmap, CUDA, worker counts, or platforms fail closed.
+
+The coordinator owns all model/cache reads and releases each borrow only after every worker has returned. Workers read immutable slices/input and write disjoint output rows with the existing double reduction order. `workers_used` in opt-in native execution profiles includes the actual MoE worker count, while `final_head_parallel_jobs` still counts only final-head work. Diagnostic probe JSON adds `moe_pool_profile` only for `moe-pool`; its `jobs` counts submitted matvec dispatches, not individual rows or threads. No whole-library thread-safety claim is made.
+
+The bounded acceptance runner is `scripts/moe_pool_acceptance.py`, using the existing acceptance driver rebuilt from current source. It compares F32 serial/moe-pool with cache none/resident-packed, one warmup and two measured runs per cell, two forward positions per run, direct full-logit byte equality, and pre/post hashes. Each process has a 300-second deadline and a sampled 2-GiB RSS ceiling. Timing is descriptive, not a speedup or default-promotion gate. Final regression, frozen matrix, and release review status are recorded separately; implementation alone does not complete Issue #87.
 
 Earlier probe measurements on the scalar CPU path:
 

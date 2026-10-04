@@ -16,7 +16,7 @@ static void usage(const char *program) {
         "usage: %s --model QXF --tokenizer QXT --prompt-file FILE "
         "--activation f32|q8_k_compat --expert-cache-policy none|resident-packed "
         "--expert-cache-budget-bytes N --dump-dir DIR --ctx N --generate 2 "
-        "--io-backend buffered\n", program);
+        "--io-backend buffered [--thread-policy serial|moe-pool --threads N]\n", program);
 }
 
 static int parse_u64_strict(const char *text, uint64_t *value) {
@@ -65,7 +65,8 @@ int main(int argc, char **argv) {
     const char *model = NULL, *tokenizer_path = NULL, *prompt_path = NULL;
     const char *activation = NULL, *policy = NULL, *dump_dir = NULL, *io_backend = NULL;
     uint64_t budget = UINT64_MAX;
-    uint32_t ctx = 0u, generation = 0u;
+    uint32_t ctx = 0u, generation = 0u, threads = 1u;
+    const char *thread_policy = NULL;
     unsigned char *prompt = NULL;
     uint32_t prompt_length = 0u, prompt_count = 0u;
     uint32_t prompt_tokens[DRIVER_MAX_PROMPT_TOKENS + 1u];
@@ -83,6 +84,13 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--expert-cache-policy") == 0) target = &policy;
         else if (strcmp(argv[i], "--dump-dir") == 0) target = &dump_dir;
         else if (strcmp(argv[i], "--io-backend") == 0) target = &io_backend;
+        else if (strcmp(argv[i], "--thread-policy") == 0) target = &thread_policy;
+        else if (strcmp(argv[i], "--threads") == 0) {
+            if (++i >= argc || !parse_u32_strict(argv[i], &threads)) {
+                fprintf(stderr, "expert-cache-acceptance-driver: invalid threads\n"); return 2;
+            }
+            continue;
+        }
         else if (strcmp(argv[i], "--expert-cache-budget-bytes") == 0) {
             if (++i >= argc || !parse_u64_strict(argv[i], &budget)) {
                 fprintf(stderr, "expert-cache-acceptance-driver: invalid expert cache budget\n"); return 2;
@@ -109,6 +117,13 @@ int main(int argc, char **argv) {
             !io_backend || budget == UINT64_MAX || ctx == 0u || generation == 0u) {
         usage(argv[0]); return 2;
     }
+    if (thread_policy == NULL) thread_policy = "serial";
+    if (strcmp(thread_policy, "serial") == 0) {
+        if (threads != 1u) { fprintf(stderr, "serial requires one thread\n"); return 2; }
+    } else if (strcmp(thread_policy, "moe-pool") == 0) {
+        if (threads < 2u || threads > 64u) { fprintf(stderr, "moe-pool requires 2..64 threads\n"); return 2; }
+        if (strcmp(activation, "f32") != 0) { fprintf(stderr, "moe-pool requires f32\n"); return 2; }
+    } else { fprintf(stderr, "unsupported thread policy\n"); return 2; }
     if (strcmp(activation, "f32") != 0 && strcmp(activation, "q8_k_compat") != 0) {
         fprintf(stderr, "expert-cache-acceptance-driver: unsupported activation\n"); return 2;
     }
@@ -154,7 +169,7 @@ int main(int argc, char **argv) {
     }
 
     if (!qx_dump_prompt_state_loop_probe_summary(model, NULL, prompt_tokens, prompt_count,
-            generation, 48u, ctx, "int8", activation, "ephemeral", "baseline", "serial", 1u,
+            generation, 48u, ctx, "int8", activation, "ephemeral", "baseline", thread_policy, threads,
             "scalar", policy, budget, "none", "none", "none", "none", "none", "none",
             0u, 0u, 0u, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 2048u, NULL, 8u,
             151936u, 5u, 0.0, 7u, dump_dir, 0u, NULL, NULL, NULL, stdout, err, sizeof(err))) {

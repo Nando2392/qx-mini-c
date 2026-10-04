@@ -192,7 +192,8 @@ typedef enum qx_native_kernel_policy {
 
 typedef enum qx_native_thread_policy {
     QX_NATIVE_THREAD_SERIAL = 0,
-    QX_NATIVE_THREAD_POOL = 1
+    QX_NATIVE_THREAD_POOL = 1,
+    QX_NATIVE_THREAD_MOE_POOL = 2
 } qx_native_thread_policy;
 
 typedef enum qx_native_cuda_policy {
