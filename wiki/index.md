@@ -43,6 +43,7 @@
 - [[cpu-inference-baseline]] — baseline A/B fail-closed con startup, prefill, decode, total, RSS y outputs por modo.
 - [[qxf-mmap-io]] — backend QXF read-only opt-in y gate buffered/mmap 2x2.
 - [[persistent-scratch-buffers]] — scratch opt-in `ephemeral|persistent`, contadores de allocation y gate 2x2x2.
+- [[moe-row-pool]] — workers persistentes opt-in por filas de expertos F32 y aceptación acotada.
 
 ## Estado
 

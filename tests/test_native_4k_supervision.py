@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -21,7 +22,8 @@ runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 
 
-def _tree_command(tmp_path: Path, mode: str, *, startup_delay: float = 0.0) -> tuple[list[str], Path, Path]:
+def _tree_command(tmp_path: Path, mode: str, *, startup_delay: float = 0.0,
+                  tails_barrier_port: int = 0) -> tuple[list[str], Path, Path]:
     child_pid = tmp_path / "child.pid"
     grandchild_pid = tmp_path / "grandchild.pid"
     ready = tmp_path / "tree.ready"
@@ -35,13 +37,17 @@ def _tree_command(tmp_path: Path, mode: str, *, startup_delay: float = 0.0) -> t
     )
     child = tmp_path / "child.py"
     child.write_text(
-        "import os,subprocess,sys,time\n"
+        "import os,socket,subprocess,sys,time\n"
         "from pathlib import Path\n"
         "Path(sys.argv[1]).write_text(str(os.getpid()))\n"
         "time.sleep(float(sys.argv[5]))\n"
         "subprocess.Popen([sys.executable, sys.argv[2], sys.argv[3]])\n"
         "deadline=time.time()+2\n"
         "while not Path(sys.argv[3]).exists() and time.time()<deadline: time.sleep(.01)\n"
+        "if int(sys.argv[7]):\n"
+        "    with socket.create_connection(('127.0.0.1', int(sys.argv[7])), timeout=10) as barrier:\n"
+        "        barrier.sendall(b'B')\n"
+        "        assert barrier.recv(1) == b'R'\n"
         "mode=sys.argv[4]\n"
         "if mode != 'parent-zero': os.write(1,b'stdout-exact-tail\\n'); os.write(2,b'stderr-exact-tail\\n')\n"
         "if mode != 'parent-zero': os.fsync(1); os.fsync(2)\n"
@@ -55,7 +61,7 @@ def _tree_command(tmp_path: Path, mode: str, *, startup_delay: float = 0.0) -> t
         encoding="utf-8",
     )
     return [sys.executable, str(child), str(child_pid), str(grandchild), str(grandchild_pid), mode,
-            str(startup_delay), str(ready)], child_pid, grandchild_pid
+            str(startup_delay), str(ready), str(tails_barrier_port)], child_pid, grandchild_pid
 
 
 def _read_pid(path: Path) -> int:
@@ -106,6 +112,12 @@ def _cancel_after_ready(ready: Path, *, readiness_deadline_seconds: float = 4.0)
             raise failures[0]
 
 
+def _explode_after_ready(ready: Path) -> bool:
+    if ready.exists():
+        raise RuntimeError("supervisor callback exploded")
+    return False
+
+
 @pytest.mark.parametrize("mode", ["timeout", "cancel", "rss", "nonzero", "exception"])
 def test_failures_kill_child_and_grandchild_and_keep_exact_tails(tmp_path: Path, mode: str) -> None:
     command, child_pid, grandchild_pid = _tree_command(tmp_path, mode)
@@ -117,11 +129,7 @@ def test_failures_kill_child_and_grandchild_and_keep_exact_tails(tmp_path: Path,
         # Let both interpreters publish PIDs/tails before deliberate allocation.
         kwargs["rss_ceiling_bytes"] = 96 << 20
     elif mode == "exception":
-        def explode() -> bool:
-            if grandchild_pid.exists():
-                raise RuntimeError("supervisor callback exploded")
-            return False
-        kwargs["cancel_requested"] = explode
+        kwargs["cancel_requested"] = lambda: _explode_after_ready(tmp_path / "tree.ready")
 
     expected = RuntimeError if mode == "exception" else runner.RunGateError
     if mode == "cancel":
@@ -130,7 +138,7 @@ def test_failures_kill_child_and_grandchild_and_keep_exact_tails(tmp_path: Path,
             with pytest.raises(expected):
                 runner.run_supervised(command, tmp_path, **kwargs)
     else:
-        with pytest.raises(expected):
+        with pytest.raises(expected, match="^supervisor callback exploded$" if mode == "exception" else None):
             runner.run_supervised(command, tmp_path, **kwargs)
 
     _assert_gone(child_pid, grandchild_pid)
@@ -138,6 +146,59 @@ def test_failures_kill_child_and_grandchild_and_keep_exact_tails(tmp_path: Path,
     assert (tmp_path / "stderr.bin").read_bytes().endswith(b"stderr-exact-tail\n")
     journal = json.loads((tmp_path / "phase-journal.json").read_text())
     assert journal["status"] not in {"completed", "pass"}
+    if mode == "exception":
+        assert journal["status"] == "failed"
+
+
+def test_exception_waits_for_tree_readiness_before_killing_descendants(tmp_path: Path) -> None:
+    ready = tmp_path / "tree.ready"
+    pre_ready_results: list[bool] = []
+    raised_when_ready: list[bool] = []
+    with socket.socket() as barrier:
+        barrier.bind(("127.0.0.1", 0))
+        barrier.listen(1)
+        barrier.settimeout(4.0)
+        command, child_pid, grandchild_pid = _tree_command(
+            tmp_path, "exception", tails_barrier_port=barrier.getsockname()[1],
+        )
+
+        def explode() -> bool:
+            try:
+                if grandchild_pid.exists() and not pre_ready_results:
+                    # Hold the child between PID publication and durable tails, independent of scheduling.
+                    with barrier.accept()[0] as connection:
+                        connection.settimeout(4.0)
+                        assert connection.recv(1) == b"B"
+                        assert not ready.exists()
+                        assert (tmp_path / "stdout.bin").read_bytes() == b""
+                        assert (tmp_path / "stderr.bin").read_bytes() == b""
+                        result = _explode_after_ready(ready)
+                        pre_ready_results.append(result)
+                        connection.sendall(b"R")
+                        return result
+                return _explode_after_ready(ready)
+            except RuntimeError:
+                raised_when_ready.append(ready.exists())
+                raise
+
+        with pytest.raises(RuntimeError, match="^supervisor callback exploded$"):
+            runner.run_supervised(
+                command,
+                tmp_path,
+                deadline_seconds=6.0,
+                rss_ceiling_bytes=1 << 30,
+                sample_interval_seconds=0.02,
+                heartbeat_seconds=0.05,
+                cancel_requested=explode,
+            )
+
+    _assert_gone(child_pid, grandchild_pid)
+    assert pre_ready_results == [False]
+    assert raised_when_ready == [True]
+    assert ready.read_text(encoding="utf-8") == "ready"
+    assert (tmp_path / "stdout.bin").read_bytes().endswith(b"stdout-exact-tail\n")
+    assert (tmp_path / "stderr.bin").read_bytes().endswith(b"stderr-exact-tail\n")
+    assert json.loads((tmp_path / "phase-journal.json").read_text())["status"] == "failed"
 
 
 def test_cancel_waits_for_tree_readiness_before_killing_delayed_descendants(tmp_path: Path) -> None:

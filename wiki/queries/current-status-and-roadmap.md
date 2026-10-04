@@ -1,7 +1,7 @@
 ---
 title: Current Status and Roadmap
 created: 2026-08-17
-updated: 2026-09-26
+updated: 2026-10-04
 type: query
 tags: [roadmap, runtime, qwen3-moe, risk]
 sources: [raw/project/project-state-2026-08-17.md]
@@ -239,7 +239,9 @@ La matriz final post-race de #86 ejecutó 16 corridas (F32/Q8_K-compatible × `n
 
 ## Después
 
-1. Publicar #86 sólo después de sus gates finales; mantener `none` como default y `resident-packed` como opt-in bounded/buffered.
+Actualización vigente: GitHub confirma #86 CLOSED en `01dac26576146e00ed34c3fc4a193bfc03f2a1ae`, CI `36275648525` SUCCESS. Los párrafos anteriores de release pendiente son históricos. #87 es el nuevo slice funcional: workers persistentes opt-in por filas de expertos F32; detalles en [[moe-row-pool]].
+
+1. Completar gates y publicación de #87; mantener `serial` y caché `none` como defaults, `moe-pool` y `resident-packed` como opt-in buffered.
 2. Mantener CPU 4K como no probado: #84 sigue OPEN, no completó el gate y no se volvió a ejecutar. No repetir por inercia ni convertir el timeout en una conclusión causal.
 3. Tratar speedup, I/O físico, paridad global y promoción Q8_K como claims no autorizados por #86.
 4. Mantener diferidos resume nativo, quality sweep KV y soak/térmica hasta que cada uno tenga runner y evidencia propios.

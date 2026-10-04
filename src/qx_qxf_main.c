@@ -41,7 +41,7 @@ static void usage(const char *argv0) {
         "  qxqxf tokenizer-inspect --tokenizer model.qxt\n"
         "  qxqxf tokenizer-encode --tokenizer model.qxt --text-file prompt.txt [--parse-special]\n"
         "  qxqxf tokenizer-decode --tokenizer model.qxt --ids 9707,0 [--special]\n"
-        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64 [--io-backend buffered|mmap] [--scratch-policy ephemeral|persistent] [--kernel-policy baseline|fused] [--thread-policy serial|pool] [--threads N] [--expert-cache-policy none|resident-packed] [--expert-cache-budget-bytes N] [--cuda-policy none|final-head-f32] [--execution-profile] [--capacity-profile]\n"
+        "  qxqxf generate --in model.qxf --tokenizer model.qxt --text-file prompt.txt --max-tokens 16 --ctx 64 [--io-backend buffered|mmap] [--scratch-policy ephemeral|persistent] [--kernel-policy baseline|fused] [--thread-policy serial|pool|moe-pool] [--threads N] [--expert-cache-policy none|resident-packed] [--expert-cache-budget-bytes N] [--cuda-policy none|final-head-f32] [--execution-profile] [--capacity-profile]\n"
         "  qxqxf chat-template-render --message system:system.txt --message user:prompt.txt [--add-generation-prompt]\n"
         "  qxqxf prompt-state-loop-probe --in model.qxf --tokenizer model.qxt --text-file prompt.txt --generate 2 --layers 48 --ctx 16 --kv int8 --activation f32 --io-backend buffered|mmap --scratch-policy ephemeral|persistent --kernel-policy baseline|fused --thread-policy serial --threads 1 --expert-cache-policy none|resident-packed [--expert-cache-budget-bytes N] --temperature 0 --seed 7 --full-moe --final-head [--bench] [--dequant-profile] [--parse-special] [--top-n 5] [--kv-snapshot-out file]\n"
         "  %s tokenizer-probe --in model.qxf --token-id 42\n"
@@ -465,6 +465,7 @@ chat_fail:
                 const char *value = argv[++i];
                 if (strcmp(value, "serial") == 0) options.thread_policy = QX_NATIVE_THREAD_SERIAL;
                 else if (strcmp(value, "pool") == 0) options.thread_policy = QX_NATIVE_THREAD_POOL;
+                else if (strcmp(value, "moe-pool") == 0) options.thread_policy = QX_NATIVE_THREAD_MOE_POOL;
                 else { fprintf(stderr, "generate failed: unsupported native generation thread policy\n"); return 2; }
             }
             else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
@@ -497,6 +498,14 @@ chat_fail:
         if (!in_path || !tokenizer_path || !text_path || !max_tokens_seen || !ctx_seen) {
             fprintf(stderr, "generate requires --in, --tokenizer, --text-file, --max-tokens, and --ctx\n");
             return 2;
+        }
+        if (options.thread_policy == QX_NATIVE_THREAD_MOE_POOL) {
+#if !defined(_WIN32)
+            fprintf(stderr, "moe-pool requires Windows\n"); return 2;
+#endif
+            if (options.thread_count < 2u || options.thread_count > 64u) { fprintf(stderr, "moe-pool requires 2..64 workers\n"); return 2; }
+            if (options.io_backend != QX_NATIVE_IO_BUFFERED) { fprintf(stderr, "moe-pool requires buffered I/O\n"); return 2; }
+            if (options.cuda_policy != QX_NATIVE_CUDA_NONE) { fprintf(stderr, "moe-pool does not support CUDA\n"); return 2; }
         }
         if (options.thread_policy == QX_NATIVE_THREAD_SERIAL && options.thread_count != 1u) {
             fprintf(stderr, "generate failed: serial native generation policy requires one thread\n");
@@ -669,8 +678,8 @@ chat_fail:
                 profile.effective_scratch_policy == QX_NATIVE_SCRATCH_PERSISTENT ? "persistent" : "ephemeral",
                 profile.requested_kernel_policy == QX_NATIVE_KERNEL_FUSED_FINAL_HEAD ? "fused" : "baseline",
                 profile.effective_kernel_policy == QX_NATIVE_KERNEL_FUSED_FINAL_HEAD ? "fused" : "baseline",
-                profile.requested_thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial",
-                profile.effective_thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial",
+                profile.requested_thread_policy == QX_NATIVE_THREAD_MOE_POOL ? "moe-pool" : (profile.requested_thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial"),
+                profile.effective_thread_policy == QX_NATIVE_THREAD_MOE_POOL ? "moe-pool" : (profile.effective_thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial"),
                 profile.requested_thread_count, profile.effective_thread_count,
                 profile.sampled_steps, profile.workers_used,
                 (unsigned long long)profile.scratch_peak_capacity_bytes,
@@ -854,11 +863,21 @@ chat_fail:
             else { usage(argv[0]); return 2; }
         }
         if (!in_path || !tokenizer_path || !text_path || !full_moe || !final_head) { usage(argv[0]); return 2; }
+        int moe_pool_policy = strcmp(thread_policy, "moe-pool") == 0;
+        if (moe_pool_policy) {
+#if !defined(_WIN32)
+            fprintf(stderr, "moe-pool requires Windows\n"); return 2;
+#endif
+            if (threads < 2u || threads > 64u) { fprintf(stderr, "moe-pool requires 2..64 workers\n"); return 2; }
+            if (strcmp(activation_format, "f32") != 0) { fprintf(stderr, "moe-pool requires F32 activation\n"); return 2; }
+            if (strcmp(io_backend, "buffered") != 0) { fprintf(stderr, "moe-pool requires buffered I/O\n"); return 2; }
+            if (strcmp(cuda_policy, "none") != 0) { fprintf(stderr, "moe-pool does not support CUDA\n"); return 2; }
+        }
         int thread_pool_policy = strcmp(thread_policy, "pool") == 0;
-        if (!thread_pool_policy && strcmp(thread_policy, "serial") != 0) {
+        if (!thread_pool_policy && !moe_pool_policy && strcmp(thread_policy, "serial") != 0) {
             fprintf(stderr, "prompt-state-loop-probe failed: unsupported thread policy\n"); return 2;
         }
-        if (!thread_pool_policy && threads != 1u) {
+        if (!thread_pool_policy && !moe_pool_policy && threads != 1u) {
             fprintf(stderr, "prompt-state-loop-probe failed: serial thread policy requires --threads 1\n"); return 2;
         }
         if (thread_pool_policy && threads < 2u) {

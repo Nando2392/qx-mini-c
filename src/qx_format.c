@@ -1,6 +1,7 @@
 #include "qx_format.h"
 #include "qx_cuda_final_head.h"
 #include "qx_expert_cache.h"
+#include "qx_row_pool.h"
 
 #include <errno.h>
 #include <math.h>
@@ -4804,9 +4805,36 @@ static void qx_print_float_json_array(FILE *out, const float *values, uint32_t c
     fprintf(out, "]");
 }
 
+typedef struct {
+    const unsigned char *slice;
+    const float *input;
+    float *output;
+    uint32_t input_dims;
+    uint32_t type;
+    uint64_t blocks_per_row, block_size, row_bytes;
+} qx_moe_rows;
+
+static int qx_moe_rows_run(void *context, uint32_t begin, uint32_t end) {
+    const qx_moe_rows *job = (const qx_moe_rows *)context;
+    for (uint32_t row = begin; row < end; ++row) {
+        const unsigned char *data = job->slice + (uint64_t)row * job->row_bytes;
+        double dot = 0.0;
+        for (uint64_t block = 0; block < job->blocks_per_row; ++block) {
+            float weights[256];
+            if (!qx_decode_supported_block(job->type, data + block * job->block_size, weights)) return 1;
+            uint32_t start = (uint32_t)block * 256u;
+            uint32_t take = job->input_dims - start;
+            if (take > 256u) take = 256u;
+            for (uint32_t i = 0; i < take; ++i) dot += (double)weights[i] * (double)job->input[start + i];
+        }
+        job->output[row] = isfinite(dot) ? (float)dot : 0.0f;
+    }
+    return 0; /* qx_row_pool_fn uses zero for success. */
+}
+
 static int qx_packed_expert_matvec_mode(qx_file *file, const qx_tensor_dir_entry *tensor, uint32_t expert,
                                    const float *input, uint32_t input_dims, float *output, uint32_t output_dims,
-                                   const qx_projection_workspace *workspace, qx_expert_cache *expert_cache, char *err, uint64_t err_len) {
+                                   const qx_projection_workspace *workspace, qx_expert_cache *expert_cache, qx_row_pool *moe_pool, char *err, uint64_t err_len) {
     if (!file || !tensor || !input || !output || tensor->rank < 3u || tensor->dims[0] != input_dims || tensor->dims[1] < output_dims || expert >= tensor->dims[2]) {
         qx_set_err(err, err_len, "invalid packed expert matvec argument"); return 0;
     }
@@ -4827,6 +4855,7 @@ static int qx_packed_expert_matvec_mode(qx_file *file, const qx_tensor_dir_entry
         input_dims % QX_Q8_K_VALUES != 0u || workspace->count != blocks_per_row)) {
         qx_set_err(err, err_len, "incompatible packed expert Q8_K workspace"); return 0;
     }
+    if (moe_pool && workspace) { qx_set_err(err, err_len, "moe-pool requires F32 activation"); return 0; }
     unsigned char *slice = NULL;
     qx_expert_cache_borrow borrow = {0};
     if (expert_cache) {
@@ -4834,6 +4863,13 @@ static int qx_packed_expert_matvec_mode(qx_file *file, const qx_tensor_dir_entry
         if (!qx_expert_cache_acquire(expert_cache, key, &borrow, err, err_len)) return 0;
         slice = (unsigned char *)borrow.data;
     } else if (!qx_read_raw_span(file, tensor->offset + (uint64_t)expert * expert_bytes, expert_bytes, &slice, err, err_len)) return 0;
+    if (moe_pool) {
+        qx_moe_rows job = {slice, input, output, input_dims, tensor->flags, blocks_per_row, block_size, row_bytes};
+        /* run joins every reader before the coordinator releases the borrowed slice. */
+        int ok = qx_row_pool_run(moe_pool, output_dims, qx_moe_rows_run, &job, err, err_len);
+        if (expert_cache) qx_expert_cache_release(expert_cache, &borrow); else free(slice);
+        return ok;
+    }
     for (uint32_t row = 0; row < output_dims; ++row) {
         const unsigned char *row_data = slice + (uint64_t)row * row_bytes;
         if (workspace) {
@@ -4862,7 +4898,7 @@ static int qx_packed_expert_matvec_mode(qx_file *file, const qx_tensor_dir_entry
 static int qx_packed_expert_matvec(qx_file *file, const qx_tensor_dir_entry *tensor, uint32_t expert,
                                    const float *input, uint32_t input_dims, float *output, uint32_t output_dims,
                                    char *err, uint64_t err_len) {
-    return qx_packed_expert_matvec_mode(file, tensor, expert, input, input_dims, output, output_dims, NULL, NULL, err, err_len);
+    return qx_packed_expert_matvec_mode(file, tensor, expert, input, input_dims, output, output_dims, NULL, NULL, NULL, err, err_len);
 }
 
 int qx_dump_real_qkv_golden_probe_summary(const char *path, uint32_t layer, uint32_t token_a, uint32_t token_b, uint32_t q_heads_run, uint32_t seed, int full_moe, FILE *out, char *err, uint64_t err_len) {
@@ -5273,7 +5309,7 @@ static int qx_apply_real_moe_layer(
     float *layer_output, float *moe_output_capture, uint32_t selected_experts[8], double routing_weights[8],
     uint32_t *gate_type_out, uint32_t *up_type_out, uint32_t *down_type_out,
     const char *activation_format, qx_scratch_workspace *scratch_workspace,
-    qx_expert_cache *expert_cache, double *moe_l2_out, char *err, uint64_t err_len) {
+    qx_expert_cache *expert_cache, qx_row_pool *moe_pool, double *moe_l2_out, char *err, uint64_t err_len) {
     int use_q8_k = activation_format && strcmp(activation_format, "q8_k_compat") == 0;
     if (!use_q8_k && (!activation_format || strcmp(activation_format, "f32") != 0)) {
         qx_set_err(err, err_len, "unsupported real MoE activation format"); return 0;
@@ -5363,14 +5399,14 @@ static int qx_apply_real_moe_layer(
     if (gate_up_q8_k && !qx_quantize_q8_k(ffn_input, hidden, &gate_up_workspace, err, err_len)) { if (!scratch_workspace) free(buffers); return 0; }
     for (uint32_t rank = 0; rank < 8u; ++rank) {
         uint32_t expert = selected_experts[rank];
-        if (!qx_packed_expert_matvec_mode(file, gate_exps, expert, ffn_input, hidden, gate_values, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, expert_cache, err, err_len) ||
-            !qx_packed_expert_matvec_mode(file, up_exps, expert, ffn_input, hidden, up_values, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, expert_cache, err, err_len)) {
+        if (!qx_packed_expert_matvec_mode(file, gate_exps, expert, ffn_input, hidden, gate_values, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, expert_cache, moe_pool, err, err_len) ||
+            !qx_packed_expert_matvec_mode(file, up_exps, expert, ffn_input, hidden, up_values, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, expert_cache, moe_pool, err, err_len)) {
             if (!scratch_workspace) free(buffers); return 0;
         }
         for (uint32_t i = 0; i < intermediate; ++i) expert_hidden[i] = (float)(qx_silu((double)gate_values[i]) * (double)up_values[i]);
         qx_projection_workspace down_workspace = {0};
         if (down_q8_k && !qx_quantize_q8_k(expert_hidden, intermediate, &down_workspace, err, err_len)) { if (!scratch_workspace) free(buffers); return 0; }
-        if (!qx_packed_expert_matvec_mode(file, down_exps, expert, expert_hidden, intermediate, expert_output, hidden, down_q8_k ? &down_workspace : NULL, expert_cache, err, err_len)) {
+        if (!qx_packed_expert_matvec_mode(file, down_exps, expert, expert_hidden, intermediate, expert_output, hidden, down_q8_k ? &down_workspace : NULL, expert_cache, moe_pool, err, err_len)) {
             if (!scratch_workspace) free(buffers); return 0;
         }
         for (uint32_t i = 0; i < hidden; ++i) moe_output[i] += (float)(routing_weights[rank] * (double)expert_output[i]);
@@ -5779,12 +5815,12 @@ int qx_dump_moe_stage_probe_summary_mode(const char *path, uint32_t layer, const
         float *swiglu_rank = swiglu + (size_t)rank * intermediate;
         float *down_rank = down_values + (size_t)rank * hidden;
         float *weighted_rank = weighted + (size_t)rank * hidden;
-        if (!qx_packed_expert_matvec_mode(&file, gate, selected[rank], ffn_norm, hidden, gate_rank, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, NULL, err, err_len) ||
-            !qx_packed_expert_matvec_mode(&file, up, selected[rank], ffn_norm, hidden, up_rank, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, NULL, err, err_len)) goto fail;
+        if (!qx_packed_expert_matvec_mode(&file, gate, selected[rank], ffn_norm, hidden, gate_rank, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, NULL, NULL, err, err_len) ||
+            !qx_packed_expert_matvec_mode(&file, up, selected[rank], ffn_norm, hidden, up_rank, intermediate, gate_up_q8_k ? &gate_up_workspace : NULL, NULL, NULL, err, err_len)) goto fail;
         for (uint32_t i = 0; i < intermediate; ++i) swiglu_rank[i] = (float)(qx_silu((double)gate_rank[i]) * (double)up_rank[i]);
         qx_projection_workspace down_workspace = {0};
         if (down_q8_k && !qx_quantize_q8_k(swiglu_rank, intermediate, &down_workspace, err, err_len)) goto fail;
-        if (!qx_packed_expert_matvec_mode(&file, down, selected[rank], swiglu_rank, intermediate, down_rank, hidden, down_q8_k ? &down_workspace : NULL, NULL, err, err_len)) goto fail;
+        if (!qx_packed_expert_matvec_mode(&file, down, selected[rank], swiglu_rank, intermediate, down_rank, hidden, down_q8_k ? &down_workspace : NULL, NULL, NULL, err, err_len)) goto fail;
         for (uint32_t i = 0; i < hidden; ++i) weighted_rank[i] = (float)(weights_norm_double[rank] * (double)down_rank[i]);
     }
 
@@ -6082,11 +6118,23 @@ static int qx_run_prompt_state_loop(const char *path, qx_io_backend io_backend, 
     }
     if (!thread_policy) thread_policy = "serial";
     if (threads == 0u) threads = 1u;
+    int moe_pool_policy = strcmp(thread_policy, "moe-pool") == 0;
+    qx_row_pool *moe_pool = NULL;
+    if (moe_pool_policy) {
+#if !defined(_WIN32)
+        qx_set_err(err, err_len, "moe-pool requires Windows"); return 0;
+#endif
+        if (threads < 2u || threads > 64u) { qx_set_err(err, err_len, "moe-pool requires 2..64 workers"); return 0; }
+        if (strcmp(activation_format, "f32") != 0) { qx_set_err(err, err_len, "moe-pool requires F32 activation"); return 0; }
+        if (io_backend != QX_IO_BUFFERED) { qx_set_err(err, err_len, "moe-pool requires buffered I/O"); return 0; }
+        if (cuda_policy && strcmp(cuda_policy, "none") != 0) { qx_set_err(err, err_len, "moe-pool does not support CUDA"); return 0; }
+        if (!full_moe) { qx_set_err(err, err_len, "moe-pool requires full-moe"); return 0; }
+    }
     int thread_pool_policy = strcmp(thread_policy, "pool") == 0;
-    if (!thread_pool_policy && strcmp(thread_policy, "serial") != 0) {
+    if (!thread_pool_policy && !moe_pool_policy && strcmp(thread_policy, "serial") != 0) {
         qx_set_err(err, err_len, "unsupported thread policy"); return 0;
     }
-    if (!thread_pool_policy && threads != 1u) {
+    if (!thread_pool_policy && !moe_pool_policy && threads != 1u) {
         qx_set_err(err, err_len, "serial thread policy requires --threads 1"); return 0;
     }
     if (thread_pool_policy && threads < 2u) { qx_set_err(err, err_len, "thread pool policy requires --threads >= 2"); return 0; }
@@ -6167,7 +6215,7 @@ static int qx_run_prompt_state_loop(const char *path, qx_io_backend io_backend, 
     qx_expert_cache *expert_cache_ptr = NULL;
     if (resident_expert_cache) {
         qx_expert_cache_ops cache_ops = {&file, qx_expert_cache_alloc_callback, qx_expert_cache_free_callback, qx_expert_cache_read_callback};
-        if (!qx_expert_cache_init(&expert_cache, expert_cache_budget_bytes, &cache_ops, err, err_len)) { qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+        if (!qx_expert_cache_init(&expert_cache, expert_cache_budget_bytes, &cache_ops, err, err_len)) { qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
         expert_cache_ptr = &expert_cache;
     }
     qx_cuda_final_head_context *cuda_context = NULL;
@@ -6178,15 +6226,15 @@ static int qx_run_prompt_state_loop(const char *path, qx_io_backend io_backend, 
     qx_scratch_workspace scratch_workspace = {0};
     qx_scratch_workspace *scratch = scratch_persistent ? &scratch_workspace : NULL;
     if (full_moe) {
-        if (strcmp(kv_format, "int8") != 0 && strcmp(kv_format, "f16") != 0 && strcmp(kv_format, "fp16") != 0 && strcmp(kv_format, "f32") != 0) { qx_close_file(&file); qx_set_err(err, err_len, "full MoE state loop requires INT8, F16, or diagnostic F32 KV"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+        if (strcmp(kv_format, "int8") != 0 && strcmp(kv_format, "f16") != 0 && strcmp(kv_format, "fp16") != 0 && strcmp(kv_format, "f32") != 0) { qx_close_file(&file); qx_set_err(err, err_len, "full MoE state loop requires INT8, F16, or diagnostic F32 KV"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
         residual_dims = file.header.manifest.hidden;
-        if (residual_dims == 0u || residual_dims > 2048u) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported full MoE hidden size"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+        if (residual_dims == 0u || residual_dims > 2048u) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported full MoE hidden size"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     }
     uint32_t requested_layers = layers;
     uint32_t manifest_layers = file.header.manifest.layers ? file.header.manifest.layers : layers;
     if (layers > manifest_layers) layers = manifest_layers;
     if (residual_replay && start_layer >= layers) {
-        qx_close_file(&file); qx_set_err(err, err_len, "residual replay start layer must be below requested layers"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        qx_close_file(&file); qx_set_err(err, err_len, "residual replay start layer must be below requested layers"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     uint32_t q_heads = file.header.manifest.q_heads;
     uint32_t kv_heads = file.header.manifest.kv_heads;
@@ -6236,51 +6284,51 @@ static int qx_run_prompt_state_loop(const char *path, qx_io_backend io_backend, 
     if (q_heads == 0u || kv_heads == 0u || head_dim == 0u || q_heads > UINT32_MAX / head_dim || kv_heads > UINT32_MAX / head_dim) {
         qx_close_file(&file);
         qx_set_err(err, err_len, "invalid attention dimensions");
-        qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     if (final_head && (!full_moe || requested_layers != manifest_layers || temperature != 0.0)) {
         qx_close_file(&file);
         qx_set_err(err, err_len, "--final-head requires --full-moe, 1..64 steps, all manifest layers, and temperature 0");
-        qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     if (thread_pool_policy && !final_head) {
         qx_close_file(&file);
         qx_set_err(err, err_len, "thread pool policy currently requires --final-head");
-        qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     if (final_head && (file.header.manifest.model_type != QX_MODEL_QWEN3_MOE || manifest_layers != 48u || file.header.manifest.hidden != 2048u || file.header.manifest.vocab != 151936u || q_heads != 32u || kv_heads != 4u || head_dim != 128u)) {
         qx_close_file(&file);
         qx_set_err(err, err_len, "--final-head requires exact Qwen3-30B-A3B manifest dimensions");
-        qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     if (ctx_tokens == 0u || ctx_tokens > 4096u) {
         qx_close_file(&file);
         qx_set_err(err, err_len, "state loop context must be between 1 and 4096");
-        qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     if (logits_top_n == 0u) logits_top_n = 1u;
     if (logits_top_n > 32u) logits_top_n = 32u;
     uint32_t vocab = file.header.manifest.vocab ? file.header.manifest.vocab : 151936u;
     for (uint32_t i = 0; i < prompt_count; ++i) {
-        if (prompt_tokens[i] >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "prompt token out of range"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+        if (prompt_tokens[i] >= vocab) { qx_close_file(&file); qx_set_err(err, err_len, "prompt token out of range"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     }
-    if (steps > ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "steps exceed ctx"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
-    if (kv_heads != 0u && (uint64_t)head_dim > UINT64_MAX / (uint64_t)kv_heads) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if (steps > ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "steps exceed ctx"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if (kv_heads != 0u && (uint64_t)head_dim > UINT64_MAX / (uint64_t)kv_heads) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     uint64_t values_per_k_or_v = (uint64_t)kv_heads * (uint64_t)head_dim;
     int kv_f32 = strcmp(kv_format, "f32") == 0;
     int kv_f16 = strcmp(kv_format, "f16") == 0 || strcmp(kv_format, "fp16") == 0;
     uint64_t bytes_per_k_or_v = 0;
     uint32_t bytes_per_value = 0;
-    if (!qx_kv_bytes_for_format(kv_format, values_per_k_or_v, &bytes_per_k_or_v, &bytes_per_value)) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported kv format"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
-    if (bytes_per_k_or_v > UINT64_MAX / 2ull || bytes_per_k_or_v > (uint64_t)SIZE_MAX / sizeof(float)) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if (!qx_kv_bytes_for_format(kv_format, values_per_k_or_v, &bytes_per_k_or_v, &bytes_per_value)) { qx_close_file(&file); qx_set_err(err, err_len, "unsupported kv format"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if (bytes_per_k_or_v > UINT64_MAX / 2ull || bytes_per_k_or_v > (uint64_t)SIZE_MAX / sizeof(float)) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     uint64_t bytes_per_token_layer = bytes_per_k_or_v * 2ull;
-    if ((uint64_t)ctx_tokens > UINT64_MAX / bytes_per_token_layer) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if ((uint64_t)ctx_tokens > UINT64_MAX / bytes_per_token_layer) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     uint64_t layer_stride = (uint64_t)ctx_tokens * bytes_per_token_layer;
-    if ((uint64_t)layers > UINT64_MAX / (uint64_t)ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if ((uint64_t)layers > UINT64_MAX / (uint64_t)ctx_tokens) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     uint64_t cache_slots = (uint64_t)layers * (uint64_t)ctx_tokens;
-    if (cache_slots > UINT64_MAX / bytes_per_k_or_v || cache_slots > (uint64_t)SIZE_MAX / sizeof(float)) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if (cache_slots > UINT64_MAX / bytes_per_k_or_v || cache_slots > (uint64_t)SIZE_MAX / sizeof(float)) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     uint64_t persistent_cache_bytes = cache_slots * bytes_per_k_or_v;
-    if (persistent_cache_bytes > (uint64_t)SIZE_MAX) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if (persistent_cache_bytes > (uint64_t)SIZE_MAX) { qx_close_file(&file); qx_set_err(err, err_len, "state loop cache size overflow"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     unsigned char *kbuf = (unsigned char *)malloc((size_t)bytes_per_k_or_v);
     unsigned char *vbuf = (unsigned char *)malloc((size_t)bytes_per_k_or_v);
     unsigned char *kcache = causal_attention ? (unsigned char *)calloc(1, (size_t)persistent_cache_bytes) : NULL;
@@ -6290,7 +6338,7 @@ static int qx_run_prompt_state_loop(const char *path, qx_io_backend io_backend, 
     float *kscales = causal_attention ? (float *)calloc((size_t)cache_slots, sizeof(float)) : NULL;
     float *vscales = causal_attention ? (float *)calloc((size_t)cache_slots, sizeof(float)) : NULL;
     float *residual_vec = residual_vector ? (float *)malloc((size_t)residual_dims * (full_moe ? 2u : 1u) * sizeof(float)) : NULL;
-    if (!kbuf || !vbuf || (causal_attention && (!kcache || !vcache || !kfloat || !vfloat || !kscales || !vscales)) || (residual_vector && !residual_vec)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+    if (!kbuf || !vbuf || (causal_attention && (!kcache || !vcache || !kfloat || !vfloat || !kscales || !vscales)) || (residual_vector && !residual_vec)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
     uint32_t position_base = 0u;
     uint32_t snapshot_next_token = prompt_tokens[0];
     if (kv_snapshot_in_path && *kv_snapshot_in_path) {
@@ -6299,18 +6347,18 @@ static int qx_run_prompt_state_loop(const char *path, qx_io_backend io_backend, 
                 &position_base, &snapshot_next_token, err, err_len)) {
             free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file);
             if (prompt_count != 1u) qx_set_err(err, err_len, "KV snapshot replay requires exactly one continuation token");
-            qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+            qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
         }
         if (prompt_tokens[0] != snapshot_next_token) {
             free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file);
-            qx_set_err(err, err_len, "KV snapshot continuation token mismatch"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+            qx_set_err(err, err_len, "KV snapshot continuation token mismatch"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
         }
     }
     int snapshot_active = (kv_snapshot_in_path && *kv_snapshot_in_path) || (kv_snapshot_out_path && *kv_snapshot_out_path);
     if (position_base > ctx_tokens || steps > ctx_tokens - position_base ||
             (snapshot_active && (position_base > 64u || steps > 64u - position_base))) {
         free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file);
-        qx_set_err(err, err_len, "KV snapshot plus replay steps exceed context"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        qx_set_err(err, err_len, "KV snapshot plus replay steps exceed context"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     if (cuda_final_head) {
         const qx_tensor_dir_entry *lm = qx_find_tensor(&file, "output.weight");
@@ -6326,8 +6374,12 @@ static int qx_run_prompt_state_loop(const char *path, qx_io_backend io_backend, 
     }
     goto cuda_setup_done;
 cuda_setup_fail:
-    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
 cuda_setup_done:
+    if (moe_pool_policy) {
+        moe_pool = qx_row_pool_create(threads, err, err_len);
+        if (!moe_pool) goto cuda_setup_fail;
+    }
     uint32_t current = prompt_tokens[0];
     uint64_t kv_appends = 0;
     uint64_t layers_run = 0;
@@ -6335,7 +6387,7 @@ cuda_setup_done:
     uint64_t k_mix = 1469598103934665603ull;
     uint64_t v_mix = 1469598103934665603ull;
     qx_dequant_dot_profile dequant_profile = {0};
-    uint32_t thread_workers_used = thread_pool_policy ? threads : 1u;
+    uint32_t thread_workers_used = (thread_pool_policy || moe_pool_policy) ? threads : 1u;
     uint64_t thread_parallel_jobs = 0u;
     uint64_t thread_serial_jobs = 0u;
     uint64_t thread_fallback_jobs = 0u;
@@ -6411,10 +6463,10 @@ cuda_setup_done:
         double residual_rms = 0.0;
         uint64_t residual_checksum = 0;
         if (residual_vector) {
-            if (!qx_fill_residual_vector_from_embedding(&file, current, norm_name, residual_vec, residual_dims, &residual_rms, &residual_checksum, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+            if (!qx_fill_residual_vector_from_embedding(&file, current, norm_name, residual_vec, residual_dims, &residual_rms, &residual_checksum, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
             residual_values = residual_dims;
             if (residual_replay) {
-                if (!qx_read_exact_f32_sidecar(residual_input_path, residual_vec, residual_values, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+                if (!qx_read_exact_f32_sidecar(residual_input_path, residual_vec, residual_values, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
                 double sumsq = 0.0;
                 for (uint32_t ri = 0; ri < residual_values; ++ri) sumsq += (double)residual_vec[ri] * (double)residual_vec[ri];
                 residual_rms = sqrt(sumsq / (double)residual_values);
@@ -6428,7 +6480,7 @@ cuda_setup_done:
             uint64_t residual_input_checksum = residual_vec && residual_values
                 ? qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float)) : 0ull;
             if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "input", residual_vec, residual_values, err, err_len)) {
-                free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
             }
             float *projection_residual = residual_vec;
             if (full_moe) {
@@ -6440,7 +6492,7 @@ cuda_setup_done:
                 double attention_rms = 0.0;
                 projection_residual = residual_vec + residual_values;
                 if (!attention_norm || !q_norm || !qx_apply_f32_rmsnorm(&file, attention_norm, residual_vec, projection_residual, residual_values, &attention_rms, err, err_len)) {
-                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
             }
             uint64_t k_offset = (uint64_t)layer * layer_stride + (uint64_t)step * bytes_per_token_layer;
@@ -6466,18 +6518,18 @@ cuda_setup_done:
                     kt = qx_find_tensor(&file, kn);
                     vt = qx_find_tensor(&file, vn);
                 }
-                if (!kt || !vt) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "projection tensor not found"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+                if (!kt || !vt) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "projection tensor not found"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
                 if (projection_matvec) {
                     uint32_t matvec_dims = residual_values ? residual_values : 64u;
                     if (!qx_projection_matvec_fill_mode(&file, kt, kbuf, causal_attention ? kfloat : NULL, (uint32_t)values_per_k_or_v, matvec_dims, projection_residual, residual_values, current, layer, seed + step * 17u, activation_format, &projection_workspace, &kprobe, &k_matvec_values, err, err_len) ||
                         !qx_projection_matvec_fill_mode(&file, vt, vbuf, causal_attention ? vfloat : NULL, (uint32_t)values_per_k_or_v, matvec_dims, projection_residual, residual_values, current, layer, (seed ^ 0x9e3779b9u) + step * 17u, activation_format, &projection_workspace, &vprobe, &v_matvec_values, err, err_len)) {
-                        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                     }
                     k_real_values = k_matvec_values;
                     v_real_values = v_matvec_values;
                 } else if (!qx_fill_kv_from_projection(&file, kt, kbuf, bytes_per_k_or_v, current, step, layer, seed, &k_real_values, err, err_len) ||
                     !qx_fill_kv_from_projection(&file, vt, vbuf, bytes_per_k_or_v, current, step, layer, seed ^ 0x9e3779b9u, &v_real_values, err, err_len)) {
-                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
             } else {
                 qx_fill_kv_append(kbuf, bytes_per_k_or_v, current, step, layer, seed, 0);
@@ -6487,11 +6539,11 @@ cuda_setup_done:
                 char k_norm_name[QX_NAME_MAX];
                 snprintf(k_norm_name, sizeof(k_norm_name), "blk.%u.attn_k_norm.weight", layer);
                 const qx_tensor_dir_entry *k_norm = qx_find_tensor(&file, k_norm_name);
-                if (full_moe && !k_norm) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "K head RMSNorm tensor not found"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
-                if (k_norm && !qx_apply_f32_head_rmsnorm(&file, k_norm, kfloat, kv_heads, head_dim, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+                if (full_moe && !k_norm) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "K head RMSNorm tensor not found"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+                if (k_norm && !qx_apply_f32_head_rmsnorm(&file, k_norm, kfloat, kv_heads, head_dim, err, err_len)) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
                 if (rope_gqa_attention) qx_apply_rope(kfloat, kv_heads, head_dim, step, 1000000.0);
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "v-cur", vfloat, (uint32_t)values_per_k_or_v, err, err_len)) {
-                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
                 uint64_t scale_index = (uint64_t)layer * ctx_tokens + step;
                 if (kv_f32) {
@@ -6555,16 +6607,16 @@ cuda_setup_done:
                 uint32_t attention_context_values = q_heads * head_dim;
                 attention_context_capture = residual_dump_dir && *residual_dump_dir ? (float *)malloc((size_t)attention_context_values * sizeof(float)) : NULL;
                 if (residual_dump_dir && *residual_dump_dir && !attention_context_capture) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
                 int attention_ok = causal_vec && (rope_gqa_attention
                     ? qx_rope_gqa_attention_partial(&file, layer, step, ctx_tokens, bytes_per_k_or_v, kcache, vcache, (uint32_t)values_per_k_or_v, bytes_per_value, kscales, vscales, projection_residual, residual_values, q_heads, kv_heads, head_dim, current, seed, causal_vec, attention_context_capture, attention_context_values, &causal_softmax_sum, &causal_softmax_min, &causal_softmax_max, &causal_q_heads_run, &causal_q_values, &causal_q_name, &causal_o_name, activation_format, &projection_workspace, scratch, err, err_len)
                     : qx_causal_attention_partial(&file, layer, step, ctx_tokens, bytes_per_k_or_v, kcache, vcache, bytes_per_value, kscales, vscales, projection_residual, residual_values, current, seed, causal_vec, &causal_softmax_sum, &causal_q_values, &causal_q_name, &causal_o_name, err, err_len));
                 if (!attention_ok) {
-                    free(attention_context_capture); free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(attention_context_capture); free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "kqv-out", attention_context_capture, attention_context_values, err, err_len)) {
-                    free(attention_context_capture); free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(attention_context_capture); free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
                 free(attention_context_capture);
                 attention_context_capture = NULL;
@@ -6577,17 +6629,17 @@ cuda_setup_done:
                 attention_output_l2 = sqrt(attention_output_l2);
                 attention_output_checksum = qx_fnv1a64((const unsigned char *)causal_vec, (uint64_t)residual_values * sizeof(float));
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "ffn-inp", residual_vec, residual_values, err, err_len)) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
-                if (!qx_apply_real_moe_layer(&file, layer, residual_vec, residual_values, residual_vec, residual_dump_dir && *residual_dump_dir ? causal_vec : NULL, selected_experts, routing_weights, &gate_ggml_type, &up_ggml_type, &down_ggml_type, activation_format, scratch, expert_cache_ptr, &real_moe_output_l2, err, err_len)) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                if (!qx_apply_real_moe_layer(&file, layer, residual_vec, residual_values, residual_vec, residual_dump_dir && *residual_dump_dir ? causal_vec : NULL, selected_experts, routing_weights, &gate_ggml_type, &up_ggml_type, &down_ggml_type, activation_format, scratch, expert_cache_ptr, moe_pool, &real_moe_output_l2, err, err_len)) {
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "ffn-moe-out", causal_vec, residual_values, err, err_len)) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
                 residual_output_checksum = qx_fnv1a64((const unsigned char *)residual_vec, (uint64_t)residual_values * sizeof(float));
                 if (residual_dump_dir && *residual_dump_dir && !qx_write_residual_dump(residual_dump_dir, step, layer, "output", residual_vec, residual_values, err, err_len)) {
-                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(causal_vec); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
                 residual_probe = 0.0;
                 for (uint32_t ri = 0; ri < residual_values; ++ri) residual_probe += residual_vec[ri];
@@ -6607,7 +6659,7 @@ cuda_setup_done:
                     float *avec = (float *)malloc((size_t)residual_values * sizeof(float));
                     float *mvec = (float *)malloc((size_t)residual_values * sizeof(float));
                     float *outv = attention_output_vector ? (float *)malloc((size_t)residual_values * sizeof(float)) : NULL;
-                    if (!avec || !mvec || (attention_output_vector && !outv)) { free(avec); free(mvec); free(outv); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+                    if (!avec || !mvec || (attention_output_vector && !outv)) { free(avec); free(mvec); free(outv); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
                     for (uint32_t ri = 0; ri < residual_values; ++ri) {
                         double awave = ((double)(((ri + 1u) * (layer + 3u)) % 17u) - 8.0) / 8.0;
                         double mwave = ((double)(((ri + 5u) * (layer + 7u)) % 19u) - 9.0) / 9.0;
@@ -6707,16 +6759,16 @@ cuda_setup_done:
         if (final_head) {
             float *normalized = residual_vec + residual_values;
             float *logits_dump = residual_dump_dir && *residual_dump_dir ? (float *)malloc((size_t)file.header.manifest.vocab * sizeof(float)) : NULL;
-            if (residual_dump_dir && *residual_dump_dir && !logits_dump) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
-            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, kernel_policy, thread_policy, threads, simd_policy, cuda_context,
-                    cuda_weight_span.data, cuda_logits, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+            if (residual_dump_dir && *residual_dump_dir && !logits_dump) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "out of memory"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+            if (!qx_compute_real_final_head(&file, residual_vec, normalized, residual_values, logits_top_n, activation_format, kernel_policy, moe_pool_policy ? "serial" : thread_policy, moe_pool_policy ? 1u : threads, simd_policy, cuda_context,
+                    cuda_weight_span.data, cuda_logits, logits_dump, file.header.manifest.vocab, &head_result, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
             dequant_profile.temporary_blocks_decoded += head_result.dequant_profile.temporary_blocks_decoded;
             dequant_profile.temporary_floats_materialized += head_result.dequant_profile.temporary_floats_materialized;
             dequant_profile.temporary_bytes_materialized += head_result.dequant_profile.temporary_bytes_materialized;
             dequant_profile.fused_dot_calls += head_result.dequant_profile.fused_dot_calls;
             dequant_profile.fallback_dot_calls += head_result.dequant_profile.fallback_dot_calls;
             dequant_profile.final_head_q6_k_blocks += head_result.dequant_profile.final_head_q6_k_blocks;
-            thread_workers_used = head_result.workers_used;
+            thread_workers_used = moe_pool ? qx_row_pool_workers(moe_pool) : head_result.workers_used;
             thread_parallel_jobs += head_result.parallel_jobs;
             thread_serial_jobs += head_result.serial_jobs;
             thread_fallback_jobs += head_result.fallback_jobs;
@@ -6727,18 +6779,18 @@ cuda_setup_done:
             }
             if (buffer_profile) {
                 if (buffer_profile->sampled_steps >= buffer_profile->full_logits_checksums_capacity) {
-                    free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "generation profile checksum capacity exceeded"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+                    free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "generation profile checksum capacity exceeded"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
                 }
                 buffer_profile->full_logits_checksums[buffer_profile->sampled_steps++] = head_result.logits_checksum;
             }
-            if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+            if (logits_dump && !qx_write_logits_dump(residual_dump_dir, step, logits_dump, head_result.vocab_size, err, err_len)) { free(logits_dump); free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
             free(logits_dump);
             memcpy(top, head_result.top, (size_t)head_result.top_n * sizeof(qx_top_token));
             sample_top_n = head_result.top_n;
             lm_name = "output.weight";
             scanned = head_result.logits_computed;
         } else if (!qx_collect_top_logits(&file, residual_probe, top_k, scan, seed + step * 17u + current, &lm_name, &tied, &scanned, top, err, err_len)) {
-            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+            free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
         }
         if (!final_head && sample_top_n > scanned) sample_top_n = scanned;
         qx_sample_result sr = qx_sample_from_top(top, sample_top_n, temperature, seed + step * 101u + current);
@@ -6747,12 +6799,12 @@ cuda_setup_done:
         const char *source = "fallback_token_id";
         int selected_eos = (capture || buffer_capture) && eos_token_id >= 0 && sr.selected_token == (uint32_t)eos_token_id;
         if (capture) {
-            if (capture->token_count >= QX_NATIVE_GENERATION_MAX_TOKENS) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "generation result capacity exceeded"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+            if (capture->token_count >= QX_NATIVE_GENERATION_MAX_TOKENS) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "generation result capacity exceeded"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
             capture->token_ids[capture->token_count++] = sr.selected_token;
             if (selected_eos) capture->stopped_on_eos = 1;
         }
         if (buffer_capture) {
-            if (buffer_capture->token_count >= buffer_capture->token_capacity) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "generation result capacity exceeded"); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
+            if (buffer_capture->token_count >= buffer_capture->token_capacity) { free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_set_err(err, err_len, "generation result capacity exceeded"); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0; }
             uint32_t output_index = buffer_capture->token_count;
             buffer_capture->token_ids[buffer_capture->token_count++] = sr.selected_token;
             if (selected_eos) {
@@ -6816,7 +6868,7 @@ cuda_setup_done:
         buffer_capture->generated_input_forward_steps = generated_input_forward_steps;
     }
     if (cuda_context && !qx_cuda_final_head_get_counters(cuda_context, &cuda_counters, err, err_len)) {
-        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     if (native_profile) {
         native_profile->workers_used = thread_workers_used;
@@ -6857,7 +6909,7 @@ cuda_setup_done:
     if (kv_snapshot_out_path && *kv_snapshot_out_path && !qx_write_accumulated_kv_snapshot(
             kv_snapshot_out_path, layers, position_base + executed_steps, ctx_tokens, kv_heads, head_dim, kv_format,
             bytes_per_k_or_v, current, seed, kcache, vcache, kscales, vscales, err, err_len)) {
-        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
+        free(kbuf); free(vbuf); free(kcache); free(vcache); free(kfloat); free(vfloat); free(kscales); free(vscales); free(residual_vec); free(cuda_logits); qx_release_span(&cuda_weight_span); qx_cuda_final_head_destroy(&cuda_context); qx_scratch_free(&scratch_workspace); qx_close_file(&file); qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters); return 0;
     }
     if (!(capture || buffer_capture)) fprintf(out, "],\n");
     if (!(capture || buffer_capture)) fprintf(out, "  \"layers_run\": %llu,\n", (unsigned long long)layers_run);
@@ -6898,10 +6950,14 @@ cuda_setup_done:
     if (!thread_pool_policy && thread_serial_jobs == 0u) thread_serial_jobs = (uint64_t)executed_steps * (uint64_t)(layers - start_layer);
     if (!thread_pool_policy && thread_fallback_jobs == 0u) thread_fallback_jobs = thread_serial_jobs;
     if (!(capture || buffer_capture)) fprintf(out, "  \"thread_profile\": {\"enabled\": true, \"policy\": \"%s\", \"requested_threads\": %u, \"workers_used\": %u, \"parallel_jobs\": %llu, \"serial_jobs\": %llu, \"fallback_jobs\": %llu",
-        thread_policy, threads, thread_workers_used, (unsigned long long)thread_parallel_jobs,
+        thread_policy, threads, thread_workers_used, (unsigned long long)(thread_parallel_jobs + qx_row_pool_jobs(moe_pool)),
         (unsigned long long)thread_serial_jobs, (unsigned long long)thread_fallback_jobs);
-    if (!thread_pool_policy) if (!(capture || buffer_capture)) fprintf(out, ", \"disabled_reason\": \"serial_policy\"");
+    if (moe_pool_policy && !(capture || buffer_capture)) fprintf(out, ", \"moe_parallel_jobs\": %llu", (unsigned long long)qx_row_pool_jobs(moe_pool));
+    if (!thread_pool_policy && !moe_pool_policy) if (!(capture || buffer_capture)) fprintf(out, ", \"disabled_reason\": \"serial_policy\"");
     if (!(capture || buffer_capture)) fprintf(out, "},\n");
+    if (moe_pool_policy && !(capture || buffer_capture)) fprintf(out,
+        "  \"moe_pool_profile\": {\"workers\": %u, \"jobs\": %llu},\n",
+        qx_row_pool_workers(moe_pool), (unsigned long long)qx_row_pool_jobs(moe_pool));
     if (!(capture || buffer_capture)) fprintf(out, "  \"simd_profile\": {\"enabled\": true, \"policy\": \"%s\", \"kernel\": \"%s\", \"fma_dot_calls\": %llu, \"fallback_dot_calls\": %llu",
         simd_policy, avx2_fma_policy ? "avx2_fma_q6_k_f32" : "scalar",
         (unsigned long long)simd_fma_dot_calls, (unsigned long long)simd_fallback_dot_calls);
@@ -6949,7 +7005,7 @@ cuda_setup_done:
     qx_cuda_final_head_destroy(&cuda_context);
     qx_scratch_free(&scratch_workspace);
     qx_close_file(&file);
-    qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters);
+    qx_row_pool_destroy(moe_pool); qx_run_expert_cache_finish(&expert_cache, &expert_cache_counters);
     return 1;
 }
 
@@ -7006,6 +7062,14 @@ static int qx_validate_native_generation_options(const qx_native_generation_opti
         if (options->expert_cache_policy == QX_NATIVE_EXPERT_CACHE_NONE && options->expert_cache_budget_bytes != 0u) { qx_set_err(err, err_len, "expert cache budget requires resident-packed policy"); return 0; }
         if (options->expert_cache_policy == QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED && options->io_backend != QX_NATIVE_IO_BUFFERED) { qx_set_err(err, err_len, "resident-packed expert cache policy requires buffered I/O"); return 0; }
     }
+    if (options->thread_policy == QX_NATIVE_THREAD_MOE_POOL) {
+#if !defined(_WIN32)
+        qx_set_err(err, err_len, "moe-pool requires Windows"); return 0;
+#endif
+        if (options->thread_count < 2u || options->thread_count > 64u) { qx_set_err(err, err_len, "moe-pool requires 2..64 workers"); return 0; }
+        if (options->io_backend != QX_NATIVE_IO_BUFFERED) { qx_set_err(err, err_len, "moe-pool requires buffered I/O"); return 0; }
+        if (options->cuda_policy != QX_NATIVE_CUDA_NONE) { qx_set_err(err, err_len, "moe-pool does not support CUDA"); return 0; }
+    }
     *effective_cuda_policy = options->version == 1u ? QX_NATIVE_CUDA_NONE : options->cuda_policy;
     if (*effective_cuda_policy != QX_NATIVE_CUDA_NONE && *effective_cuda_policy != QX_NATIVE_CUDA_FINAL_HEAD_F32) { qx_set_err(err, err_len, "unsupported native generation CUDA policy"); return 0; }
     return 1;
@@ -7025,7 +7089,7 @@ int qx_run_native_generation_with_options(const char *path, const uint32_t *prom
     if (options->io_backend != QX_NATIVE_IO_BUFFERED && options->io_backend != QX_NATIVE_IO_MMAP) { qx_set_err(err, err_len, "unsupported native generation I/O policy"); return 0; }
     if (options->scratch_policy != QX_NATIVE_SCRATCH_EPHEMERAL && options->scratch_policy != QX_NATIVE_SCRATCH_PERSISTENT) { qx_set_err(err, err_len, "unsupported native generation scratch policy"); return 0; }
     if (options->kernel_policy != QX_NATIVE_KERNEL_BASELINE && options->kernel_policy != QX_NATIVE_KERNEL_FUSED_FINAL_HEAD) { qx_set_err(err, err_len, "unsupported native generation kernel policy"); return 0; }
-    if (options->thread_policy != QX_NATIVE_THREAD_SERIAL && options->thread_policy != QX_NATIVE_THREAD_POOL) { qx_set_err(err, err_len, "unsupported native generation thread policy"); return 0; }
+    if (options->thread_policy != QX_NATIVE_THREAD_SERIAL && options->thread_policy != QX_NATIVE_THREAD_POOL && options->thread_policy != QX_NATIVE_THREAD_MOE_POOL) { qx_set_err(err, err_len, "unsupported native generation thread policy"); return 0; }
     if (options->cuda_policy != QX_NATIVE_CUDA_NONE && options->cuda_policy != QX_NATIVE_CUDA_FINAL_HEAD_F32) { qx_set_err(err, err_len, "unsupported native generation CUDA policy"); return 0; }
     if (options->thread_policy == QX_NATIVE_THREAD_SERIAL && options->thread_count != 1u) { qx_set_err(err, err_len, "serial native generation policy requires one thread"); return 0; }
     if (options->thread_policy == QX_NATIVE_THREAD_POOL && (options->thread_count < 2u || options->thread_count > 64u)) { qx_set_err(err, err_len, "pool native generation policy requires 2..64 threads"); return 0; }
@@ -7040,7 +7104,7 @@ int qx_run_native_generation_with_options(const char *path, const uint32_t *prom
     }
     const char *scratch = options->scratch_policy == QX_NATIVE_SCRATCH_PERSISTENT ? "persistent" : "ephemeral";
     const char *kernel = options->kernel_policy == QX_NATIVE_KERNEL_FUSED_FINAL_HEAD ? "fused" : "baseline";
-    const char *thread = options->thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial";
+    const char *thread = options->thread_policy == QX_NATIVE_THREAD_MOE_POOL ? "moe-pool" : (options->thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial");
     if (profile) {
         profile->struct_size = (uint32_t)sizeof(*profile); profile->version = QX_NATIVE_GENERATION_PROFILE_VERSION;
         profile->requested_io_backend = profile->effective_io_backend = options->io_backend;
@@ -7139,7 +7203,7 @@ int qx_run_native_generation_into_with_options_v3(const char *path, const uint32
     if (options->io_backend != QX_NATIVE_IO_BUFFERED && options->io_backend != QX_NATIVE_IO_MMAP) { qx_set_err(err, err_len, "unsupported native generation I/O policy"); return 0; }
     if (options->scratch_policy != QX_NATIVE_SCRATCH_EPHEMERAL && options->scratch_policy != QX_NATIVE_SCRATCH_PERSISTENT) { qx_set_err(err, err_len, "unsupported native generation scratch policy"); return 0; }
     if (options->kernel_policy != QX_NATIVE_KERNEL_BASELINE && options->kernel_policy != QX_NATIVE_KERNEL_FUSED_FINAL_HEAD) { qx_set_err(err, err_len, "unsupported native generation kernel policy"); return 0; }
-    if (options->thread_policy != QX_NATIVE_THREAD_SERIAL && options->thread_policy != QX_NATIVE_THREAD_POOL) { qx_set_err(err, err_len, "unsupported native generation thread policy"); return 0; }
+    if (options->thread_policy != QX_NATIVE_THREAD_SERIAL && options->thread_policy != QX_NATIVE_THREAD_POOL && options->thread_policy != QX_NATIVE_THREAD_MOE_POOL) { qx_set_err(err, err_len, "unsupported native generation thread policy"); return 0; }
     if (options->thread_policy == QX_NATIVE_THREAD_SERIAL && options->thread_count != 1u) { qx_set_err(err, err_len, "serial native generation policy requires one thread"); return 0; }
     if (options->thread_policy == QX_NATIVE_THREAD_POOL && (options->thread_count < 2u || options->thread_count > 64u)) { qx_set_err(err, err_len, "pool native generation policy requires 2..64 threads"); return 0; }
     if (ctx_tokens == 0u || ctx_tokens > QX_NATIVE_GENERATION_CAPACITY_MAX || (uint64_t)prompt_count + (uint64_t)max_tokens - 1u > (uint64_t)ctx_tokens) { qx_set_err(err, err_len, "native generation prompt plus output must fit the context limit"); return 0; }
@@ -7176,7 +7240,7 @@ int qx_run_native_generation_into_with_options_v3(const char *path, const uint32
     qx_expert_cache_counters cache_counters = {0};
     const char *scratch = options->scratch_policy == QX_NATIVE_SCRATCH_PERSISTENT ? "persistent" : "ephemeral";
     const char *kernel = options->kernel_policy == QX_NATIVE_KERNEL_FUSED_FINAL_HEAD ? "fused" : "baseline";
-    const char *thread = options->thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial";
+    const char *thread = options->thread_policy == QX_NATIVE_THREAD_MOE_POOL ? "moe-pool" : (options->thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial");
     const char *cache_policy = options->expert_cache_policy == QX_NATIVE_EXPERT_CACHE_RESIDENT_PACKED ? "resident-packed" : "none";
     const qx_io_backend io_backend = options->io_backend == QX_NATIVE_IO_MMAP ? QX_IO_MMAP : QX_IO_BUFFERED;
     int ok = qx_run_prompt_state_loop(path, io_backend, NULL, prompt_tokens, prompt_count, max_tokens, 48u, ctx_tokens, "int8", "f32", scratch, kernel, thread, options->thread_count, "scalar", cache_policy, options->expert_cache_budget_bytes, effective_cuda_policy == QX_NATIVE_CUDA_FINAL_HEAD_F32 ? "final-head-f32" : "none", "none", "none", "none", "none", "none", 0u, 0u, 0u, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 2048u, NULL, 8u, 0u, 8u, 0.0, 7u, NULL, 0u, NULL, NULL, NULL, NULL, NULL, result, &runtime_profile, &cache_counters, eos_token_id, NULL, err, err_len);
@@ -7281,7 +7345,7 @@ int qx_run_native_generation_into_with_options(const char *path, const uint32_t 
     if (options->io_backend != QX_NATIVE_IO_BUFFERED && options->io_backend != QX_NATIVE_IO_MMAP) { qx_set_err(err, err_len, "unsupported native generation I/O policy"); return 0; }
     if (options->scratch_policy != QX_NATIVE_SCRATCH_EPHEMERAL && options->scratch_policy != QX_NATIVE_SCRATCH_PERSISTENT) { qx_set_err(err, err_len, "unsupported native generation scratch policy"); return 0; }
     if (options->kernel_policy != QX_NATIVE_KERNEL_BASELINE && options->kernel_policy != QX_NATIVE_KERNEL_FUSED_FINAL_HEAD) { qx_set_err(err, err_len, "unsupported native generation kernel policy"); return 0; }
-    if (options->thread_policy != QX_NATIVE_THREAD_SERIAL && options->thread_policy != QX_NATIVE_THREAD_POOL) { qx_set_err(err, err_len, "unsupported native generation thread policy"); return 0; }
+    if (options->thread_policy != QX_NATIVE_THREAD_SERIAL && options->thread_policy != QX_NATIVE_THREAD_POOL && options->thread_policy != QX_NATIVE_THREAD_MOE_POOL) { qx_set_err(err, err_len, "unsupported native generation thread policy"); return 0; }
     if (options->cuda_policy != QX_NATIVE_CUDA_NONE && options->cuda_policy != QX_NATIVE_CUDA_FINAL_HEAD_F32) { qx_set_err(err, err_len, "unsupported native generation CUDA policy"); return 0; }
     if (options->thread_policy == QX_NATIVE_THREAD_SERIAL && options->thread_count != 1u) { qx_set_err(err, err_len, "serial native generation policy requires one thread"); return 0; }
     if (options->thread_policy == QX_NATIVE_THREAD_POOL && (options->thread_count < 2u || options->thread_count > 64u)) { qx_set_err(err, err_len, "pool native generation policy requires 2..64 threads"); return 0; }
@@ -7292,7 +7356,7 @@ int qx_run_native_generation_into_with_options(const char *path, const uint32_t 
 
     const char *scratch = options->scratch_policy == QX_NATIVE_SCRATCH_PERSISTENT ? "persistent" : "ephemeral";
     const char *kernel = options->kernel_policy == QX_NATIVE_KERNEL_FUSED_FINAL_HEAD ? "fused" : "baseline";
-    const char *thread = options->thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial";
+    const char *thread = options->thread_policy == QX_NATIVE_THREAD_MOE_POOL ? "moe-pool" : (options->thread_policy == QX_NATIVE_THREAD_POOL ? "pool" : "serial");
     if (profile) {
         profile->requested_io_backend = profile->effective_io_backend = options->io_backend;
         profile->requested_scratch_policy = profile->effective_scratch_policy = options->scratch_policy;
